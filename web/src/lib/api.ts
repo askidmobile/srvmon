@@ -78,10 +78,16 @@ export interface ServerView {
   group: string;
   tags: string[];
   host: string;
+  port: number;
   provider: string;
+  plan: string;
   cost?: number;
   currency: string;
   next_payment: string;
+  period: string;
+  panel_url: string;
+  ssh_user: string;
+  has_ssh: boolean;
   last_seen?: string;
   online: boolean;
   snapshot?: { received: string; report: Report };
@@ -97,6 +103,13 @@ export const api = {
   history: (id: number, range: HistoryRange) =>
     request<History>("GET", `/api/servers/${id}/history?range=${encodeURIComponent(range)}`),
   updateCard: (id: number, card: ServerCard) => request<ServerView>("PATCH", `/api/servers/${id}`, card),
+  probe: (host: string, port: number) => request<ProbeResult>("POST", "/api/servers/probe", { host, port }),
+  onboard: (req: OnboardRequest) => request<{ job: string; server_id: number }>("POST", "/api/servers/onboard", req),
+  onboardStatus: (job: string, from: number) => request<OnboardStatus>("GET", `/api/onboard/${job}?from=${from}`),
+  cancelOnboard: (job: string) => request<unknown>("DELETE", `/api/onboard/${job}`),
+  deleteServer: (id: number) => request<unknown>("DELETE", `/api/servers/${id}`),
+  containerAction: (id: number, name: string, action: "restart" | "stop" | "start") =>
+    request<{ ok: boolean }>("POST", `/api/servers/${id}/containers/${encodeURIComponent(name)}/${action}`),
 };
 
 // --- server screen (stage 2) ---
@@ -172,4 +185,56 @@ export interface ServerCard {
   cost: number | null;
   currency: string;
   next_payment: string;
+  // Left out by the passport editor: the server keeps the stored value.
+  period?: string;
+  panel_url?: string;
+}
+
+// --- stage 3: add wizard and terminal ---
+
+export interface NewServerCard extends ServerCard {
+  name: string;
+  host: string;
+  port: number;
+  period: string;
+  panel_url: string;
+}
+
+export interface ProbeResult {
+  host_key: string;
+  fingerprint: string;
+  type: string;
+}
+
+export interface OnboardRequest {
+  server_id: number;
+  card: NewServerCard;
+  user: string;
+  password: string;
+  host_key: string;
+  sudo: boolean;
+  disable_password: boolean;
+  install_agent: boolean;
+}
+
+export interface OnboardLine {
+  state: "ok" | "run" | "warn" | "fail" | "info";
+  text: string;
+  ts: number;
+}
+
+export interface OnboardStatus {
+  lines: OnboardLine[];
+  next: number;
+  done: boolean;
+  ok: boolean;
+  committed: boolean;
+  server_id: number;
+}
+
+export function terminalURL(serverId: number, cols: number, rows: number, container?: string): string {
+  const proto = location.protocol === "https:" ? "wss:" : "ws:";
+  const q = new URLSearchParams({ cols: String(cols), rows: String(rows) });
+  if (container) q.set("container", container);
+  return `${proto}//${location.host}/api/servers/${serverId}/terminal?${q}`;
 }

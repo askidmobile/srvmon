@@ -1,11 +1,14 @@
-import { useCallback, useEffect, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 
-import { Shell } from "@/components/Shell";
 import { api, type Me } from "@/lib/api";
 import { href, navigate, typingIn, useRoute } from "@/lib/router";
+import { AddServer } from "@/pages/AddServer";
 import { Login } from "@/pages/Login";
 import { Overview } from "@/pages/Overview";
 import { ServerScreen } from "@/pages/Server";
+
+// xterm.js is heavy: load the terminal page on demand.
+const TerminalPage = lazy(() => import("@/pages/Terminal").then((m) => ({ default: m.TerminalPage })));
 
 export function App() {
   const [me, setMe] = useState<Me | null>(null);
@@ -48,17 +51,13 @@ export function App() {
   switch (route.name) {
     case "server":
       return <ServerScreen key={route.id} id={route.id} route={route} version={me.version} onLogout={logout} />;
-    case "terminal":
     case "add":
+      return <AddServer key={route.id ?? 0} attachId={route.id} route={route} version={me.version} onLogout={logout} />;
+    case "terminal":
       return (
-        <Shell route={route} version={me.version} onLogout={logout}>
-          <p className="text-muted-foreground">
-            {route.name === "add" ? "Мастер добавления сервера" : "Веб-терминал"} появится в этапе 3.{" "}
-            <a href={href.overview()} className="text-primary">
-              ← к обзору
-            </a>
-          </p>
-        </Shell>
+        <Suspense fallback={<p className="p-6 text-muted-foreground">загрузка терминала…</p>}>
+          <TerminalPage serverId={route.id} route={route} version={me.version} onLogout={logout} />
+        </Suspense>
       );
   }
   return <Overview route={route} version={me.version} onLogout={logout} />;

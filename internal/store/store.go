@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
 	_ "modernc.org/sqlite" // pure-Go driver, keeps the binary CGO-free
@@ -80,6 +81,12 @@ var migrations = []string{
 		event  TEXT NOT NULL,
 		detail TEXT NOT NULL DEFAULT ''
 	);`,
+	// Stage 3: server passport extras and SSH access from the add wizard.
+	`ALTER TABLE servers ADD COLUMN period TEXT NOT NULL DEFAULT '';
+	ALTER TABLE servers ADD COLUMN panel_url TEXT NOT NULL DEFAULT '';
+	ALTER TABLE servers ADD COLUMN ssh_user TEXT NOT NULL DEFAULT '';
+	ALTER TABLE servers ADD COLUMN ssh_host_key TEXT NOT NULL DEFAULT '';
+	ALTER TABLE servers ADD COLUMN ssh_key_enc BLOB;`,
 }
 
 func (s *Store) migrate(ctx context.Context) error {
@@ -250,6 +257,10 @@ type Server struct {
 	Cost        *float64   `json:"cost,omitempty"`
 	Currency    string     `json:"currency"`
 	NextPayment string     `json:"next_payment"` // YYYY-MM-DD
+	Period      string     `json:"period"`       // month | year | hour
+	PanelURL    string     `json:"panel_url"`
+	SSHUser     string     `json:"ssh_user"`
+	HasSSH      bool       `json:"has_ssh"` // a private key is stored for the terminal
 	CreatedAt   time.Time  `json:"created_at"`
 	LastSeen    *time.Time `json:"last_seen,omitempty"`
 }
@@ -263,19 +274,55 @@ func (s *Store) CreateServer(ctx context.Context, srv Server) (int64, error) {
 		srv.Port = 22
 	}
 	tags, _ := json.Marshal(srv.Tags)
-	res, err := s.db.ExecContext(ctx, `INSERT INTO servers
-		(name, description, project, grp, tags, host, port, provider, plan, cost, currency, next_payment, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		srv.Name, srv.Description, srv.Project, srv.Group, string(tags), srv.Host, srv.Port,
-		srv.Provider, srv.Plan, srv.Cost, srv.Currency, srv.NextPayment, time.Now().Unix())
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, err
 	}
-	return res.LastInsertId()
+	defer tx.Rollback()
+	// Ids are never reused (the table has no AUTOINCREMENT and SQLite cannot
+	// add it in place): in-memory state keyed by a deleted server's id, such
+	// as a late metrics push or an onboarding job, must not reach a new card.
+	var last int64
+	var v string
+	if err := tx.QueryRowContext(ctx, `SELECT value FROM settings WHERE key = ?`, keyServerIDSeq).Scan(&v); err == nil {
+		last, _ = strconv.ParseInt(v, 10, 64)
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return 0, err
+	}
+	var maxID int64
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(id), 0) FROM servers`).Scan(&maxID); err != nil {
+		return 0, err
+	}
+	id := max(last, maxID) + 1
+	if _, err := tx.ExecContext(ctx, `INSERT INTO servers
+		(id, name, description, project, grp, tags, host, port, provider, plan, cost, currency, next_payment, period, panel_url, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, srv.Name, srv.Description, srv.Project, srv.Group, string(tags), srv.Host, srv.Port,
+		srv.Provider, srv.Plan, srv.Cost, srv.Currency, srv.NextPayment, srv.Period, srv.PanelURL, time.Now().Unix()); err != nil {
+		return 0, err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO settings (key, value) VALUES (?, ?)
+		ON CONFLICT(key) DO UPDATE SET value = excluded.value`, keyServerIDSeq, strconv.FormatInt(id, 10)); err != nil {
+		return 0, err
+	}
+	return id, tx.Commit()
+}
+
+const keyServerIDSeq = "server_id_seq"
+
+// TokenLastSeen returns the last push time of one agent token (zero if never).
+func (s *Store) TokenLastSeen(ctx context.Context, tokenHash string) (time.Time, error) {
+	var ts sql.NullInt64
+	err := s.db.QueryRowContext(ctx, `SELECT last_seen_at FROM agent_tokens WHERE token_hash = ?`, tokenHash).Scan(&ts)
+	if err != nil || !ts.Valid {
+		return time.Time{}, err
+	}
+	return time.Unix(ts.Int64, 0), nil
 }
 
 const serverCols = `s.id, s.name, s.description, s.project, s.grp, s.tags, s.host, s.port,
-	s.provider, s.plan, s.cost, s.currency, s.next_payment, s.created_at,
+	s.provider, s.plan, s.cost, s.currency, s.next_payment, s.period, s.panel_url, s.ssh_user,
+	s.ssh_key_enc IS NOT NULL, s.created_at,
 	(SELECT MAX(last_seen_at) FROM agent_tokens t WHERE t.server_id = s.id)`
 
 type scanner interface{ Scan(dest ...any) error }
@@ -287,7 +334,8 @@ func scanServer(row scanner) (Server, error) {
 	var lastSeen sql.NullInt64
 	var cost sql.NullFloat64
 	if err := row.Scan(&srv.ID, &srv.Name, &srv.Description, &srv.Project, &srv.Group, &tags, &srv.Host, &srv.Port,
-		&srv.Provider, &srv.Plan, &cost, &srv.Currency, &srv.NextPayment, &created, &lastSeen); err != nil {
+		&srv.Provider, &srv.Plan, &cost, &srv.Currency, &srv.NextPayment, &srv.Period, &srv.PanelURL, &srv.SSHUser,
+		&srv.HasSSH, &created, &lastSeen); err != nil {
 		return srv, err
 	}
 	_ = json.Unmarshal([]byte(tags), &srv.Tags)
@@ -346,6 +394,8 @@ type ServerCard struct {
 	Cost        *float64 `json:"cost"`
 	Currency    string   `json:"currency"`
 	NextPayment string   `json:"next_payment"`
+	Period      string   `json:"period"`
+	PanelURL    string   `json:"panel_url"`
 }
 
 // UpdateServerCard replaces the passport fields of a server.
@@ -355,8 +405,9 @@ func (s *Store) UpdateServerCard(ctx context.Context, id int64, c ServerCard) er
 	}
 	tags, _ := json.Marshal(c.Tags)
 	res, err := s.db.ExecContext(ctx, `UPDATE servers SET description = ?, project = ?, grp = ?, tags = ?,
-		provider = ?, plan = ?, cost = ?, currency = ?, next_payment = ? WHERE id = ?`,
-		c.Description, c.Project, c.Group, string(tags), c.Provider, c.Plan, c.Cost, c.Currency, c.NextPayment, id)
+		provider = ?, plan = ?, cost = ?, currency = ?, next_payment = ?, period = ?, panel_url = ? WHERE id = ?`,
+		c.Description, c.Project, c.Group, string(tags), c.Provider, c.Plan, c.Cost, c.Currency, c.NextPayment,
+		c.Period, c.PanelURL, id)
 	if err != nil {
 		return err
 	}
@@ -403,5 +454,103 @@ func (s *Store) AgentTokenValid(ctx context.Context, tokenHash string) (bool, er
 	var n int
 	err := s.db.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM agent_tokens WHERE token_hash = ? AND revoked_at IS NULL`, tokenHash).Scan(&n)
+	return n > 0, err
+}
+
+// DeleteServer removes a server with its agent tokens and SSH key.
+func (s *Store) DeleteServer(ctx context.Context, id int64) error {
+	res, err := s.db.ExecContext(ctx, `DELETE FROM servers WHERE id = ?`, id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// SSHAccess is what the SSH gateway needs to reach a server. KeyEnc is the
+// private key sealed with the master key (see internal/secret).
+type SSHAccess struct {
+	ServerID int64
+	Name     string
+	Host     string
+	Port     int
+	User     string
+	HostKey  string // authorized_keys format, pinned on first connect
+	KeyEnc   []byte
+}
+
+// SetServerSSH stores the SSH address, user, pinned host key and sealed
+// private key together, so a failed onboarding never leaves a new address
+// paired with the old key.
+func (s *Store) SetServerSSH(ctx context.Context, id int64, host string, port int, user, hostKey string, keyEnc []byte) error {
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE servers SET host = ?, port = ?, ssh_user = ?, ssh_host_key = ?, ssh_key_enc = ? WHERE id = ?`,
+		host, port, user, hostKey, keyEnc, id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// ServerSSH returns SSH access for a server, or ErrNotFound when the server
+// does not exist or has no key yet.
+func (s *Store) ServerSSH(ctx context.Context, id int64) (SSHAccess, error) {
+	a := SSHAccess{ServerID: id}
+	err := s.db.QueryRowContext(ctx, `SELECT name, host, port, ssh_user, ssh_host_key, ssh_key_enc FROM servers
+		WHERE id = ? AND ssh_key_enc IS NOT NULL`, id).Scan(&a.Name, &a.Host, &a.Port, &a.User, &a.HostKey, &a.KeyEnc)
+	if errors.Is(err, sql.ErrNoRows) {
+		return a, ErrNotFound
+	}
+	return a, err
+}
+
+// ServerHasAgent reports whether the server ever had an agent token.
+func (s *Store) ServerHasAgent(ctx context.Context, id int64) (bool, error) {
+	var n int
+	err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM agent_tokens WHERE server_id = ? AND revoked_at IS NULL`, id).Scan(&n)
+	return n > 0, err
+}
+
+// ServerLastSeen returns the latest agent push time for a server (zero if never).
+func (s *Store) ServerLastSeen(ctx context.Context, id int64) (time.Time, error) {
+	var ts sql.NullInt64
+	err := s.db.QueryRowContext(ctx, `SELECT MAX(last_seen_at) FROM agent_tokens WHERE server_id = ?`, id).Scan(&ts)
+	if err != nil || !ts.Valid {
+		return time.Time{}, err
+	}
+	return time.Unix(ts.Int64, 0), nil
+}
+
+// RevokeAgentTokens revokes all live tokens of a server.
+func (s *Store) RevokeAgentTokens(ctx context.Context, id int64) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE agent_tokens SET revoked_at = ? WHERE server_id = ? AND revoked_at IS NULL`, time.Now().Unix(), id)
+	return err
+}
+
+// RevokeAgentToken revokes one token by hash.
+func (s *Store) RevokeAgentToken(ctx context.Context, tokenHash string) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE agent_tokens SET revoked_at = ? WHERE token_hash = ? AND revoked_at IS NULL`, time.Now().Unix(), tokenHash)
+	return err
+}
+
+// RevokeOtherAgentTokens revokes every live token of a server except keep.
+func (s *Store) RevokeOtherAgentTokens(ctx context.Context, id int64, keepHash string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE agent_tokens SET revoked_at = ?
+		WHERE server_id = ? AND token_hash != ? AND revoked_at IS NULL`, time.Now().Unix(), id, keepHash)
+	return err
+}
+
+// ServerExists reports whether a server with this id exists.
+func (s *Store) ServerExists(ctx context.Context, id int64) (bool, error) {
+	var n int
+	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM servers WHERE id = ?`, id).Scan(&n)
 	return n > 0, err
 }

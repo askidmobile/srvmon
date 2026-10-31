@@ -18,6 +18,7 @@ import (
 	"github.com/askidmobile/srvmon/internal/auth"
 	"github.com/askidmobile/srvmon/internal/config"
 	"github.com/askidmobile/srvmon/internal/metrics"
+	"github.com/askidmobile/srvmon/internal/secret"
 	"github.com/askidmobile/srvmon/internal/store"
 )
 
@@ -34,6 +35,9 @@ type Server struct {
 	latest    *metrics.Latest
 	web       fs.FS
 	version   string
+	secrets   *secret.Box
+	jobs      *jobs
+	csp       string
 
 	totpMu  sync.Mutex    // serializes TOTP replay check-and-set
 	hashSem chan struct{} // caps concurrent argon2id verifications
@@ -50,6 +54,7 @@ type Options struct {
 	VMRead  *metrics.Reader // nil: graphs use only in-memory history
 	Web     fs.FS           // built frontend (contents of web/dist)
 	Version string
+	Secrets *secret.Box // seals SSH private keys; nil disables the add wizard
 }
 
 // New builds the server.
@@ -60,7 +65,7 @@ func New(o Options) *Server {
 	if o.Log == nil {
 		o.Log = slog.New(slog.NewTextHandler(io.Discard, nil))
 	}
-	return &Server{
+	srv := &Server{
 		cfg:     o.Config,
 		store:   o.Store,
 		log:     o.Log,
@@ -71,9 +76,24 @@ func New(o Options) *Server {
 		latest:  metrics.NewLatest(),
 		web:     o.Web,
 		version: o.Version,
+		secrets: o.Secrets,
+		jobs:    &jobs{m: map[string]*job{}},
 		now:     time.Now,
 		hashSem: make(chan struct{}, 2),
 	}
+	// 'self' covers same-origin WebSocket in current browsers; older Safari
+	// needs the wss:// origin spelled out.
+	connect := "'self'"
+	if u, err := url.Parse(o.Config.PublicOrigin); err == nil && u.Host != "" {
+		ws := "ws"
+		if u.Scheme == "https" {
+			ws = "wss"
+		}
+		connect += " " + ws + "://" + u.Host
+	}
+	srv.csp = "default-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src " +
+		connect + "; frame-ancestors 'none'"
+	return srv
 }
 
 // Handler returns the root HTTP handler.
@@ -89,6 +109,13 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/ingest", s.handleIngest)
 
 	mux.Handle("GET /api/servers", s.requireSession(http.HandlerFunc(s.handleServers)))
+	mux.Handle("POST /api/servers/probe", s.requireSession(http.HandlerFunc(s.handleProbe)))
+	mux.Handle("POST /api/servers/onboard", s.requireSession(http.HandlerFunc(s.handleOnboard)))
+	mux.Handle("GET /api/onboard/{job}", s.requireSession(http.HandlerFunc(s.handleOnboardStatus)))
+	mux.Handle("DELETE /api/onboard/{job}", s.requireSession(http.HandlerFunc(s.handleOnboardCancel)))
+	mux.Handle("DELETE /api/servers/{id}", s.requireSession(http.HandlerFunc(s.handleDeleteServer)))
+	mux.Handle("GET /api/servers/{id}/terminal", s.requireSession(http.HandlerFunc(s.handleTerminal)))
+	mux.Handle("POST /api/servers/{id}/containers/{name}/{action}", s.requireSession(http.HandlerFunc(s.handleContainerAction)))
 	mux.Handle("GET /api/servers/{id}", s.requireSession(http.HandlerFunc(s.handleServer)))
 	mux.Handle("PATCH /api/servers/{id}", s.requireSession(http.HandlerFunc(s.handleServerCard)))
 	mux.Handle("GET /api/servers/{id}/history", s.requireSession(http.HandlerFunc(s.handleHistory)))
@@ -132,8 +159,7 @@ func (s *Server) securityHeaders(next http.Handler) http.Handler {
 		h.Set("X-Content-Type-Options", "nosniff")
 		h.Set("X-Frame-Options", "DENY")
 		h.Set("Referrer-Policy", "same-origin")
-		h.Set("Content-Security-Policy",
-			"default-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'")
+		h.Set("Content-Security-Policy", s.csp)
 		next.ServeHTTP(w, r)
 	})
 }

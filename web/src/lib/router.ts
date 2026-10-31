@@ -1,12 +1,12 @@
 import { useEffect, useState } from "react";
 
-// Minimal hash router: #/ overview, #/s/<id> server screen. Stage 3 adds
-// #/add (wizard) and #/term/<id> (terminal).
+// Minimal hash router: #/ overview, #/s/<id> server screen, #/add[/<id>]
+// wizard (with an id: give an existing card SSH access), #/term[/<id>] terminal.
 export type Route =
   | { name: "overview" }
   | { name: "server"; id: number }
   | { name: "terminal"; id?: number }
-  | { name: "add" };
+  | { name: "add"; id?: number };
 
 export function parseRoute(hash: string): Route {
   const parts = hash.replace(/^#\/?/, "").split("/").filter(Boolean);
@@ -18,7 +18,7 @@ export function parseRoute(hash: string): Route {
     case "term":
       return Number.isInteger(id) && id > 0 ? { name: "terminal", id } : { name: "terminal" };
     case "add":
-      return { name: "add" };
+      return Number.isInteger(id) && id > 0 ? { name: "add", id } : { name: "add" };
   }
   return { name: "overview" };
 }
@@ -40,7 +40,7 @@ export const href = {
   overview: () => "#/",
   server: (id: number) => `#/s/${id}`,
   terminal: (id?: number) => (id ? `#/term/${id}` : "#/term"),
-  add: () => "#/add",
+  add: (id?: number) => (id ? `#/add/${id}` : "#/add"),
 };
 
 export function navigate(to: string) {

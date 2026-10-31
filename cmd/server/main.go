@@ -29,6 +29,7 @@ import (
 	"github.com/askidmobile/srvmon/internal/auth"
 	"github.com/askidmobile/srvmon/internal/config"
 	"github.com/askidmobile/srvmon/internal/metrics"
+	"github.com/askidmobile/srvmon/internal/secret"
 	"github.com/askidmobile/srvmon/internal/selfmon"
 	"github.com/askidmobile/srvmon/internal/store"
 	"github.com/askidmobile/srvmon/web"
@@ -106,6 +107,11 @@ func serve() error {
 		log.Warn("panel is not initialized: run `srvmon-server init` to set password and TOTP")
 	}
 
+	box, err := secret.LoadOrCreate(cfg.MasterKeyFile)
+	if err != nil {
+		return err
+	}
+
 	srv := api.New(api.Options{
 		Config:  cfg,
 		Store:   st,
@@ -115,6 +121,7 @@ func serve() error {
 		VMRead:  metrics.NewReader(cfg.VMURL),
 		Web:     web.Dist(),
 		Version: version,
+		Secrets: box,
 	})
 	hs := &http.Server{
 		Addr:              cfg.Listen,
@@ -245,8 +252,8 @@ func readSecret(in *bufio.Reader, prompt string) (string, error) {
 	return strings.TrimRight(s, "\r\n"), err
 }
 
-// addServer registers a server card and prints a fresh agent token. The
-// onboarding wizard in the UI (stage 3) will replace this for daily use.
+// addServer registers a server card and prints a fresh agent token. For
+// daily use the add wizard in the UI does this and installs the agent.
 func addServer(args []string) error {
 	fs := flag.NewFlagSet("add-server", flag.ContinueOnError)
 	name := fs.String("name", "", "server name (required)")

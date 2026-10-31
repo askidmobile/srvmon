@@ -166,3 +166,32 @@ func TestUpdateServerCard(t *testing.T) {
 }
 
 func itoa(n int64) string { return strconv.FormatInt(n, 10) }
+
+func TestUpdateServerCardKeepsOmittedBilling(t *testing.T) {
+	e := newEnv(t)
+	id, _ := e.st.CreateServer(context.Background(), store.Server{Name: "web", Period: "year", PanelURL: "https://p.example"})
+	e.login(t)
+	patch := func(body string) int {
+		req, _ := http.NewRequest(http.MethodPatch, e.ts.URL+"/api/servers/"+itoa(id), bytes.NewReader([]byte(body)))
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := e.client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+	if c := patch(`{"description":"x"}`); c != http.StatusOK {
+		t.Fatalf("patch: %d", c)
+	}
+	srv, _ := e.st.GetServer(context.Background(), id)
+	if srv.Period != "year" || srv.PanelURL != "https://p.example" {
+		t.Fatalf("omitted fields were wiped: %+v", srv)
+	}
+	if c := patch(`{"panel_url":"javascript:alert(1)"}`); c != http.StatusBadRequest {
+		t.Fatalf("bad panel url accepted: %d", c)
+	}
+	if c := patch(`{"period":"week"}`); c != http.StatusBadRequest {
+		t.Fatalf("bad period accepted: %d", c)
+	}
+}

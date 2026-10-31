@@ -84,7 +84,9 @@ func (s *Server) handleServerCard(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var c store.ServerCard
+	// Fields the client leaves out keep their value (older clients do not
+	// send the billing period or the panel link).
+	c := store.ServerCard{Period: srv.Period, PanelURL: srv.PanelURL}
 	if err := readJSON(r, &c); err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request")
 		return
@@ -130,6 +132,13 @@ func validateCard(c *store.ServerCard) string {
 	}
 	if c.NextPayment != "" && !datePattern.MatchString(c.NextPayment) {
 		return "next_payment"
+	}
+	c.Period, c.PanelURL = strings.TrimSpace(c.Period), strings.TrimSpace(c.PanelURL)
+	if !validPeriod(c.Period) {
+		return "period"
+	}
+	if !validPanelURL(c.PanelURL) {
+		return "panel_url"
 	}
 	if c.Cost != nil && (*c.Cost < 0 || *c.Cost > 1e9) {
 		return "cost"
