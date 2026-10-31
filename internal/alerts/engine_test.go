@@ -14,15 +14,25 @@ import (
 )
 
 type fakeNotifier struct {
-	mu  sync.Mutex
-	got []Notification
+	mu   sync.Mutex
+	got  []Notification
+	busy bool // reject everything, like a full queue
 }
 
 func (f *fakeNotifier) Notify(n Notification) bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.busy {
+		return false
+	}
 	f.got = append(f.got, n)
 	return true
+}
+
+func (f *fakeNotifier) reject(on bool) {
+	f.mu.Lock()
+	f.busy = on
+	f.mu.Unlock()
 }
 
 func (f *fakeNotifier) list() []Notification {
@@ -580,5 +590,53 @@ func TestDeferredEventFollowsCurrentRule(t *testing.T) {
 	}
 	if left, _ := te.st.UnnotifiedEvents(ctx, now.Add(-time.Hour)); len(left) != 0 {
 		t.Fatalf("still queued for retry: %+v", left)
+	}
+}
+
+func TestRecoveryFollowsCurrentRuleChannel(t *testing.T) {
+	te := newTestEnv(t)
+	ctx := context.Background()
+	h := host(1)
+	h.Disks[0].Used = 99
+	te.push(protocol.Report{Host: h})
+	te.eval(t)
+	if len(te.n.list()) != 1 {
+		t.Fatal("not sent")
+	}
+	r := te.rule(t, store.KindDisk)
+	r.Channel = store.ChanWeb
+	if err := te.st.UpdateRule(ctx, r); err != nil {
+		t.Fatal(err)
+	}
+	te.push(protocol.Report{Host: host(1)})
+	te.eval(t)
+	te.eval(t)
+	if got := te.n.list(); len(got) != 1 {
+		t.Fatalf("recovery sent to tg for a web-only rule: %+v", got)
+	}
+	if left, _ := te.st.PendingResolutions(ctx, time.Now().Add(-time.Hour)); len(left) != 0 {
+		t.Fatalf("recovery still pending: %+v", left)
+	}
+}
+
+func TestCriticalEventsAreNotCrowdedOut(t *testing.T) {
+	te := newTestEnv(t)
+	ctx := context.Background()
+	now := te.now.UTC()
+	_ = SaveQuiet(ctx, te.st, Quiet{From: now.Add(-time.Hour).Format("15:04"), To: now.Add(time.Hour).Format("15:04"), TZ: "UTC"})
+	for i := 0; i < 25; i++ {
+		te.e.Event(ctx, store.KindFail2ban, 0, "", "1.2.3.4", "бан") // warn: waits for the morning
+	}
+	r := te.rule(t, store.KindBruteforce)
+	r.Severity = store.SevCrit
+	if err := te.st.UpdateRule(ctx, r); err != nil {
+		t.Fatal(err)
+	}
+	te.n.reject(true) // the bot's queue is full
+	te.e.Event(ctx, store.KindBruteforce, 0, "", "5.6.7.8", "подбор")
+	te.n.reject(false)
+	te.eval(t)
+	if got := te.n.list(); len(got) != 1 || got[0].Alert.Kind != store.KindBruteforce {
+		t.Fatalf("critical event not retried: %d sent", len(got))
 	}
 }

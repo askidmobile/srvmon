@@ -149,8 +149,20 @@ func (e *Engine) Evaluate(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	byID := map[int64]store.Rule{}
+	for _, r := range rules {
+		byID[r.ID] = r
+	}
 	openBy := map[condKey]store.Alert{}
 	for _, a := range open {
+		// Open alerts follow the rule's current channel and severity, for
+		// delayed notifications and for the recovery message alike.
+		if r, ok := byID[a.RuleID]; ok && (a.Channel != r.Channel || a.Severity != r.Severity) {
+			if err := e.st.SetAlertNotify(ctx, a.ID, r.Channel, r.Severity); err != nil {
+				return err
+			}
+			a.Channel, a.Severity = r.Channel, r.Severity
+		}
 		openBy[condKey{a.RuleID, a.ServerID, a.Subject}] = a
 	}
 	// Keys that were evaluated this tick, and those whose condition holds
@@ -218,9 +230,7 @@ func (e *Engine) Evaluate(ctx context.Context) error {
 						a.Message = c.message
 					}
 					// Held back by quiet hours or not accepted by the bot
-					// (not configured, queue full): try again, with the
-					// rule's current channel and severity.
-					a.Channel, a.Severity = r.Channel, r.Severity
+					// (not configured, queue full): try again.
 					if a.State == store.AlertFiring && !a.Notified {
 						e.notify(ctx, a, false)
 					}
@@ -278,10 +288,6 @@ func (e *Engine) Evaluate(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	byID := map[int64]store.Rule{}
-	for _, r := range rules {
-		byID[r.ID] = r
-	}
 	for _, a := range events {
 		// The rule may have been disabled, deleted or changed meanwhile.
 		// Events that are no longer wanted (rule off, web only, silenced)
@@ -300,6 +306,9 @@ func (e *Engine) Evaluate(ctx context.Context) error {
 		return err
 	}
 	for _, a := range resolved {
+		if r, ok := byID[a.RuleID]; ok {
+			a.Channel, a.Severity = r.Channel, r.Severity
+		}
 		e.notify(ctx, a, true)
 	}
 	return nil
@@ -505,6 +514,15 @@ func (e *Engine) Event(ctx context.Context, kind string, serverID int64, serverN
 // whether the notification is merely deferred (quiet hours, notifier not
 // ready) and worth retrying. Called with e.mu.
 func (e *Engine) notify(ctx context.Context, a store.Alert, resolved bool) (deferred bool) {
+	deferred = e.deliver(ctx, a, resolved)
+	if resolved && !deferred {
+		// Sent, or not wanted any more (web only, silenced).
+		_ = e.st.SetResolvePending(ctx, a.ID, false)
+	}
+	return deferred
+}
+
+func (e *Engine) deliver(ctx context.Context, a store.Alert, resolved bool) (deferred bool) {
 	if e.notifier == nil {
 		return true
 	}
@@ -526,9 +544,7 @@ func (e *Engine) notify(ctx context.Context, a store.Alert, resolved bool) (defe
 	if !e.notifier.Notify(Notification{Alert: a, Resolved: resolved}) {
 		return true
 	}
-	if resolved {
-		_ = e.st.SetResolvePending(ctx, a.ID, false)
-	} else {
+	if !resolved {
 		_ = e.st.MarkNotified(ctx, a.ID)
 	}
 	return false

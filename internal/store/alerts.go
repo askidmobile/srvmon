@@ -267,17 +267,18 @@ func (s *Store) RecentAlerts(ctx context.Context, limit int) ([]Alert, error) {
 }
 
 // UnnotifiedEvents returns Telegram events since t that were not delivered,
-// oldest first.
+// critical ones first (they are not held back by quiet hours, so warnings
+// waiting for the morning must not crowd them out), then oldest first.
 func (s *Store) UnnotifiedEvents(ctx context.Context, since time.Time) ([]Alert, error) {
 	return s.queryAlerts(ctx, `WHERE state = 'event' AND notified = 0 AND channel = 'tg' AND started_at >= ?
-		ORDER BY started_at, id LIMIT 20`, since.Unix())
+		ORDER BY severity = 'crit' DESC, started_at, id LIMIT 20`, since.Unix())
 }
 
 // PendingResolutions returns alerts resolved since t whose recovery message
-// was not delivered yet, oldest first.
+// was not delivered yet, critical ones first, then oldest first.
 func (s *Store) PendingResolutions(ctx context.Context, since time.Time) ([]Alert, error) {
 	return s.queryAlerts(ctx, `WHERE state = 'resolved' AND resolve_pending = 1 AND resolved_at >= ?
-		ORDER BY resolved_at, id LIMIT 20`, since.Unix())
+		ORDER BY severity = 'crit' DESC, resolved_at, id LIMIT 20`, since.Unix())
 }
 
 // SetResolvePending marks whether the recovery message of an alert is still
@@ -401,6 +402,12 @@ func (s *Store) SilencedUntil(ctx context.Context, k SilenceKey, now time.Time) 
 		return time.Time{}, err
 	}
 	return time.Unix(until, 0).UTC(), nil
+}
+
+// SetAlertNotify updates the channel and severity of an alert.
+func (s *Store) SetAlertNotify(ctx context.Context, id int64, ch, sev string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE alerts SET channel = ?, severity = ? WHERE id = ?`, ch, sev, id)
+	return err
 }
 
 // SetAlertChannel changes where an alert is reported; an event moved to the
