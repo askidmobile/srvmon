@@ -93,6 +93,18 @@ func (e *Engine) Observe(serverID int64, reports ...protocol.Report) {
 	e.restarts.observe(serverID, e.now(), reports...)
 }
 
+// ResetRule drops the pending timers of a rule whose condition changed, so
+// time held under the old threshold or duration does not count.
+func (e *Engine) ResetRule(ruleID int64) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	for k := range e.pending {
+		if k.rule == ruleID {
+			delete(e.pending, k)
+		}
+	}
+}
+
 // Forget drops the in-memory state of a deleted server.
 func (e *Engine) Forget(serverID int64) { e.restarts.forget(serverID) }
 

@@ -486,3 +486,14 @@ func TestDelayedNotificationUsesCurrentRuleChannel(t *testing.T) {
 		t.Fatalf("web-only rule notified: %d", n)
 	}
 }
+
+func TestResetRuleDropsTimers(t *testing.T) {
+	te := newTestEnv(t)
+	te.push(protocol.Report{Host: host(97)})
+	te.eval(t)
+	r := te.rule(t, store.KindCPU)
+	te.e.ResetRule(r.ID)
+	if len(te.e.pending) != 0 {
+		t.Fatal("pending timers kept")
+	}
+}

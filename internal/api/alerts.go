@@ -259,6 +259,9 @@ func (s *Server) handleRuleUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = s.store.Audit(r.Context(), s.clientIP(r), "alert_rule_update", strconv.FormatInt(id, 10))
+	if rule.Threshold != cur.Threshold || rule.DurationSec != cur.DurationSec {
+		s.alerts.ResetRule(id)
+	}
 	s.reevaluate(r)
 	writeJSON(w, http.StatusOK, rule)
 }
