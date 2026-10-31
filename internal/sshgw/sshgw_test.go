@@ -477,3 +477,19 @@ func TestDropKeyScript(t *testing.T) {
 		t.Fatalf("authorized_keys = %q", got)
 	}
 }
+
+// The update must start the agent exactly like the first install.
+func TestAgentUpdateScriptMatchesInstall(t *testing.T) {
+	flags := func(script string) string {
+		i := strings.Index(script, "--name srvmon-agent --restart")
+		j := strings.Index(script[i:], `"$IMG"`)
+		if i < 0 || j < 0 {
+			t.Fatalf("no docker run in script")
+		}
+		return script[i : i+j]
+	}
+	a := AgentInstall{Image: "ghcr.io/x/srvmon-agent:sha-1", URL: "https://mon"}
+	if in, up := flags(agentScript(a)), flags(agentUpdateScript(a)); in != up {
+		t.Errorf("install:\n%s\nupdate:\n%s", in, up)
+	}
+}

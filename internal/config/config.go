@@ -40,6 +40,10 @@ type Config struct {
 	Fail2banEvents     string
 	AgentRegistryUser  string
 	AgentRegistryToken string
+	// AgentAutoUpdate (SRVMON_AGENT_AUTOUPDATE, default true) replaces, over
+	// SSH, agents that report another version than the panel's, once per
+	// panel version.
+	AgentAutoUpdate bool
 
 	// AI agent (srvmon-ai container). Both empty disables the agent.
 	// SRVMON_AI_URL is the srvmon-ai base URL, SRVMON_AI_TOKEN the bearer
@@ -88,6 +92,9 @@ func FromEnv() (Config, error) {
 		return c, err
 	}
 	if c.SecureCookie, err = boolEnv("SRVMON_SECURE_COOKIE", true); err != nil {
+		return c, err
+	}
+	if c.AgentAutoUpdate, err = boolEnv("SRVMON_AGENT_AUTOUPDATE", true); err != nil {
 		return c, err
 	}
 	ttl := env("SRVMON_SESSION_TTL", "12h")

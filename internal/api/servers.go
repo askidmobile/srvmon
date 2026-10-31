@@ -49,6 +49,7 @@ func (s *Server) handleServer(w http.ResponseWriter, r *http.Request) {
 		v.Snapshot = &snap
 		v.Online = s.now().Sub(snap.Received) < offlineAfter
 	}
+	s.decorateAgent(&v.serverView)
 	writeJSON(w, http.StatusOK, v)
 }
 

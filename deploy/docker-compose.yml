@@ -45,6 +45,7 @@ services:
       SRVMON_AGENT_IMAGE: ghcr.io/askidmobile/srvmon-agent:${SRVMON_TAG:-latest}
       SRVMON_AGENT_REGISTRY_USER: ${SRVMON_AGENT_REGISTRY_USER:-}
       SRVMON_AGENT_REGISTRY_TOKEN: ${SRVMON_AGENT_REGISTRY_TOKEN:-}
+      SRVMON_AGENT_AUTOUPDATE: ${SRVMON_AGENT_AUTOUPDATE:-true}
       # AI agent: srvmon-ai answers on the compose network, and its tools
       # call back the tool API on :8081 (not published, not proxied).
       SRVMON_AI_URL: http://ai:8090

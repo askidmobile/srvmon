@@ -137,6 +137,17 @@ export interface ServerView {
   last_seen?: string;
   online: boolean;
   snapshot?: { received: string; report: Report };
+  // The agent reports another version than the panel (agent_latest).
+  agent_outdated?: boolean;
+  agent_latest?: string;
+  agent_update?: AgentUpdate;
+}
+
+export interface AgentUpdate {
+  state: "running" | "ok" | "failed";
+  image: string;
+  error?: string;
+  at: string;
 }
 
 export const api = {
@@ -158,6 +169,8 @@ export const api = {
   deleteServer: (id: number) => request<unknown>("DELETE", `/api/servers/${id}`),
   containerAction: (id: number, name: string, action: "restart" | "stop" | "start") =>
     request<{ ok: boolean }>("POST", `/api/servers/${id}/containers/${encodeURIComponent(name)}/${action}`),
+  updateAgent: (id: number) => request<{ started: boolean }>("POST", `/api/servers/${id}/agent/update`),
+  updateAgents: () => request<{ started: number }>("POST", "/api/servers/agents/update"),
   alerts: () => request<AlertsView>("GET", "/api/alerts"),
   alertSummary: () => request<AlertSummary>("GET", "/api/alerts/summary"),
   ackAlert: (id: number) => request<Alert>("POST", `/api/alerts/${id}/ack`),

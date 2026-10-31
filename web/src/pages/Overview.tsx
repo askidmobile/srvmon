@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 
+import { needsAgentUpdate, shortVersion } from "@/components/AgentVersion";
 import { Hotkey, Shell } from "@/components/Shell";
 import { Button } from "@/components/ui/button";
 import { Panel } from "@/components/ui/panel";
@@ -54,6 +55,22 @@ function Row({ s, onDelete }: { s: ServerView; onDelete: (s: ServerView) => void
         <a href={href.server(s.id)} className="text-hi hover:text-primary" onClick={(e) => e.stopPropagation()}>
           {s.name}
         </a>
+        {s.agent_outdated && (
+          <span
+            className="ml-2 text-xs text-warn"
+            title={t("agent {v}, the panel runs {latest}", {
+              v: shortVersion(r?.agent_version),
+              latest: shortVersion(s.agent_latest),
+            })}
+          >
+            {s.agent_update?.state === "running" ? t("agent updating…") : t("agent outdated")}
+          </span>
+        )}
+        {s.agent_update?.state === "failed" && s.agent_outdated && (
+          <span className="ml-2 text-xs text-crit" title={s.agent_update.error}>
+            {t("update failed")}
+          </span>
+        )}
         {s.description && <div className="text-xs text-muted-foreground">{s.description}</div>}
       </td>
       <td className="pr-4 text-muted-foreground">{s.group || "—"}</td>
@@ -184,6 +201,13 @@ export function Overview({ route, version, onLogout }: { route: Route; version: 
   const groups = useMemo(() => ["", ...new Set((servers ?? []).map((s) => s.group).filter(Boolean))], [servers]);
   const visible = (servers ?? []).filter((s) => !group || s.group === group);
   const online = (servers ?? []).filter((s) => s.online).length;
+  const outdated = (servers ?? []).filter(needsAgentUpdate).length;
+  const updateAll = () => {
+    api
+      .updateAgents()
+      .then(() => setReload((n) => n + 1))
+      .catch(() => setError(t("could not start the update")));
+  };
 
   return (
     <Shell
@@ -197,6 +221,11 @@ export function Overview({ route, version, onLogout }: { route: Route; version: 
             <span className={online === (servers?.length ?? 0) ? "text-primary" : "text-warn"}>●</span> {online}/
             {servers?.length ?? 0} up
           </span>
+          {outdated > 0 && (
+            <Button size="sm" variant="outline" onClick={updateAll} title={t("replace outdated agents over ssh")}>
+              ↑ {t("update agents ({n})", { n: outdated })}
+            </Button>
+          )}
           <Button size="sm" asChild>
             <a href={href.add()}>+ {t("server")}</a>
           </Button>
