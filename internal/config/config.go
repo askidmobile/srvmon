@@ -31,7 +31,13 @@ type Config struct {
 	// AgentImage (SRVMON_AGENT_IMAGE) is installed on servers by the add
 	// wizard. Optional SRVMON_AGENT_REGISTRY_USER/_TOKEN log in for the pull
 	// when the image is private.
-	AgentImage         string
+	AgentImage string
+	// TelegramAPI (SRVMON_TELEGRAM_API) overrides https://api.telegram.org,
+	// e.g. with a Bot API proxy where Telegram is blocked.
+	TelegramAPI string
+	// Fail2banEvents (SRVMON_FAIL2BAN_EVENTS) is the file the srvmon-notify
+	// fail2ban action appends bans to; empty disables fail2ban alerts.
+	Fail2banEvents     string
 	AgentRegistryUser  string
 	AgentRegistryToken string
 }
@@ -49,6 +55,9 @@ func FromEnv() (Config, error) {
 		PublicOrigin:  env("SRVMON_PUBLIC_ORIGIN", ""),
 		SelfTokenFile: env("SRVMON_SELF_TOKEN_FILE", ""),
 		SelfName:      env("SRVMON_SELF_NAME", "monitor"),
+
+		TelegramAPI:    env("SRVMON_TELEGRAM_API", ""),
+		Fail2banEvents: env("SRVMON_FAIL2BAN_EVENTS", ""),
 
 		AgentImage:         env("SRVMON_AGENT_IMAGE", "ghcr.io/askidmobile/srvmon-agent:latest"),
 		AgentRegistryUser:  env("SRVMON_AGENT_REGISTRY_USER", ""),
