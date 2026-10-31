@@ -33,6 +33,9 @@ type Server struct {
 	log       *slog.Logger
 	authLog   io.Writer
 	authLogMu sync.Mutex
+	// aiSaveMu orders AI settings saves with their push to srvmon-ai, so the
+	// last saved setup is the one srvmon-ai runs.
+	aiSaveMu  sync.Mutex
 	limiter   *auth.Limiter
 	vm        *metrics.Writer
 	vmRead    *metrics.Reader

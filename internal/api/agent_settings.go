@@ -306,6 +306,8 @@ func (s *Server) handleAISaveSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
+	s.aiSaveMu.Lock()
+	defer s.aiSaveMu.Unlock()
 	if in.APIKey != nil {
 		if err := s.setAIKey(ctx, in.Provider, *in.APIKey); err != nil {
 			if errors.Is(err, errAINoSecrets) {
