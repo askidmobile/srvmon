@@ -300,3 +300,17 @@ func TestOnboardCancelBeforeCommit(t *testing.T) {
 		t.Fatalf("err=%v optional steps ran=%v", err, optional)
 	}
 }
+
+// An existing account's password hash must survive onboarding: only an
+// account created by the script gets the "*" (key-only) password.
+func TestUserScriptKeepsExistingPassword(t *testing.T) {
+	s := userScript("srvmon", "ssh-ed25519 AAAA test", false)
+	create := strings.Index(s, `if ! id -u "$U"`)
+	end := strings.Index(s[create:], "\nfi\n") + create
+	for _, cmd := range []string{"usermod -p", "chpasswd"} {
+		i := strings.Index(s, cmd)
+		if i < 0 || i < create || i > end {
+			t.Fatalf("%s must only run for a newly created account:\n%s", cmd, s)
+		}
+	}
+}

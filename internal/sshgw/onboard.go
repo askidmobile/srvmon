@@ -221,10 +221,11 @@ func userScript(user, pubKey string, sudo bool) string {
 	b.WriteString(`if ! id -u "$U" >/dev/null 2>&1; then
   SH=$(command -v bash || echo /bin/sh)
   if command -v useradd >/dev/null 2>&1; then useradd -m -s "$SH" "$U"; else adduser -D -s "$SH" "$U"; fi
+  # Only for the account created here: "*" = no password but not locked
+  # (sshd refuses key logins to locked accounts on systems without PAM).
+  # An existing account keeps its password hash untouched.
+  if command -v usermod >/dev/null 2>&1; then usermod -p '*' "$U"; else echo "$U:*" | chpasswd -e; fi
 fi
-# "*" = no password but not locked: sshd refuses key logins to locked
-# accounts on systems without PAM.
-if command -v usermod >/dev/null 2>&1; then usermod -p '*' "$U"; else echo "$U:*" | chpasswd -e; fi
 if getent group docker >/dev/null 2>&1; then
   if command -v usermod >/dev/null 2>&1; then usermod -aG docker "$U"; else addgroup "$U" docker; fi
   echo docker-group
