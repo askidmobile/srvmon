@@ -38,6 +38,9 @@
 }
 
 @layer base {
+  html {
+    color-scheme: dark; /* native date pickers and selects in dark */
+  }
   html,
   body,
   #root {

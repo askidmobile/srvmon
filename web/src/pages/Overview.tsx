@@ -25,7 +25,7 @@ function Meter({ value }: { value: number }) {
   );
 }
 
-function Row({ s }: { s: ServerView }) {
+function Row({ s, onDelete }: { s: ServerView; onDelete: (s: ServerView) => void }) {
   const r = s.snapshot?.report;
   const memPct = r && r.host.mem_total > 0 ? ((r.host.mem_total - r.host.mem_available) / r.host.mem_total) * 100 : 0;
   const disk = r?.host.disks?.reduce((max, d) => Math.max(max, d.total ? (d.used / d.total) * 100 : 0), 0) ?? 0;
@@ -61,6 +61,24 @@ function Row({ s }: { s: ServerView }) {
         {s.cost != null ? `${s.cost} ${s.currency}` : "—"}
         {s.next_payment && <div className="text-xs">до {s.next_payment}</div>}
       </td>
+      <td className="whitespace-nowrap pl-2 text-right">
+        {s.has_ssh ? (
+          <Button size="sm" variant="outline" asChild>
+            <a href={`#/term/${s.id}`} title="терминал">
+              &gt;_
+            </a>
+          </Button>
+        ) : (
+          <Button size="sm" variant="ghost" asChild>
+            <a href={`#/add/${s.id}`} title="подключить ssh-доступ">
+              + ssh
+            </a>
+          </Button>
+        )}
+        <Button size="sm" variant="ghost" className="hover:text-crit" title="удалить" onClick={() => onDelete(s)}>
+          ×
+        </Button>
+      </td>
     </tr>
   );
 }
@@ -69,6 +87,13 @@ export function Overview({ version, onLogout }: { version: string; onLogout: () 
   const [servers, setServers] = useState<ServerView[] | null>(null);
   const [error, setError] = useState("");
   const [group, setGroup] = useState("все");
+
+  const [reload, setReload] = useState(0);
+  const remove = async (s: ServerView) => {
+    if (!confirm(`Удалить ${s.name} из панели? Ключ и токен агента будут отозваны, сам сервер не трогаем.`)) return;
+    await api.deleteServer(s.id).catch(() => setError("не удалось удалить"));
+    setReload((n) => n + 1);
+  };
 
   useEffect(() => {
     let alive = true;
@@ -87,7 +112,7 @@ export function Overview({ version, onLogout }: { version: string; onLogout: () 
       alive = false;
       clearInterval(t);
     };
-  }, [onLogout]);
+  }, [onLogout, reload]);
 
   const groups = useMemo(() => ["все", ...new Set((servers ?? []).map((s) => s.group).filter(Boolean))], [servers]);
   const visible = (servers ?? []).filter((s) => group === "все" || s.group === group);
@@ -105,6 +130,12 @@ export function Overview({ version, onLogout }: { version: string; onLogout: () 
         <div className="flex items-center gap-3">
           {error && <span className="text-crit">{error}</span>}
           <span className="text-xs text-muted-foreground">v{version}</span>
+          <Button asChild>
+            <a href="#/add">+ сервер</a>
+          </Button>
+          <Button variant="outline" asChild>
+            <a href="#/term">&gt;_ терминал</a>
+          </Button>
           <Button
             variant="outline"
             onClick={async () => {
@@ -128,11 +159,11 @@ export function Overview({ version, onLogout }: { version: string; onLogout: () 
       <Panel title="серверы" right="обновление 5с">
         {servers && servers.length === 0 ? (
           <div className="py-6 text-muted-foreground">
-            серверов пока нет. Добавьте первый на сервере мониторинга:
-            <pre className="mt-3 overflow-x-auto text-foreground">
-              cd /opt/srvmon && docker compose exec server /srvmon-server add-server -name my-server -group prod
-            </pre>
-            и запустите агент по инструкции из deploy/agent.
+            серверов пока нет.{" "}
+            <a className="text-primary" href="#/add">
+              Добавьте первый
+            </a>
+            : мастер сгенерирует ssh-ключ, пропишет его по паролю и поставит агента.
           </div>
         ) : (
           <ScrollArea className="w-full">
@@ -147,11 +178,12 @@ export function Overview({ version, onLogout }: { version: string; onLogout: () 
                   <th className="pb-2 font-normal">docker</th>
                   <th className="pb-2 font-normal">uptime · ram</th>
                   <th className="pb-2 font-normal">оплата</th>
+                  <th className="pb-2 font-normal" />
                 </tr>
               </thead>
               <tbody>
                 {visible.map((s) => (
-                  <Row key={s.id} s={s} />
+                  <Row key={s.id} s={s} onDelete={remove} />
                 ))}
               </tbody>
             </table>

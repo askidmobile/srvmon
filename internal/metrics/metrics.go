@@ -151,3 +151,10 @@ func (l *Latest) Get(serverID int64) (Snapshot, bool) {
 	s, ok := l.data[serverID]
 	return s, ok
 }
+
+// Delete forgets a server (after it was removed).
+func (l *Latest) Delete(serverID int64) {
+	l.mu.Lock()
+	delete(l.data, serverID)
+	l.mu.Unlock()
+}

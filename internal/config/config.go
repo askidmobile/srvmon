@@ -24,6 +24,16 @@ type Config struct {
 	// token to this file for the agent in the same compose stack.
 	SelfTokenFile string
 	SelfName      string
+
+	// MasterKeyFile (SRVMON_MASTER_KEY_FILE, default <data>/master.key)
+	// encrypts SSH private keys stored in the database.
+	MasterKeyFile string
+	// AgentImage (SRVMON_AGENT_IMAGE) is installed on servers by the add
+	// wizard. Optional SRVMON_AGENT_REGISTRY_USER/_TOKEN log in for the pull
+	// when the image is private.
+	AgentImage         string
+	AgentRegistryUser  string
+	AgentRegistryToken string
 }
 
 // DBPath is the SQLite database file.
@@ -39,7 +49,12 @@ func FromEnv() (Config, error) {
 		PublicOrigin:  env("SRVMON_PUBLIC_ORIGIN", ""),
 		SelfTokenFile: env("SRVMON_SELF_TOKEN_FILE", ""),
 		SelfName:      env("SRVMON_SELF_NAME", "monitor"),
+
+		AgentImage:         env("SRVMON_AGENT_IMAGE", "ghcr.io/askidmobile/srvmon-agent:latest"),
+		AgentRegistryUser:  env("SRVMON_AGENT_REGISTRY_USER", ""),
+		AgentRegistryToken: env("SRVMON_AGENT_REGISTRY_TOKEN", ""),
 	}
+	c.MasterKeyFile = env("SRVMON_MASTER_KEY_FILE", filepath.Join(c.DataDir, "master.key"))
 	var err error
 	if c.TrustProxy, err = boolEnv("SRVMON_TRUST_PROXY", false); err != nil {
 		return c, err
