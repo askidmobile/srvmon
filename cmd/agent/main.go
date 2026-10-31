@@ -5,7 +5,9 @@
 // Environment:
 //
 //	SRVMON_URL       panel URL, e.g. https://mon.example.com (required)
-//	SRVMON_TOKEN     agent token from `srvmon-server add-server` (required)
+//	SRVMON_TOKEN     agent token from `srvmon-server add-server`
+//	SRVMON_TOKEN_FILE  file with the token instead of SRVMON_TOKEN; the agent
+//	                 waits until it appears (self-monitoring in the server stack)
 //	SRVMON_INTERVAL  push interval, default 5s
 //	HOST_PROC        host procfs, default /proc (container: /host/proc)
 //	HOST_ROOT        host root fs, default / (container: /host)
@@ -14,10 +16,12 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -41,20 +45,50 @@ func main() {
 	if !ok {
 		sock = "/var/run/docker.sock"
 	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	token := os.Getenv("SRVMON_TOKEN")
+	if f := os.Getenv("SRVMON_TOKEN_FILE"); token == "" && f != "" {
+		if token, err = waitToken(ctx, f, log); err != nil {
+			fmt.Fprintln(os.Stderr, "srvmon-agent:", err)
+			os.Exit(1)
+		}
+	}
 	cfg := agent.Config{
 		URL:        os.Getenv("SRVMON_URL"),
-		Token:      os.Getenv("SRVMON_TOKEN"),
+		Token:      token,
 		Interval:   interval,
 		HostProc:   getenv("HOST_PROC", "/proc"),
 		HostRoot:   getenv("HOST_ROOT", "/"),
 		DockerSock: sock,
 		Version:    version,
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 	if err := agent.Run(ctx, cfg, log); err != nil {
 		fmt.Fprintln(os.Stderr, "srvmon-agent:", err)
 		os.Exit(1)
+	}
+}
+
+// waitToken reads the token file, waiting while it does not exist yet.
+func waitToken(ctx context.Context, path string, log *slog.Logger) (string, error) {
+	for warned := false; ; {
+		b, err := os.ReadFile(path)
+		if err == nil {
+			if tok := strings.TrimSpace(string(b)); tok != "" {
+				return tok, nil
+			}
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return "", fmt.Errorf("SRVMON_TOKEN_FILE: %w", err)
+		}
+		if !warned {
+			log.Info("waiting for agent token file", "path", path)
+			warned = true
+		}
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-time.After(2 * time.Second):
+		}
 	}
 }
 

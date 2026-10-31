@@ -331,3 +331,22 @@ func (s *Store) AgentServer(ctx context.Context, tokenHash string) (id int64, na
 	_, err = s.db.ExecContext(ctx, `UPDATE agent_tokens SET last_seen_at = ? WHERE token_hash = ?`, time.Now().Unix(), tokenHash)
 	return id, name, err
 }
+
+// ServerIDByName returns the id of the server with this name.
+func (s *Store) ServerIDByName(ctx context.Context, name string) (int64, error) {
+	var id int64
+	err := s.db.QueryRowContext(ctx, `SELECT id FROM servers WHERE name = ?`, name).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, ErrNotFound
+	}
+	return id, err
+}
+
+// AgentTokenValid reports whether a live (not revoked) token with this hash
+// exists, without touching last_seen.
+func (s *Store) AgentTokenValid(ctx context.Context, tokenHash string) (bool, error) {
+	var n int
+	err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM agent_tokens WHERE token_hash = ? AND revoked_at IS NULL`, tokenHash).Scan(&n)
+	return n > 0, err
+}

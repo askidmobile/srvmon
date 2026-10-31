@@ -19,6 +19,11 @@ type Config struct {
 	TrustProxy   bool          // SRVMON_TRUST_PROXY, take client IP from X-Forwarded-For
 	SecureCookie bool          // SRVMON_SECURE_COOKIE, default true
 	SessionTTL   time.Duration // SRVMON_SESSION_TTL, default 12h
+	// SRVMON_SELF_TOKEN_FILE: when set, the monitoring host registers itself
+	// as server SRVMON_SELF_NAME (default "monitor") and writes its agent
+	// token to this file for the agent in the same compose stack.
+	SelfTokenFile string
+	SelfName      string
 }
 
 // DBPath is the SQLite database file.
@@ -27,11 +32,13 @@ func (c Config) DBPath() string { return filepath.Join(c.DataDir, "srvmon.db") }
 // FromEnv loads the config from the environment.
 func FromEnv() (Config, error) {
 	c := Config{
-		Listen:       env("SRVMON_LISTEN", ":8080"),
-		DataDir:      env("SRVMON_DATA_DIR", "./data"),
-		VMURL:        env("SRVMON_VM_URL", ""),
-		AuthLog:      env("SRVMON_AUTH_LOG", ""),
-		PublicOrigin: env("SRVMON_PUBLIC_ORIGIN", ""),
+		Listen:        env("SRVMON_LISTEN", ":8080"),
+		DataDir:       env("SRVMON_DATA_DIR", "./data"),
+		VMURL:         env("SRVMON_VM_URL", ""),
+		AuthLog:       env("SRVMON_AUTH_LOG", ""),
+		PublicOrigin:  env("SRVMON_PUBLIC_ORIGIN", ""),
+		SelfTokenFile: env("SRVMON_SELF_TOKEN_FILE", ""),
+		SelfName:      env("SRVMON_SELF_NAME", "monitor"),
 	}
 	var err error
 	if c.TrustProxy, err = boolEnv("SRVMON_TRUST_PROXY", false); err != nil {

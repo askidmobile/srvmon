@@ -130,7 +130,7 @@ export function Overview({ version, onLogout }: { version: string; onLogout: () 
           <div className="py-6 text-muted-foreground">
             серверов пока нет. Добавьте первый на сервере мониторинга:
             <pre className="mt-3 overflow-x-auto text-foreground">
-              docker compose exec server srvmon-server add-server -name my-server -group prod
+              cd /opt/srvmon && docker compose exec server /srvmon-server add-server -name my-server -group prod
             </pre>
             и запустите агент по инструкции из deploy/agent.
           </div>

@@ -29,6 +29,7 @@ import (
 	"github.com/askidmobile/srvmon/internal/auth"
 	"github.com/askidmobile/srvmon/internal/config"
 	"github.com/askidmobile/srvmon/internal/metrics"
+	"github.com/askidmobile/srvmon/internal/selfmon"
 	"github.com/askidmobile/srvmon/internal/store"
 	"github.com/askidmobile/srvmon/web"
 )
@@ -93,6 +94,13 @@ func serve() error {
 		}
 		defer f.Close()
 		authLog = io.MultiWriter(f, os.Stderr)
+	}
+	if cfg.SelfTokenFile != "" {
+		created, err := selfmon.Ensure(context.Background(), st, cfg.SelfName, cfg.SelfTokenFile)
+		if err != nil {
+			return err
+		}
+		log.Info("self-monitoring", "server", cfg.SelfName, "new_token", created)
 	}
 	if _, err := st.GetSetting(context.Background(), store.KeyPasswordHash); errors.Is(err, store.ErrNotFound) {
 		log.Warn("panel is not initialized: run `srvmon-server init` to set password and TOTP")

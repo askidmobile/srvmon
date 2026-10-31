@@ -36,6 +36,9 @@ services:
       SRVMON_PUBLIC_ORIGIN: https://${SRVMON_DOMAIN}
       SRVMON_TRUST_PROXY: "true"
       SRVMON_SECURE_COOKIE: "true"
+      # Self-monitoring: register this host and hand its token to `agent`.
+      SRVMON_SELF_TOKEN_FILE: /data/self-agent.token
+      SRVMON_SELF_NAME: ${SRVMON_SELF_NAME:-monitor}
     volumes:
       - srvmon-data:/data
       # fail2ban on the host reads this file (jail srvmon-auth).
@@ -47,6 +50,30 @@ services:
       - "${SRVMON_HTTP_BIND:-127.0.0.1:8088}:8080"
     depends_on:
       - victoriametrics
+
+  # Agent for the monitoring host itself; the server registers it on start
+  # and writes the token into its data volume.
+  agent:
+    image: ghcr.io/askidmobile/srvmon-agent:${SRVMON_TAG:-latest}
+    restart: unless-stopped
+    network_mode: host # real host interfaces in /proc/net/dev
+    pid: host
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      # Published loopback port of srvmon-server (see SRVMON_HTTP_BIND).
+      SRVMON_URL: http://${SRVMON_HTTP_BIND:-127.0.0.1:8088}
+      SRVMON_TOKEN_FILE: /srvmon-data/self-agent.token
+      SRVMON_INTERVAL: ${SRVMON_INTERVAL:-5s}
+    volumes:
+      - /proc:/host/proc:ro
+      - /:/host:ro,rslave
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - srvmon-data:/srvmon-data:ro
+    depends_on:
+      server:
+        condition: service_healthy
 
   victoriametrics:
     image: victoriametrics/victoria-metrics:v1.155.0

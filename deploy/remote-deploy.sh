@@ -34,6 +34,9 @@ if grep -q '^SRVMON_DOMAIN=mon.example.com' .env; then
   exit 1
 fi
 
+# The monitoring host shows up in the panel under its hostname.
+grep -q '^SRVMON_SELF_NAME=' .env || set_env SRVMON_SELF_NAME "$(hostname -s)"
+
 PROXY="$(grep '^SRVMON_PROXY=' .env | cut -d= -f2 || true)"
 case "${PROXY:-caddy}" in
   caddy) set_env COMPOSE_PROFILES caddy ;;
