@@ -43,6 +43,18 @@ esac
 PROXY="${PROXY:-caddy}"
 echo "proxy: $PROXY"
 
+# The fail2ban ban chain depends on the proxy mode and is set by
+# install-host.sh (root). This script has no root, so flag a mismatch.
+if [[ -f /etc/fail2ban/jail.d/srvmon.conf ]]; then
+  want=DOCKER-USER
+  [[ "$PROXY" == external ]] && want=INPUT
+  have="$(sed -n 's/^chain *= *//p' /etc/fail2ban/jail.d/srvmon.local 2>/dev/null || true)"
+  have="${have:-DOCKER-USER}"
+  if [[ "$have" != "$want" ]]; then
+    echo "::warning::fail2ban jail srvmon-auth bans in $have, proxy mode $PROXY needs $want: run sudo bash $(pwd)/install-host.sh"
+  fi
+fi
+
 wait_healthy() {
   local id status
   for _ in $(seq 1 30); do
