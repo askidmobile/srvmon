@@ -31,9 +31,7 @@ const (
 	onboardTimeout  = 10 * time.Minute
 	heartbeatWait   = 90 * time.Second
 	jobRetention    = 30 * time.Minute
-	maxTags         = 20
 	maxFieldLen     = 200
-	maxDescription  = 1000
 	onboardRunLimit = 4
 )
 
@@ -81,41 +79,32 @@ func (c *cardInput) normalize() string {
 		return "bad_port"
 	case c.NextPayment != "" && !validDate(c.NextPayment):
 		return "bad_date"
-	case c.Cost != nil && (*c.Cost < 0 || *c.Cost > 1e9):
-		return "bad_cost"
-	case len(c.Description) > maxDescription:
-		return "bad_description"
 	}
-	for _, s := range []string{c.Project, c.Group, c.Provider, c.Plan, c.Currency, c.PanelURL} {
-		if len(s) > maxFieldLen {
-			return "field_too_long"
+	// The passport part follows the same rules as the passport editor, so a
+	// card created here stays editable on the server screen.
+	pc := store.ServerCard{
+		Description: c.Description, Project: c.Project, Group: c.Group, Tags: c.Tags, Provider: c.Provider,
+		Plan: c.Plan, Cost: c.Cost, Currency: strings.ToUpper(c.Currency), NextPayment: c.NextPayment,
+		Period: c.Period, PanelURL: c.PanelURL,
+	}
+	if field := validateCard(&pc); field != "" {
+		if code, ok := cardFieldCodes[field]; ok {
+			return code
 		}
+		return "field_too_long"
 	}
-	if !validPeriod(c.Period) {
-		return "bad_period"
-	}
-	if !validPanelURL(c.PanelURL) {
-		return "bad_url"
-	}
-	c.Currency = strings.ToUpper(c.Currency)
-	tags := make([]string, 0, len(c.Tags))
-	seen := map[string]bool{}
-	for _, t := range c.Tags {
-		t = strings.TrimPrefix(strings.TrimSpace(t), "#")
-		if t == "" || seen[t] {
-			continue
-		}
-		if len(t) > 40 {
-			return "bad_tag"
-		}
-		seen[t] = true
-		tags = append(tags, t)
-	}
-	if len(tags) > maxTags {
-		return "too_many_tags"
-	}
-	c.Tags = tags
+	c.Description, c.Project, c.Group, c.Tags, c.Provider = pc.Description, pc.Project, pc.Group, pc.Tags, pc.Provider
+	c.Plan, c.Cost, c.Currency, c.NextPayment, c.Period, c.PanelURL = pc.Plan, pc.Cost, pc.Currency, pc.NextPayment, pc.Period, pc.PanelURL
 	return ""
+}
+
+var cardFieldCodes = map[string]string{
+	"next_payment": "bad_date",
+	"cost":         "bad_cost",
+	"description":  "bad_description",
+	"tags":         "bad_tag",
+	"period":       "bad_period",
+	"panel_url":    "bad_url",
 }
 
 func validDate(s string) bool {
@@ -417,6 +406,27 @@ func (s *Server) runOnboard(ctx context.Context, j *job, req onboardReq, hostKey
 		Sudo:            req.Sudo,
 		DisablePassword: req.DisablePassword,
 	}
+	// The commit point: the key login works, nothing optional has run yet.
+	// After this, cancelling no longer rolls back (sshd may be about to stop
+	// accepting the password, so the key has to be kept).
+	params.Commit = func(ctx context.Context) error {
+		j.mu.Lock()
+		if err := ctx.Err(); err != nil {
+			j.mu.Unlock()
+			return err
+		}
+		j.committed = true
+		j.mu.Unlock()
+		sealed, err := s.secrets.Seal(key.Private, keyAAD(id))
+		if err != nil {
+			return fmt.Errorf("шифрование ключа: %w", err)
+		}
+		if err := s.store.SetServerSSH(bg, id, req.Card.Host, req.Card.Port, sshUser, sshgw.FormatHostKey(hostKey), sealed); err != nil {
+			return fmt.Errorf("сохранение ключа: %w", err)
+		}
+		j.log(sshgw.StepOK, "приватный ключ сохранён зашифрованным (XChaCha20-Poly1305); установка зафиксирована, отмена больше не откатывает")
+		return nil
+	}
 	req.Password = ""
 
 	var tokenHash string
@@ -451,27 +461,6 @@ func (s *Server) runOnboard(ctx context.Context, j *job, req onboardReq, hostKey
 		return
 	}
 	j.log(sshgw.StepOK, "пароль удалён из памяти, в бд и логи не записан")
-
-	j.mu.Lock()
-	cancelled := ctx.Err() != nil
-	if !cancelled {
-		j.committed = true
-	}
-	j.mu.Unlock()
-	if cancelled {
-		fail("отменено; на сервере мог остаться пользователь " + sshUser)
-		return
-	}
-	sealed, err := s.secrets.Seal(key.Private, keyAAD(id))
-	if err != nil {
-		fail("шифрование ключа: " + err.Error())
-		return
-	}
-	if err := s.store.SetServerSSH(bg, id, req.Card.Host, req.Card.Port, sshUser, sshgw.FormatHostKey(hostKey), sealed); err != nil {
-		fail("сохранение ключа: " + err.Error())
-		return
-	}
-	j.log(sshgw.StepOK, "приватный ключ сохранён зашифрованным (XChaCha20-Poly1305); установка зафиксирована, отмена больше не откатывает")
 
 	if tokenHash != "" {
 		if !res.AgentInstalled {

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 
 	"golang.org/x/crypto/ssh"
 )
@@ -45,7 +46,17 @@ type OnboardParams struct {
 	Sudo            bool    // passwordless sudo for SSHUser
 	DisablePassword bool    // PasswordAuthentication no
 	Agent           *AgentInstall
+
+	// Commit runs once the key login works, before the agent install and
+	// sshd hardening. It persists the key: from here on the server may stop
+	// accepting the password, so the key must not be lost. An error aborts
+	// the onboarding before anything else changes on the server.
+	Commit func(ctx context.Context) error
 }
+
+// AfterCommitTimeout bounds the optional steps that run after Commit; they
+// ignore the caller's cancellation so sshd is never left half-configured.
+const AfterCommitTimeout = 10 * time.Minute
 
 // Result reports what Onboard achieved besides the mandatory key setup.
 type Result struct {
@@ -151,6 +162,17 @@ func Onboard(ctx context.Context, p OnboardParams, log Logger) (Result, error) {
 	}
 	log(StepOK, "проверка входа по ключу — ok")
 
+	if p.Commit != nil {
+		if err := p.Commit(ctx); err != nil {
+			return res, err
+		}
+	}
+	// Past the commit point the key is stored and the onboarding counts as
+	// done: cancelling must not interrupt the agent install or, worse, the
+	// sshd change halfway and drop a key the server may already depend on.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), AfterCommitTimeout)
+	defer cancel()
+
 	if a := p.Agent; a != nil {
 		log(StepRun, "docker run srvmon-agent ("+a.Image+")")
 		_, errOut, err := pr.run(ctx, agentScript(*a))
@@ -173,12 +195,6 @@ func Onboard(ctx context.Context, p OnboardParams, log Logger) (Result, error) {
 			res.PasswordDisabled = true
 			log(StepOK, "sshd: PasswordAuthentication no · reload")
 		}
-	}
-	// Optional steps only warn on failure, but a cancelled or timed-out
-	// context is not an optional-step failure: report it so the caller
-	// rolls back instead of saving a half-done onboarding as success.
-	if err := ctx.Err(); err != nil {
-		return res, err
 	}
 	return res, nil
 }

@@ -27,7 +27,10 @@ const ERRORS: Record<string, string> = {
   bad_date: "дата оплаты в формате ГГГГ-ММ-ДД",
   bad_cost: "некорректная стоимость",
   bad_url: "ссылка на панель должна начинаться с https://",
-  bad_tag: "тег длиннее 40 символов",
+  bad_tag: "тег: до 32 символов, без пробелов и запятых; не больше 20 тегов",
+  bad_description: "описание: до 500 символов",
+  field_too_long: "слишком длинное значение: проект и группа до 64 символов, тариф до 128",
+  bad_period: "некорректный период оплаты",
   too_many_tags: "не больше 20 тегов",
   bad_user: "укажите пользователя",
   password_required: "введите пароль",
@@ -403,6 +406,7 @@ export function AddServer({
                 <Field label="проект" htmlFor="f-project">
                   <input
                     id="f-project"
+                    maxLength={64}
                     className={fieldCls}
                     list="dl-projects"
                     value={card.project}
@@ -419,6 +423,7 @@ export function AddServer({
                 <Field label="группа" htmlFor="f-group">
                   <input
                     id="f-group"
+                    maxLength={64}
                     className={fieldCls}
                     list="dl-groups"
                     value={card.group}
@@ -440,6 +445,7 @@ export function AddServer({
                   <Field label="описание" htmlFor="f-desc">
                     <textarea
                       id="f-desc"
+                      maxLength={500}
                       className={cn(fieldCls, "h-16 resize-y py-2")}
                       value={card.description}
                       placeholder="Postgres магазина, реплика на shop-db-2"
@@ -458,6 +464,7 @@ export function AddServer({
                   <Field label="провайдер" htmlFor="f-prov">
                     <input
                       id="f-prov"
+                      maxLength={64}
                       className={fieldCls}
                       list="dl-prov"
                       value={card.provider}
@@ -473,6 +480,7 @@ export function AddServer({
                   <Field label="тариф" htmlFor="f-plan">
                     <input
                       id="f-plan"
+                      maxLength={128}
                       className={fieldCls}
                       value={card.plan}
                       placeholder="CPX31"
@@ -532,6 +540,7 @@ export function AddServer({
                 <Field label="ссылка на панель провайдера" htmlFor="f-url">
                   <input
                     id="f-url"
+                    maxLength={200}
                     type="url"
                     className={fieldCls}
                     value={card.panel_url}
