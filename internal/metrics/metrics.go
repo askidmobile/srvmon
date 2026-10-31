@@ -11,7 +11,6 @@ import (
 	"net/http"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/askidmobile/srvmon/internal/protocol"
@@ -105,6 +104,13 @@ func Encode(server string, r protocol.Report) []byte {
 				up = 1
 			}
 			line("srvmon_container_up", [][2]string{{"container", c.Name}, {"image", c.Image}, {"health", c.Health}}, up)
+			// Usage is known only while the server screen is open.
+			if c.CPUPercent != nil {
+				line("srvmon_container_cpu_percent", [][2]string{{"container", c.Name}}, *c.CPUPercent)
+			}
+			if c.MemBytes != nil {
+				line("srvmon_container_mem_bytes", [][2]string{{"container", c.Name}}, float64(*c.MemBytes))
+			}
 		}
 		keys := make([]string, 0, len(states))
 		for k := range states {
@@ -121,33 +127,3 @@ func Encode(server string, r protocol.Report) []byte {
 var labelEscaper = strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\n", `\n`)
 
 func escape(s string) string { return labelEscaper.Replace(s) }
-
-// Latest keeps the most recent report of each server.
-type Latest struct {
-	mu   sync.RWMutex
-	data map[int64]Snapshot
-}
-
-// Snapshot is a report plus the time it was received.
-type Snapshot struct {
-	Received time.Time       `json:"received"`
-	Report   protocol.Report `json:"report"`
-}
-
-// NewLatest returns an empty cache.
-func NewLatest() *Latest { return &Latest{data: map[int64]Snapshot{}} }
-
-// Put stores a report.
-func (l *Latest) Put(serverID int64, r protocol.Report) {
-	l.mu.Lock()
-	l.data[serverID] = Snapshot{Received: time.Now().UTC(), Report: r}
-	l.mu.Unlock()
-}
-
-// Get returns the last report of a server.
-func (l *Latest) Get(serverID int64) (Snapshot, bool) {
-	l.mu.RLock()
-	defer l.mu.RUnlock()
-	s, ok := l.data[serverID]
-	return s, ok
-}

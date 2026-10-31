@@ -38,6 +38,11 @@ export interface Container {
   state: string;
   status: string;
   health?: string;
+  ports?: string[];
+  compose?: string;
+  restarts?: number;
+  cpu_percent?: number;
+  mem_bytes?: number;
 }
 
 export interface Report {
@@ -54,8 +59,14 @@ export interface Report {
     load15: number;
     mem_total: number;
     mem_available: number;
+    mem_free?: number;
+    mem_cached?: number;
+    mem_buffers?: number;
+    swap_total: number;
+    swap_free: number;
     uptime_sec: number;
-    disks?: { mount: string; total: number; used: number }[];
+    disks?: { mount: string; fs: string; total: number; used: number }[];
+    net?: { name: string; rx_bytes: number; tx_bytes: number }[];
   };
 }
 
@@ -82,4 +93,83 @@ export const api = {
   totp: (code: string) => request<{ authenticated: boolean }>("POST", "/api/auth/totp", { code }),
   logout: () => request<unknown>("POST", "/api/auth/logout"),
   servers: () => request<ServerView[]>("GET", "/api/servers"),
+  server: (id: number) => request<ServerDetailView>("GET", `/api/servers/${id}`),
+  history: (id: number, range: HistoryRange) =>
+    request<History>("GET", `/api/servers/${id}/history?range=${encodeURIComponent(range)}`),
+  updateCard: (id: number, card: ServerCard) => request<ServerView>("PATCH", `/api/servers/${id}`, card),
 };
+
+// --- server screen (stage 2) ---
+
+export interface Process {
+  pid: number;
+  name: string;
+  cmd?: string;
+  user?: string;
+  cpu: number;
+  mem: number;
+  container?: string;
+}
+
+export interface LogLine {
+  ts: string;
+  level: "ERR" | "WARN" | string;
+  source: string;
+  msg: string;
+}
+
+export interface Detail {
+  cpu_user: number;
+  cpu_system: number;
+  cpu_iowait: number;
+  cpu_steal: number;
+  cores: number[];
+  temp_c?: number;
+  disk_read_bps: number;
+  disk_write_bps: number;
+  tcp_conns: number;
+  procs_total: number;
+  procs: Process[];
+}
+
+export interface Inventory {
+  os?: string;
+  kernel?: string;
+  cpu_model?: string;
+  docker_version?: string;
+  ips?: string[];
+}
+
+export interface ServerDetailView extends ServerView {
+  port: number;
+  plan: string;
+  created_at: string;
+  detail?: Detail;
+  detail_at?: string;
+  inventory?: Inventory;
+  logs: LogLine[];
+}
+
+export type HistoryRange = "15m" | "1h" | "6h" | "24h" | "7d";
+export const historyRanges: HistoryRange[] = ["15m", "1h", "6h", "24h", "7d"];
+
+export interface History {
+  range: HistoryRange;
+  start: string;
+  step_sec: number;
+  cpu: (number | null)[];
+  rx: (number | null)[];
+  tx: (number | null)[];
+}
+
+export interface ServerCard {
+  description: string;
+  project: string;
+  group: string;
+  tags: string[];
+  provider: string;
+  plan: string;
+  cost: number | null;
+  currency: string;
+  next_payment: string;
+}

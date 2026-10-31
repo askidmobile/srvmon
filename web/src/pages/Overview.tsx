@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 
+import { Hotkey, Shell } from "@/components/Shell";
 import { Button } from "@/components/ui/button";
 import { Panel } from "@/components/ui/panel";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { api, type ServerView } from "@/lib/api";
+import { href, navigate, type Route } from "@/lib/router";
 import { cn, formatBytes, formatUptime } from "@/lib/utils";
 
 function level(p: number) {
@@ -33,10 +35,24 @@ function Row({ s }: { s: ServerView }) {
   const running = containers.filter((c) => c.state === "running").length;
   const bad = containers.filter((c) => c.state !== "running" || c.health === "unhealthy").length;
   return (
-    <tr className="border-t border-border/60 hover:bg-secondary/60">
+    <tr
+      className="cursor-pointer border-t border-border/60 hover:bg-secondary/60 focus-visible:bg-secondary"
+      tabIndex={0}
+      onClick={() => navigate(href.server(s.id))}
+      onKeyDown={(e) => {
+        const row = e.currentTarget;
+        if (e.key === "Enter") navigate(href.server(s.id));
+        else if (e.key === "ArrowDown") (row.nextElementSibling as HTMLElement | null)?.focus();
+        else if (e.key === "ArrowUp") (row.previousElementSibling as HTMLElement | null)?.focus();
+        else return;
+        e.preventDefault();
+      }}
+    >
       <td className="py-1.5 pr-4">
         <span className={s.online ? "text-primary" : "text-crit"}>{s.online ? "●" : "○"}</span>{" "}
-        <span className="text-hi">{s.name}</span>
+        <a href={href.server(s.id)} className="text-hi hover:text-primary" onClick={(e) => e.stopPropagation()}>
+          {s.name}
+        </a>
         {s.description && <div className="text-xs text-muted-foreground">{s.description}</div>}
       </td>
       <td className="pr-4 text-muted-foreground">{s.group || "—"}</td>
@@ -65,7 +81,7 @@ function Row({ s }: { s: ServerView }) {
   );
 }
 
-export function Overview({ version, onLogout }: { version: string; onLogout: () => void }) {
+export function Overview({ route, version, onLogout }: { route: Route; version: string; onLogout: () => void }) {
   const [servers, setServers] = useState<ServerView[] | null>(null);
   const [error, setError] = useState("");
   const [group, setGroup] = useState("все");
@@ -94,29 +110,28 @@ export function Overview({ version, onLogout }: { version: string; onLogout: () 
   const online = (servers ?? []).filter((s) => s.online).length;
 
   return (
-    <div className="mx-auto flex min-h-screen max-w-[1600px] flex-col gap-5 p-4 sm:p-6">
-      <header className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <span className="font-bold text-primary">srvmon</span>
-          <span className="text-muted-foreground">
-            серверов {servers?.length ?? 0} · онлайн <span className="text-primary">{online}</span>
-          </span>
-        </div>
-        <div className="flex items-center gap-3">
+    <Shell
+      route={route}
+      version={version}
+      onLogout={onLogout}
+      status={
+        <>
           {error && <span className="text-crit">{error}</span>}
-          <span className="text-xs text-muted-foreground">v{version}</span>
-          <Button
-            variant="outline"
-            onClick={async () => {
-              await api.logout().catch(() => undefined);
-              onLogout();
-            }}
-          >
-            выйти
-          </Button>
-        </div>
-      </header>
-
+          <span>
+            <span className={online === (servers?.length ?? 0) ? "text-primary" : "text-warn"}>●</span> {online}/
+            {servers?.length ?? 0} up
+          </span>
+        </>
+      }
+      footer={
+        <>
+          <Hotkey k="↑↓">выбор</Hotkey>
+          <Hotkey k="enter">экран сервера</Hotkey>
+          <Hotkey k="3">терминал</Hotkey>
+        </>
+      }
+      footerNote="обновление 5с"
+    >
       <nav className="flex flex-wrap gap-2" aria-label="группы">
         {groups.map((g) => (
           <Button key={g} size="sm" variant={g === group ? "default" : "outline"} onClick={() => setGroup(g)}>
@@ -158,6 +173,6 @@ export function Overview({ version, onLogout }: { version: string; onLogout: () 
           </ScrollArea>
         )}
       </Panel>
-    </div>
+    </Shell>
   );
 }

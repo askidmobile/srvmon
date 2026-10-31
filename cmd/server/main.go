@@ -112,6 +112,7 @@ func serve() error {
 		Log:     log,
 		AuthLog: authLog,
 		VM:      metrics.NewWriter(cfg.VMURL),
+		VMRead:  metrics.NewReader(cfg.VMURL),
 		Web:     web.Dist(),
 		Version: version,
 	})
