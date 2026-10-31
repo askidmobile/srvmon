@@ -57,7 +57,7 @@ func TestAutoUpdateOncePerImage(t *testing.T) {
 	if n != 0 {
 		t.Errorf("states = %d", n)
 	}
-	if !s.updates.begin(id, "img", time.Now()) || s.updates.begin(id, "img", time.Now()) {
+	if !s.updates.begin(id, "img", time.Now(), nil) || s.updates.begin(id, "img", time.Now(), nil) {
 		t.Errorf("begin must refuse a second running update")
 	}
 }
@@ -69,5 +69,23 @@ func TestAgentUpdateNeedsSSH(t *testing.T) {
 	resp := e.post(t, "/api/servers/"+itoa(id)+"/agent/update", nil)
 	if resp.StatusCode != 404 {
 		t.Errorf("status %d, want 404", resp.StatusCode)
+	}
+}
+
+// An onboarding and an update of the same server exclude each other.
+func TestAgentUpdateExcludesOnboarding(t *testing.T) {
+	e := newEnv(t)
+	s := e.srv
+	if _, err := s.addOnboardJob(&job{serverID: 7, cancel: func() {}}); err != nil {
+		t.Fatal(err)
+	}
+	if s.updates.begin(7, "img", time.Now(), s.jobs.active) {
+		t.Error("update started during an onboarding")
+	}
+	if !s.updates.begin(8, "img", time.Now(), s.jobs.active) {
+		t.Fatal("update of another server refused")
+	}
+	if _, err := s.addOnboardJob(&job{serverID: 8, cancel: func() {}}); err != errAgentUpdating {
+		t.Errorf("onboarding during an update: %v", err)
 	}
 }

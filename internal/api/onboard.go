@@ -342,7 +342,7 @@ func (s *Server) handleOnboard(w http.ResponseWriter, r *http.Request) {
 
 	jctx, cancel := context.WithTimeout(context.Background(), onboardTimeout)
 	j := &job{serverID: id, cancel: cancel}
-	jobID, err := s.jobs.add(j)
+	jobID, err := s.addOnboardJob(j)
 	if err != nil {
 		cancel()
 		if created {
@@ -354,6 +354,10 @@ func (s *Server) handleOnboard(w http.ResponseWriter, r *http.Request) {
 		}
 		if errors.Is(err, errServerBusy) {
 			writeError(w, http.StatusConflict, "onboarding")
+			return
+		}
+		if errors.Is(err, errAgentUpdating) {
+			writeError(w, http.StatusConflict, "update_running")
 			return
 		}
 		writeError(w, http.StatusInternalServerError, "internal")

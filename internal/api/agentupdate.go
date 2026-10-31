@@ -11,6 +11,7 @@ import (
 	"github.com/askidmobile/srvmon/internal/i18n"
 	"github.com/askidmobile/srvmon/internal/sshgw"
 	"github.com/askidmobile/srvmon/internal/store"
+	"golang.org/x/crypto/ssh"
 )
 
 // Agent updates: the panel replaces the srvmon-agent container over SSH
@@ -53,11 +54,17 @@ func (u *agentUpdates) get(id int64) (agentUpdateView, bool) {
 	return v, ok
 }
 
-// begin marks the server's update as running; false if one already runs.
-func (u *agentUpdates) begin(id int64, image string, now time.Time) bool {
+// begin marks the server's update as running; false if one already runs
+// or busy (an onboarding of the server) says so. u.mu also guards
+// addOnboardJob, so an update and an onboarding never replace the same
+// container at once.
+func (u *agentUpdates) begin(id int64, image string, now time.Time, busy func(int64) bool) bool {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	if v, ok := u.m[id]; ok && v.State == "running" {
+		return false
+	}
+	if busy != nil && busy(id) {
 		return false
 	}
 	u.m[id] = agentUpdateView{State: "running", Image: image, At: now}
@@ -125,7 +132,7 @@ func (s *Server) updateAgent(id int64, ip string, auto bool) {
 	}
 	image := s.cfg.AgentImage
 	started := s.now()
-	if !s.updates.begin(id, image, started) {
+	if !s.updates.begin(id, image, started, s.jobs.active) {
 		return
 	}
 	fail := func(err error) {
@@ -167,7 +174,7 @@ func (s *Server) updateAgent(id int64, ip string, auto bool) {
 			} else {
 				why = errors.New(i18n.T("the new agent reports version %s instead of %s", short(v), short(s.version)))
 			}
-			if rerr := sshgw.AgentRollback(ctx, client); rerr != nil {
+			if rerr := s.agentFinish(access, sshgw.AgentRollback); rerr != nil {
 				fail(i18n.Errorf("%s; restoring the previous agent failed: %s", why.Error(), rerr.Error()))
 			} else {
 				fail(i18n.Errorf("%s; the previous agent is restored", why.Error()))
@@ -175,11 +182,39 @@ func (s *Server) updateAgent(id int64, ip string, auto bool) {
 			return
 		}
 	}
-	if err := sshgw.AgentCommit(ctx, client); err != nil {
+	if err := s.agentFinish(access, sshgw.AgentCommit); err != nil {
 		s.log.Warn("agent update: removing the previous container", "server", access.Name, "err", err)
 	}
 	s.log.Info("agent updated", "server", access.Name, "image", image, "auto", auto)
 	s.updates.set(id, agentUpdateView{State: "ok", Image: image, At: s.now()})
+}
+
+// agentFinish runs the commit or rollback step over a new connection with
+// its own deadline: a slow update must not leave no time to restore the
+// previous agent.
+func (s *Server) agentFinish(access store.SSHAccess, step func(context.Context, *ssh.Client) error) error {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	client, err := s.dialServer(ctx, access)
+	if err != nil {
+		return err
+	}
+	defer client.Close()
+	return step(ctx, client)
+}
+
+var errAgentUpdating = errors.New("the agent of this server is being updated")
+
+// addOnboardJob registers an onboarding unless the server's agent is being
+// updated.
+func (s *Server) addOnboardJob(j *job) (string, error) {
+	u := s.updates
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	if v, ok := u.m[j.serverID]; ok && v.State == "running" {
+		return "", errAgentUpdating
+	}
+	return s.jobs.add(j)
 }
 
 // waitAgentVersion waits for a report received after since that carries the
@@ -228,6 +263,10 @@ func (s *Server) handleAgentUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 	if u, ok := s.updates.get(id); ok && u.State == "running" {
 		writeError(w, http.StatusConflict, "update_running")
+		return
+	}
+	if s.jobs.active(id) {
+		writeError(w, http.StatusConflict, "onboarding")
 		return
 	}
 	go s.updateAgent(id, s.clientIP(r), false)
