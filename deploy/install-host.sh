@@ -1,10 +1,15 @@
 #!/usr/bin/env bash
-# One-time setup of the monitoring server host (Debian/Ubuntu). Run as root:
-#   curl -fsSL ... | bash   or   scp deploy/ && sudo bash deploy/install-host.sh
-# Installs docker and fail2ban, the srvmon-auth jail and the deploy folder.
+# One-time setup of the monitoring server host (Debian/Ubuntu). Run as root.
+# The Deploy workflow uploads this script with fail2ban/ into DEPLOY_PATH, so
+# after the first deploy:  sudo bash /opt/srvmon/install-host.sh
+# Installs docker (if missing) and fail2ban with the srvmon-auth jail.
 set -euo pipefail
 
 DEPLOY_PATH="${DEPLOY_PATH:-/opt/srvmon}"
+# Keep the current owner of an existing deploy folder (the CI deploy user).
+if [[ -z "${DEPLOY_USER:-}" && -d "$DEPLOY_PATH" ]]; then
+  DEPLOY_USER="$(stat -c %U "$DEPLOY_PATH")"
+fi
 DEPLOY_USER="${DEPLOY_USER:-${SUDO_USER:-root}}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 
