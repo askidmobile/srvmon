@@ -92,3 +92,21 @@ func TestNextBatchRespectsSize(t *testing.T) {
 		t.Fatalf("oversized single report must still be sent: %d", len(got))
 	}
 }
+
+func TestReloadToken(t *testing.T) {
+	f := filepath.Join(t.TempDir(), "tok")
+	if tok, ch := reloadToken("", "a"); ch || tok != "a" {
+		t.Fatal("no file must keep the token")
+	}
+	if tok, ch := reloadToken(f, "a"); ch || tok != "a" {
+		t.Fatal("missing file must keep the token")
+	}
+	_ = os.WriteFile(f, []byte("a\n"), 0o600)
+	if _, ch := reloadToken(f, "a"); ch {
+		t.Fatal("same token reported as changed")
+	}
+	_ = os.WriteFile(f, []byte("b\n"), 0o600)
+	if tok, ch := reloadToken(f, "a"); !ch || tok != "b" {
+		t.Fatalf("got %q %v, want b true", tok, ch)
+	}
+}

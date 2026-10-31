@@ -20,6 +20,7 @@ import (
 type Config struct {
 	URL        string        // panel base URL, e.g. https://mon.example.com
 	Token      string        // agent token from `srvmon-server add-server`
+	TokenFile  string        // if set, re-read after a failed push (token rotated by the server)
 	Interval   time.Duration // default 5s
 	HostProc   string
 	HostRoot   string
@@ -89,6 +90,10 @@ func Run(ctx context.Context, cfg Config, log *slog.Logger) error {
 		batch := nextBatch(buf, maxBatchReports, maxBatchBytes)
 		if err := push(ctx, client, endpoint, cfg.Token, batch); err != nil {
 			log.Warn("push failed, will retry", "err", err, "buffered", len(buf))
+			if tok, changed := reloadToken(cfg.TokenFile, cfg.Token); changed {
+				cfg.Token = tok
+				log.Info("agent token reloaded", "file", cfg.TokenFile)
+			}
 			continue
 		}
 		buf = buf[len(batch):]
@@ -147,6 +152,22 @@ func push(ctx context.Context, c *http.Client, url, token string, reports []prot
 		return fmt.Errorf("%s: %s", resp.Status, strings.TrimSpace(string(msg)))
 	}
 	return nil
+}
+
+// reloadToken returns the token from file when it differs from cur.
+func reloadToken(file, cur string) (string, bool) {
+	if file == "" {
+		return cur, false
+	}
+	b, err := os.ReadFile(file)
+	if err != nil {
+		return cur, false
+	}
+	tok := strings.TrimSpace(string(b))
+	if tok == "" || tok == cur {
+		return cur, false
+	}
+	return tok, true
 }
 
 func readHostname(root string) string {

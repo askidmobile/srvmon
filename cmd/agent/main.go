@@ -48,7 +48,9 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	token := os.Getenv("SRVMON_TOKEN")
+	tokenFile := ""
 	if f := os.Getenv("SRVMON_TOKEN_FILE"); token == "" && f != "" {
+		tokenFile = f
 		if token, err = waitToken(ctx, f, log); err != nil {
 			fmt.Fprintln(os.Stderr, "srvmon-agent:", err)
 			os.Exit(1)
@@ -57,6 +59,7 @@ func main() {
 	cfg := agent.Config{
 		URL:        os.Getenv("SRVMON_URL"),
 		Token:      token,
+		TokenFile:  tokenFile,
 		Interval:   interval,
 		HostProc:   getenv("HOST_PROC", "/proc"),
 		HostRoot:   getenv("HOST_ROOT", "/"),
