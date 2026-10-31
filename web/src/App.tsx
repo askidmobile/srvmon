@@ -1,6 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 
 import { api, type Me } from "@/lib/api";
+import { isLang, setLang, t, useLang } from "@/lib/i18n";
 import { href, navigate, typingIn, useRoute } from "@/lib/router";
 import { AddServer } from "@/pages/AddServer";
 import { AgentPage } from "@/pages/Agent";
@@ -17,11 +18,13 @@ export function App() {
   const [me, setMe] = useState<Me | null>(null);
   const [failed, setFailed] = useState(false);
   const route = useRoute();
+  const lang = useLang();
 
   const refresh = useCallback(() => {
     api
       .me()
       .then((m) => {
+        if (isLang(m.lang)) setLang(m.lang);
         setMe(m);
         setFailed(false);
       })
@@ -46,13 +49,13 @@ export function App() {
   }, [route]);
 
   if (failed) {
-    return <p className="p-6 text-crit">srvmon-server недоступен. Повторите попытку позже.</p>;
+    return <p className="p-6 text-crit">{t("srvmon-server is unavailable. Try again later.")}</p>;
   }
   if (!me) {
-    return <p className="p-6 text-muted-foreground">загрузка…</p>;
+    return <p className="p-6 text-muted-foreground">{t("loading…")}</p>;
   }
   if (!me.authenticated) {
-    return <Login onSuccess={refresh} />;
+    return <Login key={lang} onSuccess={refresh} />;
   }
   switch (route.name) {
     case "server":
@@ -67,7 +70,7 @@ export function App() {
       return <SettingsPage route={route} version={me.version} onLogout={logout} />;
     case "terminal":
       return (
-        <Suspense fallback={<p className="p-6 text-muted-foreground">загрузка терминала…</p>}>
+        <Suspense fallback={<p className="p-6 text-muted-foreground">{t("loading the terminal…")}</p>}>
           <TerminalPage serverId={route.id} route={route} version={me.version} onLogout={logout} />
         </Suspense>
       );

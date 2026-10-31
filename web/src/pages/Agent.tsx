@@ -5,16 +5,17 @@ import { Hotkey, Shell } from "@/components/Shell";
 import { Panel } from "@/components/ui/panel";
 import { type AgentAction, agentApi } from "@/lib/agent";
 import { api, type ServerView } from "@/lib/api";
+import { t } from "@/lib/i18n";
 import { href, navigate, type Route } from "@/lib/router";
 import { cn } from "@/lib/utils";
 
 const stateLabel: Record<AgentAction["state"], string> = {
-  pending: "ждёт",
-  approved: "выполняется",
-  rejected: "отклонено",
-  expired: "истекло",
-  done: "выполнено",
-  failed: "ошибка",
+  pending: "waiting",
+  approved: "running",
+  rejected: "rejected",
+  expired: "expired",
+  done: "done",
+  failed: "error",
 };
 
 // Journal of commands the agent asked to run with confirmation.
@@ -33,13 +34,14 @@ function ActionsLog() {
     return () => clearInterval(t);
   }, [load]);
   return (
-    <Panel title="журнал подтверждений" className="flex min-h-0 flex-col">
+    <Panel title={t("confirmation log")} className="flex min-h-0 flex-col">
       <div className="min-h-0 flex-1 overflow-y-auto pr-1 [scrollbar-width:thin]">
-        {list === null && <div className="text-muted-foreground">загрузка…</div>}
+        {list === null && <div className="text-muted-foreground">{t("loading…")}</div>}
         {list?.length === 0 && (
           <div className="text-xs text-muted-foreground">
-            Здесь появятся команды, которые агент выполнял после вашего подтверждения. Чтение (логи, docker ps, df…)
-            выполняется без подтверждения и пишется в аудит.
+            {t(
+              "Commands the agent ran after your confirmation show up here. Reads (logs, docker ps, df…) run without confirmation and go to the audit log.",
+            )}
           </div>
         )}
         {list?.map((a) => (
@@ -59,7 +61,7 @@ function ActionsLog() {
                       : "text-crit",
                 )}
               >
-                {stateLabel[a.state]}
+                {t(stateLabel[a.state])}
               </span>
               <span className="shrink-0 text-hi">{a.server}</span>
               <span className="min-w-0 flex-1 truncate text-muted-foreground">{a.command}</span>
@@ -69,8 +71,8 @@ function ActionsLog() {
               <div className="mt-1 pl-22">
                 {a.reason && <div className="text-muted-foreground">{a.reason}</div>}
                 <pre className="mt-1 whitespace-pre-wrap break-all bg-field px-2 py-1 text-hi">{a.command}</pre>
-                {a.decided_by && <div className="mt-1 text-muted-foreground">решение: {a.decided_by}</div>}
-                {a.exit_code !== undefined && <div className="text-muted-foreground">код выхода {a.exit_code}</div>}
+                {a.decided_by && <div className="mt-1 text-muted-foreground">{t("decision:")} {a.decided_by}</div>}
+                {a.exit_code !== undefined && <div className="text-muted-foreground">{t("exit code {code}", { code: a.exit_code })}</div>}
                 {a.output && (
                   <pre className="mt-1 max-h-60 overflow-auto bg-field px-2 py-1 text-foreground [scrollbar-width:thin]">
                     {a.output}
@@ -112,15 +114,15 @@ export function AgentPage({
       onLogout={onLogout}
       footer={
         <>
-          <Hotkey k="3">терминал</Hotkey>
-          <span className="text-muted-foreground">агент работает через srvmon-gateway, ключей у него нет</span>
+          <Hotkey k="3">{t("terminal")}</Hotkey>
+          <span className="text-muted-foreground">{t("the agent works through srvmon-gateway and holds no keys")}</span>
         </>
       }
-      footerNote="изменения на серверах — только после вашего подтверждения"
+      footerNote={t("changes to servers only after your confirmation")}
     >
       <div className="flex items-center gap-3 text-xs">
         <label htmlFor="agent-ctx" className="text-muted-foreground">
-          контекст:
+          {t("context:")}
         </label>
         <select
           id="agent-ctx"
@@ -128,7 +130,7 @@ export function AgentPage({
           value={serverId ?? 0}
           onChange={(e) => navigate(href.agent(Number(e.target.value) || undefined))}
         >
-          <option value={0}>все серверы</option>
+          <option value={0}>{t("all servers")}</option>
           {servers.map((s) => (
             <option key={s.id} value={s.id}>
               {s.name}

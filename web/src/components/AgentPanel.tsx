@@ -15,12 +15,13 @@ import {
   toolLine,
 } from "@/lib/agent";
 import { ApiError } from "@/lib/api";
+import { t } from "@/lib/i18n";
 import { href } from "@/lib/router";
 import { cn } from "@/lib/utils";
 
 // Agent panel from the terminal mockup: chat / tasks / history. The agent
 // runs in srvmon-ai; commands that change a server show up here as
-// confirmation cards and run only after "✓ выполнить".
+// confirmation cards and run only after "✓ run".
 
 type Tab = "chat" | "tasks" | "history";
 
@@ -81,25 +82,25 @@ function Rich({ text }: { text: string }) {
   );
 }
 
-function ToolRow({ t }: { t: AgentToolCall }) {
+function ToolRow({ t: call }: { t: AgentToolCall }) {
   const [open, setOpen] = useState(false);
-  const pending = t.done === false;
+  const pending = call.done === false;
   return (
     <div className="mt-1 text-xs">
       <button
         type="button"
         className="flex w-full min-w-0 items-start gap-1.5 text-left text-muted-foreground hover:text-foreground"
         onClick={() => setOpen((o) => !o)}
-        title="показать вывод"
+        title={t("show the output")}
       >
-        <span className={pending ? "text-warn" : t.ok ? "text-primary" : "text-crit"}>
-          {pending ? "…" : t.ok ? "✓" : "✗"}
+        <span className={pending ? "text-warn" : call.ok ? "text-primary" : "text-crit"}>
+          {pending ? "…" : call.ok ? "✓" : "✗"}
         </span>
-        <span className="min-w-0 break-all">{toolLine(t)}</span>
+        <span className="min-w-0 break-all">{toolLine(call)}</span>
       </button>
-      {open && t.output && (
+      {open && call.output && (
         <pre className="mt-1 max-h-64 overflow-auto border border-border/60 bg-field px-2 py-1 text-[11px] text-foreground [scrollbar-width:thin]">
-          {t.output}
+          {call.output}
         </pre>
       )}
     </div>
@@ -115,7 +116,7 @@ function ActionCard({ a, onDone }: { a: AgentAction; onDone: () => void }) {
     try {
       await agentApi.decide(a.id, d);
     } catch (e) {
-      setErr(e instanceof ApiError && e.code === "already_decided" ? "уже решено" : "не удалось");
+      setErr(e instanceof ApiError && e.code === "already_decided" ? t("already decided") : t("failed"));
     }
     setBusy(false);
     onDone();
@@ -123,8 +124,8 @@ function ActionCard({ a, onDone }: { a: AgentAction; onDone: () => void }) {
   return (
     <div className="mt-2 border border-warn/70 bg-warn/5 p-2">
       <div className="text-xs text-warn">
-        ⚠ подтвердите · {a.server}
-        {a.task_id ? ` · задача #${a.task_id}` : ""}
+        ⚠ {t("confirm")} · {a.server}
+        {a.task_id ? ` · ${t("task #{id}", { id: a.task_id })}` : ""}
       </div>
       <pre className="my-1 overflow-x-auto whitespace-pre-wrap break-all bg-field px-2 py-1 text-xs text-hi">
         {a.command}
@@ -132,10 +133,10 @@ function ActionCard({ a, onDone }: { a: AgentAction; onDone: () => void }) {
       {a.reason && <div className="text-xs text-muted-foreground">{a.reason}</div>}
       <div className="mt-2 flex gap-2">
         <Button size="sm" disabled={busy} onClick={() => decide("approve")}>
-          ✓ выполнить
+          ✓ {t("run")}
         </Button>
         <Button size="sm" variant="destructive" disabled={busy} onClick={() => decide("reject")}>
-          ✗ отклонить
+          ✗ {t("reject")}
         </Button>
         {err && <span className="text-xs text-crit">{err}</span>}
       </div>
@@ -147,13 +148,13 @@ function MessageView({ m }: { m: { role: string; text: string; tools: AgentToolC
   if (m.role === "user") {
     return (
       <div className="border-l-2 border-primary pl-2">
-        <span className="text-primary">вы ›</span> <span className="whitespace-pre-wrap">{m.text}</span>
+        <span className="text-primary">{t("you")} ›</span> <span className="whitespace-pre-wrap">{m.text}</span>
       </div>
     );
   }
   return (
     <div className="border-l-2 border-border pl-2">
-      <span className="text-hi">агент ›</span>
+      <span className="text-hi">{t("agent")} ›</span>
       {m.tools.length > 0 && (
         <div className="mb-1">
           {m.tools.map((t) => (
@@ -200,10 +201,10 @@ function TasksTab({ contextServer, onChanged }: { contextServer?: string; onChan
   }, [load]);
 
   const fieldMsg: Record<string, string> = {
-    name: "имя: 1–64 символа",
-    schedule: "расписание: cron из 5 полей в UTC, не чаще раза в 5 минут, или @every 30m",
-    prompt: "промпт обязателен",
-    servers: "неизвестный сервер",
+    name: t("name: 1–64 characters"),
+    schedule: t("schedule: 5-field cron in UTC, at most every 5 minutes, or @every 30m"),
+    prompt: t("a prompt is required"),
+    servers: t("unknown server"),
   };
 
   async function create(e: React.FormEvent) {
@@ -225,7 +226,7 @@ function TasksTab({ contextServer, onChanged }: { contextServer?: string; onChan
       setPrompt("");
       load();
     } catch (e) {
-      setErr(e instanceof ApiError ? (fieldMsg[e.code] ?? e.code) : "ошибка");
+      setErr(e instanceof ApiError ? (fieldMsg[e.code] ?? e.code) : t("error"));
     }
   }
 
@@ -233,17 +234,17 @@ function TasksTab({ contextServer, onChanged }: { contextServer?: string; onChan
     <div className="flex flex-col gap-2">
       <div className="flex items-center gap-2">
         <span className="flex-1 text-xs text-muted-foreground">
-          агент запускается по расписанию (UTC); изменения на серверах — только после подтверждения
+          {t("the agent runs on a schedule (UTC); changes to servers only after confirmation")}
         </span>
         <Button size="sm" variant="outline" onClick={() => setForm((f) => !f)}>
-          {form ? "отмена" : "+ задача"}
+          {form ? t("cancel") : `+ ${t("task")}`}
         </Button>
       </div>
       {form && (
         <form onSubmit={create} className="flex flex-col gap-2 border border-border p-2">
           <Input
             className="h-8"
-            placeholder="имя, например restart-watch"
+            placeholder={t("name, for example restart-watch")}
             value={name}
             onChange={(e) => setName(e.target.value)}
           />
@@ -255,87 +256,87 @@ function TasksTab({ contextServer, onChanged }: { contextServer?: string; onChan
           />
           <textarea
             className="min-h-20 w-full border border-input bg-field px-3 py-2 text-hi placeholder:text-muted-foreground"
-            placeholder="что проверять и когда поднимать тревогу"
+            placeholder={t("what to check and when to raise an alarm")}
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
           />
           <Input
             className="h-8"
-            placeholder="серверы через запятую, пусто = все"
+            placeholder={t("servers, comma-separated; empty = all")}
             value={servers}
             onChange={(e) => setServers(e.target.value)}
           />
           <label className="flex items-center gap-2 text-xs">
-            <input type="checkbox" checked={tg} onChange={(e) => setTg(e.target.checked)} /> в Telegram при ALERT или
-            ошибке
+            <input type="checkbox" checked={tg} onChange={(e) => setTg(e.target.checked)} />{" "}
+            {t("to Telegram on ALERT or error")}
           </label>
           {err && <div className="text-xs text-crit">{err}</div>}
           <Button size="sm" type="submit">
-            создать
+            {t("create")}
           </Button>
         </form>
       )}
-      {tasks === null && <div className="text-muted-foreground">загрузка…</div>}
+      {tasks === null && <div className="text-muted-foreground">{t("loading…")}</div>}
       {tasks?.length === 0 && !form && (
         <div className="text-muted-foreground">
-          задач нет. Попросите агента: «каждые 15 минут проверяй рестарты контейнеров».
+          {t("No tasks. Ask the agent: “check container restarts every 15 minutes”.")}
         </div>
       )}
-      {tasks?.map((t) => (
-        <div key={t.id} className={cn("border border-border p-2", !t.enabled && "opacity-60")}>
+      {tasks?.map((task) => (
+        <div key={task.id} className={cn("border border-border p-2", !task.enabled && "opacity-60")}>
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-primary">#{t.id}</span>
-            <span className="text-hi">{t.name}</span>
-            <span className="text-xs text-muted-foreground">{t.schedule}</span>
-            {t.notify === "telegram" && <span className="text-xs text-tx">tg</span>}
+            <span className="text-primary">#{task.id}</span>
+            <span className="text-hi">{task.name}</span>
+            <span className="text-xs text-muted-foreground">{task.schedule}</span>
+            {task.notify === "telegram" && <span className="text-xs text-tx">tg</span>}
             <span className="flex-1" />
             <span
               className={cn(
                 "text-xs",
-                t.last_status === "ok" ? "text-primary" : t.last_status === "error" ? "text-crit" : "text-warn",
+                task.last_status === "ok" ? "text-primary" : task.last_status === "error" ? "text-crit" : "text-warn",
               )}
             >
-              {t.last_status === "running" ? "выполняется…" : t.last_status || "не запускалась"}
+              {task.last_status === "running" ? t("running…") : task.last_status || t("never run")}
             </span>
           </div>
           <div className="mt-1 text-xs text-muted-foreground">
-            {t.servers.length ? t.servers.join(", ") : "все серверы"} · след. {fmtTime(t.next_run_at)} · посл.{" "}
-            {fmtTime(t.last_run_at)}
+            {task.servers.length ? task.servers.join(", ") : t("all servers")} · {t("next run")} {fmtTime(task.next_run_at)} · {t("last run")}{" "}
+            {fmtTime(task.last_run_at)}
           </div>
-          {t.last_result && (
+          {task.last_result && (
             <button
               type="button"
               className="mt-1 block w-full text-left text-xs"
-              onClick={() => setOpen(open === t.id ? null : t.id)}
+              onClick={() => setOpen(open === task.id ? null : task.id)}
             >
-              <span className={cn("whitespace-pre-wrap", open !== t.id && "line-clamp-2")}>{t.last_result}</span>
+              <span className={cn("whitespace-pre-wrap", open !== task.id && "line-clamp-2")}>{task.last_result}</span>
             </button>
           )}
-          {open === t.id && (
-            <div className="mt-1 text-xs text-muted-foreground whitespace-pre-wrap">промпт: {t.prompt}</div>
+          {open === task.id && (
+            <div className="mt-1 text-xs text-muted-foreground whitespace-pre-wrap">{t("prompt:")} {task.prompt}</div>
           )}
           <div className="mt-2 flex gap-2">
             <Button
               size="sm"
               variant="outline"
-              disabled={t.last_status === "running"}
-              onClick={() => agentApi.runTask(t.id).finally(load)}
+              disabled={task.last_status === "running"}
+              onClick={() => agentApi.runTask(task.id).finally(load)}
             >
-              ▶ запустить
+              ▶ {t("start")}
             </Button>
             <Button
               size="sm"
               variant="outline"
-              onClick={() => agentApi.updateTask(t.id, { enabled: !t.enabled }).finally(load)}
+              onClick={() => agentApi.updateTask(task.id, { enabled: !task.enabled }).finally(load)}
             >
-              {t.enabled ? "выкл" : "вкл"}
+              {task.enabled ? t("disable") : t("enable")}
             </Button>
             <Button
               size="sm"
               variant="ghost"
-              onClick={() => confirm(`Удалить задачу ${t.name}?`) && agentApi.deleteTask(t.id).finally(load)}
+              onClick={() => confirm(t("Delete task {name}?", { name: task.name })) && agentApi.deleteTask(task.id).finally(load)}
             >
-              удалить
+              {t("delete")}
             </Button>
           </div>
         </div>
@@ -355,8 +356,8 @@ function HistoryTab({ current, onOpen }: { current?: number; onOpen: (c: AgentCh
   useEffect(load, [load]);
   return (
     <div className="flex flex-col">
-      {chats === null && <div className="text-muted-foreground">загрузка…</div>}
-      {chats?.length === 0 && <div className="text-muted-foreground">чатов пока нет</div>}
+      {chats === null && <div className="text-muted-foreground">{t("loading…")}</div>}
+      {chats?.length === 0 && <div className="text-muted-foreground">{t("no chats yet")}</div>}
       {chats?.map((c) => (
         <div
           key={c.id}
@@ -371,16 +372,16 @@ function HistoryTab({ current, onOpen }: { current?: number; onOpen: (c: AgentCh
             onClick={() => onOpen(c)}
           >
             {c.running ? "● " : ""}
-            {c.title || "без названия"}
+            {c.title || t("untitled")}
           </button>
           <span className="shrink-0 text-xs text-muted-foreground">
-            {c.server ?? "все"} · {fmtTime(c.updated_at)}
+            {c.server ?? t("all")} · {fmtTime(c.updated_at)}
           </span>
           <button
             type="button"
             className="shrink-0 text-xs text-muted-foreground hover:text-crit"
-            aria-label="удалить чат"
-            onClick={() => confirm("Удалить чат?") && agentApi.deleteChat(c.id).finally(load)}
+            aria-label={t("delete chat")}
+            onClick={() => confirm(t("Delete the chat?")) && agentApi.deleteChat(c.id).finally(load)}
           >
             ×
           </button>
@@ -519,7 +520,7 @@ export function AgentPanel({
         }
       }
     } catch {
-      setErr("не удалось создать чат");
+      setErr(t("could not create a chat"));
       return;
     }
     setText("");
@@ -551,7 +552,7 @@ export function AgentPanel({
         show();
       });
     } catch (e) {
-      if (active.current === runId) setErr(e instanceof ApiError && e.code === "busy" ? "агент ещё отвечает в этом чате" : "нет связи с агентом");
+      if (active.current === runId) setErr(e instanceof ApiError && e.code === "busy" ? t("the agent is still replying in this chat") : t("no connection to the agent"));
     }
     if (active.current === runId) {
       await loadChat(runId);
@@ -579,24 +580,25 @@ export function AgentPanel({
     agentApi
       .setChatModel(chatId, m)
       .then((c) => active.current === c.id && setChat(c))
-      .catch(() => setErr("модель недоступна: обновите список в настройках"));
+      .catch(() => setErr(t("the model is unavailable: refresh the list in settings")));
   };
-  const ctxName = chat?.server ?? context?.name ?? "все";
+  const ctxName = chat?.server ?? context?.name ?? t("all");
 
   return (
     <aside className={cn("relative flex min-h-0 flex-col border border-border px-3 pt-4 pb-3", className)}>
       <h2 className="absolute -top-2.5 left-3 max-w-[calc(100%-1.5rem)] truncate bg-background px-1.5 text-sm leading-5 text-primary">
-        агент ── {model} · контекст: {ctxName}
+        {t("agent")} ── {model} · {t("context:")} {ctxName}
       </h2>
       <div className="flex flex-wrap items-center gap-1.5">
         <Button size="sm" variant={tab === "chat" ? "default" : "outline"} onClick={() => setTab("chat")}>
-          чат
+          {t("chat")}
         </Button>
         <Button size="sm" variant={tab === "tasks" ? "default" : "outline"} onClick={() => setTab("tasks")}>
-          задачи{taskCount !== null ? ` (${taskCount})` : ""}
+          {t("tasks")}
+          {taskCount !== null ? ` (${taskCount})` : ""}
         </Button>
         <Button size="sm" variant={tab === "history" ? "default" : "outline"} onClick={() => setTab("history")}>
-          история
+          {t("history")}
         </Button>
         <span className="flex-1" />
         {pending.length > 0 && <span className="text-xs text-warn">⚠ {pending.length}</span>}
@@ -606,8 +608,8 @@ export function AgentPanel({
             value={shownModel ?? ""}
             onChange={(e) => changeModel(e.target.value)}
             disabled={!!live}
-            title="модель этого чата"
-            aria-label="модель чата"
+            title={t("model of this chat")}
+            aria-label={t("chat model")}
           >
             {models.map((m) => (
               <option key={m} value={m}>
@@ -617,21 +619,21 @@ export function AgentPanel({
             ))}
           </select>
         )}
-        <Button size="sm" variant="ghost" onClick={newChat} title="новый чат">
-          + чат
+        <Button size="sm" variant="ghost" onClick={newChat} title={t("new chat")}>
+          + {t("chat")}
         </Button>
       </div>
 
       {status && !status.enabled && (
         <div className="mt-3 text-xs text-muted-foreground">
-          Агент выключен: нет контейнера srvmon-ai (SRVMON_AI_URL / SRVMON_AI_TOKEN).
+          {t("The agent is off: no srvmon-ai container (SRVMON_AI_URL / SRVMON_AI_TOKEN).")}
         </div>
       )}
       {status?.enabled && status.ready === false && (
         <div className="mt-3 text-xs text-warn">
-          агент не готов: {status.error ?? "srvmon-ai недоступен"} ·{" "}
+          {t("the agent is not ready:")} {status.error ?? t("srvmon-ai is unavailable")} ·{" "}
           <a className="text-primary underline-offset-2 hover:underline" href={href.settings()}>
-            настройки → AI
+            {t("settings → AI")}
           </a>
         </div>
       )}
@@ -644,8 +646,9 @@ export function AgentPanel({
             ))}
             {messages.length === 0 && !live && (
               <div className="text-xs text-muted-foreground">
-                Спросите о серверах или поставьте задачу. Агент читает метрики, логи и вывод команд сам; всё, что меняет
-                сервер, он предложит, а выполнится оно только после вашего «✓ выполнить».
+                {t(
+                  "Ask about your servers or give a task. The agent reads metrics, logs and command output on its own; anything that changes a server it proposes, and it runs only after your “✓ run”.",
+                )}
               </div>
             )}
             {messages.map((m) => (
@@ -654,7 +657,7 @@ export function AgentPanel({
             {live && (
               <MessageView m={{ role: "assistant", ...live, text: live.text || (live.tools.length ? "" : "…") }} />
             )}
-            {chat?.running && !live && <div className="text-xs text-warn">агент отвечает…</div>}
+            {chat?.running && !live && <div className="text-xs text-warn">{t("the agent is replying…")}</div>}
             {chatPending.map((a) => (
               <ActionCard key={a.id} a={a} onDone={loadPending} />
             ))}
@@ -681,7 +684,7 @@ export function AgentPanel({
             id="agent-ask"
             ref={inputRef}
             className="h-10 min-w-0 flex-1"
-            placeholder="спросить агента или поставить задачу…"
+            placeholder={t("ask the agent or give a task…")}
             value={text}
             maxLength={4000}
             disabled={disabled}
@@ -693,12 +696,12 @@ export function AgentPanel({
               variant="destructive"
               className="h-10"
               onClick={() => void agentApi.abort(chatId)}
-              aria-label="Остановить"
+              aria-label={t("Stop")}
             >
               ■
             </Button>
           ) : (
-            <Button type="submit" className="h-10" disabled={disabled || !text.trim()} aria-label="Отправить">
+            <Button type="submit" className="h-10" disabled={disabled || !text.trim()} aria-label={t("Send")}>
               ⏎
             </Button>
           )}

@@ -13,62 +13,63 @@ import {
   type NewServerCard,
   type ServerView,
 } from "@/lib/api";
+import { t } from "@/lib/i18n";
 import { href, navigate, type Route } from "@/lib/router";
 import { cn } from "@/lib/utils";
 
 const fieldCls =
   "h-9 w-full min-w-0 border border-input bg-field px-2.5 text-hi placeholder:text-muted-foreground focus-visible:outline-1 focus-visible:outline-ring disabled:opacity-60";
 
-const GROUPS = ["prod", "staging", "infra", "личные"];
+const GROUPS = ["prod", "staging", "infra", "personal"];
 const PROVIDERS = ["Hetzner", "Selectel", "Timeweb", "Aeza", "DigitalOcean", "Yandex Cloud"];
 const CURRENCIES = ["RUB", "EUR", "USD"];
 const PERIODS = [
-  { v: "month", l: "месяц" },
-  { v: "year", l: "год" },
-  { v: "hour", l: "час (почасовой)" },
+  { v: "month", l: "month" },
+  { v: "year", l: "year" },
+  { v: "hour", l: "hour (hourly)" },
 ];
 
 type LoginMethod = "password" | "key" | "panel_key";
 
 const LOGIN_METHODS: { v: LoginMethod; l: string }[] = [
-  { v: "password", l: "пароль" },
-  { v: "key", l: "мой ключ" },
-  { v: "panel_key", l: "ключ панели" },
+  { v: "password", l: "password" },
+  { v: "key", l: "my key" },
+  { v: "panel_key", l: "panel key" },
 ];
 
 const ERRORS: Record<string, string> = {
-  bad_name: "имя: латиница, цифры, . _ -, до 63 символов",
-  bad_host: "укажите host (ip или домен)",
-  bad_port: "порт 1–65535",
-  bad_date: "дата оплаты в формате ГГГГ-ММ-ДД",
-  bad_cost: "некорректная стоимость",
-  bad_url: "ссылка на панель должна начинаться с https://",
-  bad_tag: "тег: до 32 символов, без пробелов и запятых; не больше 20 тегов",
-  bad_description: "описание: до 500 символов",
-  field_too_long: "слишком длинное значение: проект и группа до 64 символов, тариф до 128",
-  bad_period: "некорректный период оплаты",
-  too_many_tags: "не больше 20 тегов",
-  bad_user: "укажите пользователя",
-  password_required: "введите пароль",
-  private_key_required: "вставьте приватный ключ",
-  public_key_given: "это публичный ключ (.pub): нужен приватный, например ~/.ssh/id_ed25519",
-  bad_private_key: "не удалось прочитать приватный ключ (нужен формат OpenSSH или PEM)",
-  passphrase_required: "ключ зашифрован: введите его пароль (passphrase)",
-  bad_passphrase: "неверный пароль ключа (passphrase)",
-  setup_key_expired: "ключ панели устарел (сервер перезапускался или прошёл час): получите новый",
-  bad_method: "неизвестный способ входа",
-  bad_host_key: "сначала проверьте host key",
-  name_taken: "сервер с таким именем уже есть",
-  unreachable: "сервер недоступен по ssh",
-  busy: "уже идёт несколько установок, подождите",
-  no_master_key: "на сервере мониторинга нет мастер-ключа",
-  not_found: "сервер не найден",
-  onboarding: "для этого сервера уже идёт установка",
+  bad_name: "name: latin letters, digits, . _ -, up to 63 characters",
+  bad_host: "enter a host (ip or domain)",
+  bad_port: "port 1–65535",
+  bad_date: "payment date as YYYY-MM-DD",
+  bad_cost: "invalid cost",
+  bad_url: "the panel link must start with https://",
+  bad_tag: "tag: up to 32 characters, no spaces or commas; at most 20 tags",
+  bad_description: "description: up to 500 characters",
+  field_too_long: "value too long: project and group up to 64 characters, plan up to 128",
+  bad_period: "invalid payment period",
+  too_many_tags: "at most 20 tags",
+  bad_user: "enter a user",
+  password_required: "enter the password",
+  private_key_required: "paste the private key",
+  public_key_given: "this is a public key (.pub): a private one is needed, for example ~/.ssh/id_ed25519",
+  bad_private_key: "could not read the private key (OpenSSH or PEM format needed)",
+  passphrase_required: "the key is encrypted: enter its passphrase",
+  bad_passphrase: "wrong key passphrase",
+  setup_key_expired: "the panel key is stale (the server restarted or an hour passed): get a new one",
+  bad_method: "unknown sign-in method",
+  bad_host_key: "check the host key first",
+  name_taken: "a server with this name already exists",
+  unreachable: "the server is unreachable over ssh",
+  busy: "several setups are already running, please wait",
+  no_master_key: "the monitoring server has no master key",
+  not_found: "server not found",
+  onboarding: "a setup is already running for this server",
 };
 
 function errText(e: unknown): string {
-  if (e instanceof ApiError) return ERRORS[e.code] ?? `ошибка: ${e.code}`;
-  return "нет связи с сервером мониторинга";
+  if (e instanceof ApiError) return ERRORS[e.code] ? t(ERRORS[e.code]) : t("error: {code}", { code: e.code });
+  return t("no connection to the monitoring server");
 }
 
 function Field({ label, htmlFor, children }: { label: string; htmlFor: string; children: React.ReactNode }) {
@@ -113,27 +114,27 @@ function Check({
 function TagInput({ tags, onChange, id }: { tags: string[]; onChange: (t: string[]) => void; id: string }) {
   const [draft, setDraft] = useState("");
   const add = (raw: string) => {
-    const t = raw.trim().replace(/^#/, "");
-    if (t && !tags.includes(t)) onChange([...tags, t]);
+    const tag = raw.trim().replace(/^#/, "");
+    if (tag && !tags.includes(tag)) onChange([...tags, tag]);
     setDraft("");
   };
   return (
     <div className="flex min-h-9 flex-wrap items-center gap-1.5 border border-input bg-field px-1.5 focus-within:outline-1 focus-within:outline-ring">
-      {tags.map((t) => (
+      {tags.map((tag) => (
         <button
-          key={t}
+          key={tag}
           type="button"
           className="inline-flex h-[22px] items-center border border-border px-1.5 text-xs text-[#9fc3a7] hover:border-crit hover:text-crit"
-          onClick={() => onChange(tags.filter((x) => x !== t))}
-          aria-label={`убрать тег ${t}`}
+          onClick={() => onChange(tags.filter((x) => x !== tag))}
+          aria-label={t("remove tag {tag}", { tag })}
         >
-          #{t} ×
+          #{tag} ×
         </button>
       ))}
       <input
         id={id}
         value={draft}
-        placeholder="+ тег"
+        placeholder={`+ ${t("tag")}`}
         className="h-[30px] min-w-[60px] flex-1 bg-transparent text-hi outline-none placeholder:text-muted-foreground"
         onChange={(e) => {
           const v = e.target.value;
@@ -301,7 +302,7 @@ export function AddServer({
       return;
     }
     if (!confirmed) {
-      setError("сверьте fingerprint с сервером и подтвердите его");
+      setError(t("check the fingerprint against the server and confirm it"));
       return;
     }
     const { host, port } = splitHostPort(hostPort);
@@ -391,7 +392,7 @@ export function AddServer({
 
   const sudoField = (
     <Field
-      label={user === "root" ? "пароль sudo (не нужен для root)" : "пароль sudo, если sudo его спрашивает"}
+      label={user === "root" ? t("sudo password (not needed for root)") : t("sudo password, if sudo asks for one")}
       htmlFor="f-sudo"
     >
       <input
@@ -413,7 +414,7 @@ export function AddServer({
     return n === 4;
   };
 
-  const steps = ["1 описание", "2 оплата", "3 доступ", "4 ключ и агент"];
+  const steps = [`1 ${t("description")}`, `2 ${t("payment")}`, `3 ${t("access")}`, `4 ${t("key and agent")}`];
 
   return (
     <Shell
@@ -422,16 +423,16 @@ export function AddServer({
       onLogout={onLogout}
       footer={
         <>
-          <Hotkey k="tab">поле</Hotkey>
-          <Hotkey k="⏎">далее</Hotkey>
+          <Hotkey k="tab">{t("field")}</Hotkey>
+          <Hotkey k="⏎">{t("next")}</Hotkey>
         </>
       }
-      footerNote="агент получает свой токен для push-метрик · ssh-ключ хранится зашифрованным"
+      footerNote={t("the agent gets its own token to push metrics · the ssh key is stored encrypted")}
     >
       <form onSubmit={submit} className="mx-auto flex w-full max-w-[1320px] flex-1 flex-col gap-7">
         <div className="flex flex-wrap items-baseline gap-x-4 gap-y-2">
           <h1 className="text-xl font-bold text-hi">
-            {existing ? `+ ssh-доступ: ${existing.name}` : "+ новый сервер"}
+            {existing ? `+ ${t("ssh access:")} ${existing.name}` : `+ ${t("new server")}`}
           </h1>
           <div className="flex flex-wrap items-baseline gap-1">
             {steps.map((s, i) => (
@@ -444,10 +445,10 @@ export function AddServer({
         </div>
 
         <section className="grid gap-6 [grid-template-columns:repeat(auto-fit,minmax(300px,1fr))]">
-          <Panel title="1 · описание" accent={stepOn(1)}>
+          <Panel title={`1 · ${t("description")}`} accent={stepOn(1)}>
             <fieldset disabled={locked} className="flex min-w-0 flex-col gap-2.5">
               <div className="grid grid-cols-2 gap-2.5">
-                <Field label="имя" htmlFor="f-name">
+                <Field label={t("name")} htmlFor="f-name">
                   <input
                     id="f-name"
                     className={fieldCls}
@@ -471,7 +472,7 @@ export function AddServer({
                 </Field>
               </div>
               <div className="grid grid-cols-2 gap-2.5">
-                <Field label="проект" htmlFor="f-project">
+                <Field label={t("project")} htmlFor="f-project">
                   <input
                     id="f-project"
                     maxLength={64}
@@ -488,7 +489,7 @@ export function AddServer({
                     ))}
                   </datalist>
                 </Field>
-                <Field label="группа" htmlFor="f-group">
+                <Field label={t("group")} htmlFor="f-group">
                   <input
                     id="f-group"
                     maxLength={64}
@@ -507,16 +508,16 @@ export function AddServer({
               </div>
               {!existing && (
                 <>
-                  <Field label="теги" htmlFor="f-tags">
+                  <Field label={t("tags")} htmlFor="f-tags">
                     <TagInput id="f-tags" tags={card.tags} onChange={(t) => set("tags", t)} />
                   </Field>
-                  <Field label="описание" htmlFor="f-desc">
+                  <Field label={t("description")} htmlFor="f-desc">
                     <textarea
                       id="f-desc"
                       maxLength={500}
                       className={cn(fieldCls, "h-16 resize-y py-2")}
                       value={card.description}
-                      placeholder="Postgres магазина, реплика на shop-db-2"
+                      placeholder={t("Shop Postgres, replica on shop-db-2")}
                       onChange={(e) => set("description", e.target.value)}
                     />
                   </Field>
@@ -526,10 +527,10 @@ export function AddServer({
           </Panel>
 
           {!existing && (
-            <Panel title="2 · провайдер и оплата" accent={stepOn(2)}>
+            <Panel title={`2 · ${t("provider and payment")}`} accent={stepOn(2)}>
               <fieldset disabled={locked} className="flex min-w-0 flex-col gap-2.5">
                 <div className="grid grid-cols-2 gap-2.5">
-                  <Field label="провайдер" htmlFor="f-prov">
+                  <Field label={t("provider")} htmlFor="f-prov">
                     <input
                       id="f-prov"
                       maxLength={64}
@@ -545,7 +546,7 @@ export function AddServer({
                       ))}
                     </datalist>
                   </Field>
-                  <Field label="тариф" htmlFor="f-plan">
+                  <Field label={t("plan")} htmlFor="f-plan">
                     <input
                       id="f-plan"
                       maxLength={128}
@@ -557,7 +558,7 @@ export function AddServer({
                   </Field>
                 </div>
                 <div className="grid grid-cols-2 gap-2.5">
-                  <Field label="стоимость" htmlFor="f-cost">
+                  <Field label={t("cost")} htmlFor="f-cost">
                     <input
                       id="f-cost"
                       className={fieldCls}
@@ -567,7 +568,7 @@ export function AddServer({
                       onChange={(e) => setCostText(e.target.value)}
                     />
                   </Field>
-                  <Field label="валюта" htmlFor="f-cur">
+                  <Field label={t("currency")} htmlFor="f-cur">
                     <select
                       id="f-cur"
                       className={fieldCls}
@@ -581,7 +582,7 @@ export function AddServer({
                   </Field>
                 </div>
                 <div className="grid grid-cols-2 gap-2.5">
-                  <Field label="период" htmlFor="f-period">
+                  <Field label={t("period")} htmlFor="f-period">
                     <select
                       id="f-period"
                       className={fieldCls}
@@ -590,12 +591,12 @@ export function AddServer({
                     >
                       {PERIODS.map((p) => (
                         <option key={p.v} value={p.v}>
-                          {p.l}
+                          {t(p.l)}
                         </option>
                       ))}
                     </select>
                   </Field>
-                  <Field label="след. оплата" htmlFor="f-next">
+                  <Field label={t("next payment")} htmlFor="f-next">
                     <input
                       id="f-next"
                       type="date"
@@ -605,7 +606,7 @@ export function AddServer({
                     />
                   </Field>
                 </div>
-                <Field label="ссылка на панель провайдера" htmlFor="f-url">
+                <Field label={t("provider panel link")} htmlFor="f-url">
                   <input
                     id="f-url"
                     maxLength={200}
@@ -617,15 +618,15 @@ export function AddServer({
                   />
                 </Field>
                 <div className="text-xs text-muted-foreground">
-                  напоминание в tg за 3 дня до оплаты · шаг можно пропустить
+                  {t("tg reminder 3 days before the payment · this step can be skipped")}
                 </div>
               </fieldset>
             </Panel>
           )}
 
-          <Panel title="3 · разовый доступ" accent={stepOn(3)}>
+          <Panel title={`3 · ${t("one-time access")}`} accent={stepOn(3)}>
             <fieldset disabled={locked} className="flex min-w-0 flex-col gap-2.5">
-              <Field label="пользователь" htmlFor="f-user">
+              <Field label={t("user")} htmlFor="f-user">
                 <input
                   id="f-user"
                   className={fieldCls}
@@ -635,8 +636,8 @@ export function AddServer({
                 />
               </Field>
               <div className="flex flex-col gap-1">
-                <span className="text-muted-foreground">вход</span>
-                <div className="flex flex-wrap gap-1" role="radiogroup" aria-label="способ входа">
+                <span className="text-muted-foreground">{t("sign-in")}</span>
+                <div className="flex flex-wrap gap-1" role="radiogroup" aria-label={t("sign-in method")}>
                   {LOGIN_METHODS.map((m) => (
                     <Button
                       key={m.v}
@@ -650,7 +651,7 @@ export function AddServer({
                         setError("");
                       }}
                     >
-                      {m.l}
+                      {t(m.l)}
                     </Button>
                   ))}
                 </div>
@@ -658,7 +659,7 @@ export function AddServer({
 
               {method === "password" && (
                 <>
-                  <Field label="пароль (один раз)" htmlFor="f-pw">
+                  <Field label={t("password (once)")} htmlFor="f-pw">
                     <input
                       id="f-pw"
                       type="password"
@@ -669,16 +670,16 @@ export function AddServer({
                     />
                   </Field>
                   <div className="text-xs text-warn">
-                    пароль нужен только для установки ключа: не пишется в бд и логи, после шага 4 стирается. Подойдёт
-                    root или пользователь с sudo. Вход по паролю на сервере выключен? Выберите «мой ключ» или «ключ
-                    панели».
+                    {t(
+                      "The password is only used to install the key: it is not written to the db or logs and is wiped after step 4. Use root or a user with sudo. Password sign-in is off on the server? Pick “my key” or “panel key”.",
+                    )}
                   </div>
                 </>
               )}
 
               {method === "key" && (
                 <>
-                  <Field label="приватный ключ (один раз)" htmlFor="f-pk">
+                  <Field label={t("private key (once)")} htmlFor="f-pk">
                     <textarea
                       id="f-pk"
                       className={cn(fieldCls, "h-24 resize-y py-1.5 font-mono text-xs")}
@@ -689,7 +690,7 @@ export function AddServer({
                       onChange={(e) => setPrivateKey(e.target.value)}
                     />
                   </Field>
-                  <Field label="пароль ключа, если есть" htmlFor="f-pp">
+                  <Field label={t("key passphrase, if any")} htmlFor="f-pp">
                     <input
                       id="f-pp"
                       type="password"
@@ -701,8 +702,9 @@ export function AddServer({
                   </Field>
                   {sudoField}
                   <div className="text-xs text-warn">
-                    нужен приватный ключ, которым вы сами заходите на сервер (например ~/.ssh/id_ed25519, не .pub). Он
-                    используется один раз для установки ключа srvmon: не пишется в бд и логи, после шага 4 стирается.
+                    {t(
+                      "The private key you sign in to the server with (for example ~/.ssh/id_ed25519, not .pub). It is used once to install the srvmon key: not written to the db or logs, wiped after step 4.",
+                    )}
                   </div>
                 </>
               )}
@@ -711,12 +713,12 @@ export function AddServer({
                 <>
                   {!setupKey ? (
                     <Button type="button" variant="outline" onClick={getSetupKey}>
-                      показать ключ панели
+                      {t("show the panel key")}
                     </Button>
                   ) : (
                     <div className="flex flex-col gap-1.5">
                       <span className="text-muted-foreground">
-                        выполните на сервере под пользователем <span className="text-hi">{user || "root"}</span>:
+                        {t("run on the server as user")} <span className="text-hi">{user || "root"}</span>:
                       </span>
                       <pre className="max-h-28 overflow-auto border border-border bg-field p-2 text-xs break-all whitespace-pre-wrap text-hi">
                         {setupKey.command}
@@ -733,10 +735,10 @@ export function AddServer({
                               .catch(() => undefined)
                           }
                         >
-                          {copied ? "скопировано ✓" : "копировать"}
+                          {copied ? `${t("copied")} ✓` : t("copy")}
                         </Button>
                         <Button type="button" size="sm" variant="ghost" onClick={getSetupKey}>
-                          новый ключ
+                          {t("new key")}
                         </Button>
                         <span className="min-w-0 text-xs break-all text-muted-foreground">{setupKey.fingerprint}</span>
                       </div>
@@ -744,21 +746,23 @@ export function AddServer({
                   )}
                   {sudoField}
                   <div className="text-xs text-warn">
-                    публичный ключ панели добавляется в authorized_keys, после установки он остаётся только у
-                    пользователя srvmon, а у {user || "root"} убирается. Приватная часть не покидает сервер мониторинга.
+                    {t(
+                      "The panel public key goes to authorized_keys; after setup only the srvmon user keeps it and it is removed from {user}. The private part never leaves the monitoring server.",
+                      { user: user || "root" },
+                    )}
                   </div>
                 </>
               )}
             </fieldset>
           </Panel>
 
-          <Panel title="4 · ключ и агент" accent={stepOn(4)}>
+          <Panel title={`4 · ${t("key and agent")}`} accent={stepOn(4)}>
             <div className="flex flex-col gap-1.5">
               <div>
-                <span className="text-muted-foreground">ключ </span> ed25519, генерируется на сервере мониторинга
+                <span className="text-muted-foreground">{t("key")} </span> {t("ed25519, generated on the monitoring server")}
               </div>
               <div>
-                <span className="text-muted-foreground">юзер </span> srvmon (группа docker)
+                <span className="text-muted-foreground">{t("user")} </span> srvmon ({t("docker group")})
               </div>
               <div className="break-all">
                 <span className="text-muted-foreground">host </span>
@@ -767,40 +771,40 @@ export function AddServer({
                     {probe.type} {probe.fingerprint}
                   </span>
                 ) : (
-                  <span className="text-muted-foreground">не проверен</span>
+                  <span className="text-muted-foreground">{t("not checked")}</span>
                 )}
               </div>
               {probe && (
                 <div className="mb-1">
                   <Check checked={confirmed} onChange={setConfirmed} disabled={locked}>
-                    fingerprint совпадает с сервером{" "}
+                    {t("the fingerprint matches the server")}{" "}
                     <span className="text-xs text-muted-foreground">(ssh-keygen -lf /etc/ssh/ssh_host_*_key.pub)</span>
                   </Check>
                 </div>
               )}
               <div className="mt-1.5 flex flex-col gap-1.5">
                 <Check checked={installAgent} onChange={setInstallAgent} disabled={locked}>
-                  установить srvmon-agent
+                  {t("install srvmon-agent")}
                 </Check>
                 <Check checked={sudo} onChange={setSudo} disabled={locked}>
-                  sudo без пароля для srvmon <span className="text-xs text-muted-foreground">(root в терминале)</span>
+                  {t("passwordless sudo for srvmon")} <span className="text-xs text-muted-foreground">({t("root in the terminal")})</span>
                 </Check>
                 <Check checked={disablePassword} onChange={setDisablePassword} disabled={locked}>
-                  отключить вход по паролю
+                  {t("turn off password sign-in")}
                 </Check>
               </div>
             </div>
           </Panel>
         </section>
 
-        <Panel title="журнал установки" accent={phase !== "form"}>
+        <Panel title={t("setup log")} accent={phase !== "form"}>
           <ScrollArea className="max-h-[320px] border border-border bg-field">
             <div className="px-3 py-2.5 leading-normal">
               {lines.length === 0 && phase === "form" && (
                 <div className="text-muted-foreground">
                   {probe
-                    ? "○ сверьте fingerprint и нажмите «добавить»"
-                    : "○ заполните имя и адрес, затем «проверить host key»"}
+                    ? `○ ${t("check the fingerprint and press “add”")}`
+                    : `○ ${t("fill in the name and address, then “check host key”")}`}
                 </div>
               )}
               {lines.map((l, i) => (
@@ -808,7 +812,7 @@ export function AddServer({
                   <span className={MARK[l.state].c}>{MARK[l.state].m}</span> {l.text}
                 </div>
               ))}
-              {phase === "running" && <div className="text-muted-foreground">○ выполняется…</div>}
+              {phase === "running" && <div className="text-muted-foreground">○ {t("running…")}</div>}
               <div ref={logEnd} />
             </div>
           </ScrollArea>
@@ -821,20 +825,20 @@ export function AddServer({
             {phase === "form" && (
               <>
                 <Button type="button" variant="outline" onClick={() => navigate(href.overview())}>
-                  ← назад
+                  ← {t("back")}
                 </Button>
                 <Button type="button" variant="outline" onClick={doProbe} disabled={probing || !hostPort}>
-                  {probing ? "проверяем…" : probe ? "проверить заново" : "проверить host key"}
+                  {probing ? t("checking…") : probe ? t("check again") : t("check host key")}
                 </Button>
                 <span className="flex-1" />
                 <Button type="submit" disabled={probing || (!!probe && (!confirmed || !loginReady || !card.name))}>
-                  {probe ? (existing ? "подключить ⏎" : "добавить сервер ⏎") : "далее ⏎"}
+                  {probe ? (existing ? t("connect") : t("add server")) : t("next")} ⏎
                 </Button>
               </>
             )}
             {phase === "running" && !committed && (
               <Button type="button" variant="destructive" onClick={() => api.cancelOnboard(job).catch(() => undefined)}>
-                отмена (откат)
+                {t("cancel (roll back)")}
               </Button>
             )}
             {phase === "failed" && (
@@ -847,22 +851,22 @@ export function AddServer({
                     setJob("");
                   }}
                 >
-                  ← исправить и повторить
+                  ← {t("fix and retry")}
                 </Button>
                 <span className="flex-1" />
                 <Button type="button" variant="outline" onClick={() => navigate(href.overview())}>
-                  к обзору
+                  {t("to the overview")}
                 </Button>
               </>
             )}
             {phase === "done" && (
               <>
                 <Button type="button" variant="outline" onClick={() => navigate(href.overview())}>
-                  к обзору
+                  {t("to the overview")}
                 </Button>
                 <span className="flex-1" />
                 <Button type="button" onClick={() => navigate(href.terminal(serverId))}>
-                  открыть терминал →
+                  {t("open the terminal")} →
                 </Button>
               </>
             )}

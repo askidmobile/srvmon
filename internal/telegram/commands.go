@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/askidmobile/srvmon/internal/alerts"
+	"github.com/askidmobile/srvmon/internal/i18n"
 	"github.com/askidmobile/srvmon/internal/store"
 )
 
@@ -19,13 +20,15 @@ const offlineAfter = 2 * time.Minute
 
 var esc = html.EscapeString
 
-const helpText = `<b>srvmon</b> — команды:
-/status — сводка по серверам
-/server &lt;имя&gt; — сервер подробно
-/alerts — активные алерты
-/ack &lt;id&gt; — подтвердить алерт
-/bills — ближайшие оплаты
-/ask &lt;вопрос&gt; — вопрос AI-агенту`
+func helpText() string {
+	return i18n.T("<b>srvmon</b> commands:\n" +
+		"/status — server summary\n" +
+		"/server &lt;name&gt; — server details\n" +
+		"/alerts — active alerts\n" +
+		"/ack &lt;id&gt; — acknowledge an alert\n" +
+		"/bills — upcoming payments\n" +
+		"/ask &lt;question&gt; — ask the AI agent")
+}
 
 func sevIcon(sev string) string {
 	switch sev {
@@ -56,7 +59,7 @@ func (b *Bot) alertText(n alerts.Notification) (string, [][]button) {
 	if n.Resolved {
 		dur := ""
 		if a.ResolvedAt != nil {
-			dur = " · длилось " + alerts.FormatDuration(a.ResolvedAt.Sub(a.StartedAt))
+			dur = " · " + i18n.T("lasted %s", alerts.FormatDuration(a.ResolvedAt.Sub(a.StartedAt)))
 		}
 		return fmt.Sprintf("✅ <b>RESOLVED</b> · %s\n%s\n<i>#%d%s</i>", where, esc(a.Message), a.ID, dur), nil
 	}
@@ -66,7 +69,7 @@ func (b *Bot) alertText(n alerts.Notification) (string, [][]button) {
 		return text, nil
 	}
 	id := strconv.FormatInt(a.ID, 10)
-	return text, [][]button{{{Text: "✓ ack", Data: "ack:" + id}, {Text: "🔕 тишина 1ч", Data: "sil:" + id}}}
+	return text, [][]button{{{Text: "✓ ack", Data: "ack:" + id}, {Text: "🔕 " + i18n.T("mute 1h"), Data: "sil:" + id}}}
 }
 
 func (b *Bot) callback(ctx context.Context, data string) string {
@@ -76,7 +79,7 @@ func (b *Bot) callback(ctx context.Context, data string) string {
 	action, idStr, _ := strings.Cut(data, ":")
 	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil {
-		return "неизвестная кнопка"
+		return i18n.T("unknown button")
 	}
 	switch action {
 	case "ack":
@@ -84,11 +87,11 @@ func (b *Bot) callback(ctx context.Context, data string) string {
 	case "sil":
 		a, until, err := b.engine.Silence(ctx, id, time.Hour)
 		if err != nil {
-			return "алерт #" + idStr + " не найден"
+			return i18n.T("alert #%s not found", idStr)
 		}
-		return fmt.Sprintf("🔕 #%d %s: тишина до %s", a.ID, a.ServerName, until.In(b.loc(ctx)).Format("15:04"))
+		return "🔕 " + i18n.T("#%d %s: muted until %s", a.ID, a.ServerName, until.In(b.loc(ctx)).Format("15:04"))
 	}
-	return "неизвестная кнопка"
+	return i18n.T("unknown button")
 }
 
 // agentAction handles "<id>:ok|no" from the agent's confirmation buttons.
@@ -96,13 +99,13 @@ func (b *Bot) agentAction(ctx context.Context, data string) string {
 	idStr, verdict, _ := strings.Cut(data, ":")
 	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil || (verdict != "ok" && verdict != "no") {
-		return "неизвестная кнопка"
+		return i18n.T("unknown button")
 	}
 	b.mu.Lock()
 	decide := b.decide
 	b.mu.Unlock()
 	if decide == nil {
-		return "AI-агент не подключён"
+		return i18n.T("the AI agent is not connected")
 	}
 	return decide(ctx, id, verdict == "ok")
 }
@@ -111,32 +114,32 @@ func (b *Bot) ack(ctx context.Context, id int64) string {
 	a, err := b.engine.Ack(ctx, id)
 	switch {
 	case errors.Is(err, store.ErrNotFound):
-		return fmt.Sprintf("алерт #%d не найден", id)
+		return i18n.T("alert #%d not found", id)
 	case err != nil:
-		return "ошибка: " + err.Error()
+		return i18n.T("error: %s", err.Error())
 	case a.State == store.AlertAcked:
-		return fmt.Sprintf("✓ #%d %s подтверждён", a.ID, a.ServerName)
+		return "✓ " + i18n.T("#%d %s acknowledged", a.ID, a.ServerName)
 	}
-	return fmt.Sprintf("#%d уже %s", a.ID, a.State)
+	return i18n.T("#%d is already %s", a.ID, a.State)
 }
 
 // command answers one message from the allowed chat.
 func (b *Bot) command(ctx context.Context, text string) (string, [][]button) {
 	text = strings.TrimSpace(text)
 	if !strings.HasPrefix(text, "/") {
-		return "Не понимаю. " + helpText, nil
+		return i18n.T("I do not understand.") + " " + helpText(), nil
 	}
 	cmd, arg, _ := strings.Cut(text, " ")
 	cmd, _, _ = strings.Cut(cmd, "@") // /status@srvmon_bot in groups
 	arg = strings.TrimSpace(arg)
 	switch strings.ToLower(cmd) {
 	case "/start", "/help":
-		return helpText, nil
+		return helpText(), nil
 	case "/status":
 		return b.statusText(ctx), nil
 	case "/server":
 		if arg == "" {
-			return "Укажите имя: /server &lt;имя&gt;", nil
+			return i18n.T("Give a name: /server &lt;name&gt;"), nil
 		}
 		return b.serverText(ctx, arg), nil
 	case "/alerts":
@@ -144,20 +147,20 @@ func (b *Bot) command(ctx context.Context, text string) (string, [][]button) {
 	case "/ack":
 		id, err := strconv.ParseInt(strings.TrimPrefix(arg, "#"), 10, 64)
 		if err != nil {
-			return "Укажите номер: /ack 42", nil
+			return i18n.T("Give a number: /ack 42"), nil
 		}
 		return esc(b.ack(ctx, id)), nil
 	case "/bills":
 		return b.billsText(ctx), nil
 	case "/ask":
 		if arg == "" {
-			return "Задайте вопрос: /ask что с диском на shop-db?", nil
+			return i18n.T("Ask a question: /ask what is up with the disk on shop-db?"), nil
 		}
 		b.mu.Lock()
 		ask := b.ask
 		b.mu.Unlock()
 		if ask == nil {
-			return "AI-агент не настроен: нужен ключ SRVMON_AI_API_KEY (см. README).", nil
+			return i18n.T("The AI agent is not set up: configure it in the panel, settings → AI."), nil
 		}
 		// The agent may take minutes and may wait for a confirmation that
 		// comes as a button press of this same loop: answer from the side.
@@ -166,14 +169,14 @@ func (b *Bot) command(ctx context.Context, text string) (string, [][]button) {
 			defer cancel()
 			ans, err := ask(actx, arg)
 			if err != nil {
-				b.Send("Агент не ответил: " + esc(err.Error()))
+				b.Send(i18n.T("The agent did not answer: %s", esc(err.Error())))
 				return
 			}
 			b.Send("🤖 " + esc(ans))
 		}()
-		return "🤖 агент думает…", nil
+		return "🤖 " + i18n.T("the agent is thinking…"), nil
 	}
-	return "Неизвестная команда. " + helpText, nil
+	return i18n.T("Unknown command.") + " " + helpText(), nil
 }
 
 func pct(used, total uint64) float64 {
@@ -186,7 +189,7 @@ func pct(used, total uint64) float64 {
 func (b *Bot) statusText(ctx context.Context) string {
 	servers, err := b.st.ListServers(ctx)
 	if err != nil {
-		return "ошибка базы: " + esc(err.Error())
+		return i18n.T("database error: %s", esc(err.Error()))
 	}
 	open, _ := b.st.OpenAlerts(ctx)
 	now := b.now()
@@ -200,9 +203,9 @@ func (b *Bot) statusText(ctx context.Context) string {
 	for _, s := range servers {
 		snap, ok := b.latest.Get(s.ID)
 		if !ok || now.Sub(snap.Received) >= offlineAfter {
-			since := "нет данных"
+			since := i18n.T("no data")
 			if s.LastSeen != nil {
-				since = "молчит " + alerts.FormatDuration(now.Sub(*s.LastSeen))
+				since = i18n.T("silent for %s", alerts.FormatDuration(now.Sub(*s.LastSeen)))
 			}
 			lines = append(lines, fmt.Sprintf("○ <b>%s</b> — %s", esc(s.Name), since))
 			continue
@@ -232,12 +235,12 @@ func (b *Bot) statusText(ctx context.Context) string {
 		}
 		lines = append(lines, line)
 	}
-	head := fmt.Sprintf("<b>srvmon</b>: %d/%d онлайн · алертов %d", online, len(servers), len(open))
+	head := i18n.T("<b>srvmon</b>: %d/%d online · alerts %d", online, len(servers), len(open))
 	if crit > 0 {
 		head += fmt.Sprintf(" (crit %d)", crit)
 	}
 	if len(servers) == 0 {
-		return head + "\nСерверов пока нет."
+		return head + "\n" + i18n.T("No servers yet.")
 	}
 	return head + "\n\n" + strings.Join(lines, "\n")
 }
@@ -245,7 +248,7 @@ func (b *Bot) statusText(ctx context.Context) string {
 func (b *Bot) findServer(ctx context.Context, name string) (store.Server, string) {
 	servers, err := b.st.ListServers(ctx)
 	if err != nil {
-		return store.Server{}, "ошибка базы"
+		return store.Server{}, i18n.T("database error")
 	}
 	var prefix []store.Server
 	for _, s := range servers {
@@ -260,13 +263,13 @@ func (b *Bot) findServer(ctx context.Context, name string) (store.Server, string
 	case 1:
 		return prefix[0], ""
 	case 0:
-		return store.Server{}, "сервер «" + esc(name) + "» не найден"
+		return store.Server{}, i18n.T("server “%s” not found", esc(name))
 	}
 	names := make([]string, len(prefix))
 	for i, s := range prefix {
 		names[i] = esc(s.Name)
 	}
-	return store.Server{}, "уточните: " + strings.Join(names, ", ")
+	return store.Server{}, i18n.T("be more specific: %s", strings.Join(names, ", "))
 }
 
 func (b *Bot) serverText(ctx context.Context, name string) string {
@@ -284,32 +287,32 @@ func (b *Bot) serverText(ctx context.Context, name string) string {
 	now := b.now()
 	if !ok || now.Sub(snap.Received) >= offlineAfter {
 		if s.LastSeen != nil {
-			fmt.Fprintf(&out, "○ агент молчит %s\n", alerts.FormatDuration(now.Sub(*s.LastSeen)))
+			out.WriteString("○ " + i18n.T("agent silent for %s", alerts.FormatDuration(now.Sub(*s.LastSeen))) + "\n")
 		} else {
-			out.WriteString("○ нет данных от агента\n")
+			out.WriteString("○ " + i18n.T("no data from the agent") + "\n")
 		}
 	} else {
 		h := snap.Report.Host
-		fmt.Fprintf(&out, "● онлайн · uptime %s\n", alerts.FormatDuration(time.Duration(h.UptimeSec)*time.Second))
-		fmt.Fprintf(&out, "cpu %.0f%% (%d ядер) · load %.2f %.2f %.2f\n", h.CPUPercent, h.CPUCores, h.Load1, h.Load5, h.Load15)
-		fmt.Fprintf(&out, "ram %.0f%% из %s", pct(h.MemUsed(), h.MemTotal), bytesText(h.MemTotal))
+		out.WriteString("● " + i18n.T("online · uptime %s", alerts.FormatDuration(time.Duration(h.UptimeSec)*time.Second)) + "\n")
+		out.WriteString(i18n.T("cpu %.0f%% (%d cores) · load %.2f %.2f %.2f", h.CPUPercent, h.CPUCores, h.Load1, h.Load5, h.Load15) + "\n")
+		out.WriteString(i18n.T("ram %.0f%% of %s", pct(h.MemUsed(), h.MemTotal), bytesText(h.MemTotal)))
 		if h.SwapTotal > 0 {
 			fmt.Fprintf(&out, " · swap %.0f%%", pct(h.SwapTotal-h.SwapFree, h.SwapTotal))
 		}
 		out.WriteString("\n")
 		for _, d := range h.Disks {
-			fmt.Fprintf(&out, "disk %s %.0f%% из %s\n", esc(d.Mount), pct(d.Used, d.Total), bytesText(d.Total))
+			out.WriteString(i18n.T("disk %s %.0f%% of %s", esc(d.Mount), pct(d.Used, d.Total), bytesText(d.Total)) + "\n")
 		}
 		if snap.Report.DockerOK {
 			cs := snap.Report.Containers
-			fmt.Fprintf(&out, "\n<b>контейнеры</b> (%d):\n", len(cs))
+			fmt.Fprintf(&out, "\n<b>%s</b> (%d):\n", i18n.T("containers"), len(cs))
 			sorted := append(cs[:0:0], cs...)
 			sort.SliceStable(sorted, func(i, j int) bool {
 				return (sorted[i].State == "running") && !(sorted[j].State == "running")
 			})
 			for i, c := range sorted {
 				if i >= 30 {
-					fmt.Fprintf(&out, "… ещё %d\n", len(sorted)-i)
+					out.WriteString("… " + i18n.T("%d more", len(sorted)-i) + "\n")
 					break
 				}
 				mark := "●"
@@ -327,7 +330,7 @@ func (b *Bot) serverText(ctx context.Context, name string) string {
 			continue
 		}
 		if first {
-			out.WriteString("\n<b>алерты</b>:\n")
+			out.WriteString("\n<b>" + i18n.T("alerts") + "</b>:\n")
 			first = false
 		}
 		fmt.Fprintf(&out, "#%d %s %s\n", a.ID, sevIcon(a.Severity), esc(a.Message))
@@ -338,14 +341,14 @@ func (b *Bot) serverText(ctx context.Context, name string) string {
 func (b *Bot) alertsText(ctx context.Context) string {
 	open, err := b.st.OpenAlerts(ctx)
 	if err != nil {
-		return "ошибка базы"
+		return i18n.T("database error")
 	}
 	if len(open) == 0 {
-		return "✅ Активных алертов нет."
+		return "✅ " + i18n.T("No active alerts.")
 	}
 	loc := b.loc(ctx)
 	var out strings.Builder
-	fmt.Fprintf(&out, "<b>Активные алерты</b> (%d):\n", len(open))
+	fmt.Fprintf(&out, "<b>%s</b> (%d):\n", i18n.T("Active alerts"), len(open))
 	for _, a := range open {
 		state := ""
 		if a.State == store.AlertAcked {
@@ -354,7 +357,7 @@ func (b *Bot) alertsText(ctx context.Context) string {
 		fmt.Fprintf(&out, "\n#%d %s · <b>%s</b>%s\n%s · %s", a.ID, sevIcon(a.Severity), esc(a.ServerName), state,
 			esc(a.Message), a.StartedAt.In(loc).Format("02.01 15:04"))
 	}
-	out.WriteString("\n\nПодтвердить: /ack &lt;id&gt;")
+	out.WriteString("\n\n" + i18n.T("Acknowledge: /ack &lt;id&gt;"))
 	return out.String()
 }
 
@@ -372,7 +375,7 @@ func monthly(cost float64, period string) float64 {
 func (b *Bot) billsText(ctx context.Context) string {
 	servers, err := b.st.ListServers(ctx)
 	if err != nil {
-		return "ошибка базы"
+		return i18n.T("database error")
 	}
 	now := b.now()
 	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
@@ -395,9 +398,9 @@ func (b *Bot) billsText(ctx context.Context) string {
 	}
 	sort.Slice(bills, func(i, j int) bool { return bills[i].due.Before(bills[j].due) })
 	var out strings.Builder
-	out.WriteString("<b>Оплаты серверов</b>\n")
+	out.WriteString("<b>" + i18n.T("Server payments") + "</b>\n")
 	if len(bills) == 0 {
-		out.WriteString("Даты оплат не заполнены: укажите их в паспорте сервера.\n")
+		out.WriteString(i18n.T("No payment dates yet: set them in the server passport.") + "\n")
 	}
 	for _, bl := range bills {
 		mark := "·"
@@ -419,7 +422,7 @@ func (b *Bot) billsText(ctx context.Context) string {
 		for i, c := range cur {
 			parts[i] = fmt.Sprintf("%.2f %s", totals[c], esc(c))
 		}
-		fmt.Fprintf(&out, "\nВ месяц: %s", strings.Join(parts, " + "))
+		out.WriteString("\n" + i18n.T("Per month: %s", strings.Join(parts, " + ")))
 	}
 	return strings.TrimRight(out.String(), "\n")
 }

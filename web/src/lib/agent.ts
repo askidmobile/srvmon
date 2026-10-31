@@ -1,4 +1,5 @@
 import { ApiError } from "@/lib/api";
+import { t } from "@/lib/i18n";
 
 // AI agent API (stage 5). Chats stream as NDJSON from POST .../run.
 
@@ -220,22 +221,22 @@ export async function runChat(chatId: number, text: string, onEvent: (e: AgentEv
 }
 
 /** One-line summary of a tool call for the transcript. */
-export function toolLine(t: Pick<AgentToolCall, "name" | "args">): string {
-  const a = t.args ?? {};
+export function toolLine(call: Pick<AgentToolCall, "name" | "args">): string {
+  const a = call.args ?? {};
   const s = (k: string) => (typeof a[k] === "string" ? (a[k] as string) : "");
-  switch (t.name) {
+  switch (call.name) {
     case "srvmon_exec":
       return `${s("server")} $ ${s("command")}`;
     case "srvmon_servers":
-      return "серверы";
+      return t("servers");
     case "srvmon_server":
-      return `сервер ${s("server")}`;
+      return t("server {name}", { name: s("server") });
     case "srvmon_tasks":
-      return "задачи";
+      return t("tasks");
     case "srvmon_task_create":
-      return `новая задача ${s("name")} · ${s("schedule")}`;
+      return t("new task {name} · {schedule}", { name: s("name"), schedule: s("schedule") });
     case "srvmon_task_delete":
-      return `удалить задачу #${String(a.id ?? "")}`;
+      return t("delete task #{id}", { id: String(a.id ?? "") });
   }
-  return t.name;
+  return call.name;
 }

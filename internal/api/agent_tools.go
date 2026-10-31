@@ -203,7 +203,7 @@ func limitOutput(s string) string {
 	for len(tail) > 0 && tail[0]&0xC0 == 0x80 {
 		tail = tail[1:]
 	}
-	return head + fmt.Sprintf("[… пропущено %d байт …]\n", len(s)-toolOutputMax) + tail
+	return head + fmt.Sprintf("[… %d bytes skipped …]\n", len(s)-toolOutputMax) + tail
 }
 
 // runOnServer runs cmd over SSH under `timeout`, so a streaming command
@@ -230,7 +230,7 @@ func (s *Server) runOnServer(ctx context.Context, a store.SSHAccess, cmd string,
 		text += "[stderr]\n" + errOut
 	}
 	if code == 124 {
-		text += fmt.Sprintf("\n[остановлено по таймауту %s]", limit)
+		text += fmt.Sprintf("\n[stopped by the %s timeout]", limit)
 	}
 	if code == -1 && err != nil {
 		return code, limitOutput(text), err
@@ -266,7 +266,7 @@ func (s *Server) toolExec(w http.ResponseWriter, r *http.Request) {
 	}
 	access, err := s.store.ServerSSH(r.Context(), srv.ID)
 	if errors.Is(err, store.ErrNotFound) {
-		writeJSON(w, http.StatusOK, execResult{Status: "error", Note: "у srvmon нет ssh-доступа к этому серверу"})
+		writeJSON(w, http.StatusOK, execResult{Status: "error", Note: "srvmon has no ssh access to this server"})
 		return
 	} else if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal")
@@ -363,10 +363,10 @@ wait:
 	switch decision {
 	case store.ActionApproved:
 	case store.ActionRejected:
-		finish(execResult{Status: "rejected", ActionID: action.ID, Note: "владелец отклонил команду"})
+		finish(execResult{Status: "rejected", ActionID: action.ID, Note: "the owner rejected the command"})
 		return
 	default:
-		finish(execResult{Status: "expired", ActionID: action.ID, Note: "команду не подтвердили вовремя"})
+		finish(execResult{Status: "expired", ActionID: action.ID, Note: "the command was not confirmed in time"})
 		return
 	}
 	// Approved: run even if the agent stopped waiting, the owner asked for
@@ -425,11 +425,11 @@ func (s *Server) toolNewTask(w http.ResponseWriter, r *http.Request) {
 	t, field, err := s.createTask(r.Context(), in, "agent")
 	if field != "" {
 		msg := map[string]string{
-			"name":     "имя 1–64 символа",
-			"prompt":   "промпт обязателен, до 4000 символов",
-			"schedule": "cron из 5 полей (UTC, не чаще раза в 5 минут) или @every 15m",
-			"notify":   "notify: пусто или telegram",
-			"servers":  "неизвестный сервер в списке",
+			"name":     "name of 1–64 characters",
+			"prompt":   "a prompt is required, up to 4000 characters",
+			"schedule": "a 5-field cron (UTC, at most every 5 minutes) or @every 15m",
+			"notify":   "notify: empty or telegram",
+			"servers":  "an unknown server in the list",
 		}[field]
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid", "field": field, "hint": msg})
 		return

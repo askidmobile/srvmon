@@ -233,7 +233,7 @@ func TestOnboardWrongPassword(t *testing.T) {
 	_, err := Onboard(context.Background(), OnboardParams{
 		Addr: ts.addr, User: "root", Password: "nope", HostKey: ts.hostKey, Key: key, SSHUser: "srvmon",
 	}, func(string, string) {})
-	if err == nil || !strings.Contains(err.Error(), "пароль") {
+	if err == nil || !strings.Contains(err.Error(), "password") {
 		t.Fatalf("want auth error, got %v", err)
 	}
 }
@@ -362,7 +362,7 @@ func TestCappedBuffer(t *testing.T) {
 	for _, s := range []string{"ab", "cdef", "ghij", "klmnop"} {
 		b.Write([]byte(s))
 	}
-	if got := b.String(); got != "abcd\n[… пропущено 8 байт …]\nmnop" || b.Len() != 16 {
+	if got := b.String(); got != "abcd\n[… 8 bytes skipped …]\nmnop" || b.Len() != 16 {
 		t.Fatalf("%q %d", got, b.Len())
 	}
 	small := &CappedBuffer{Head: 4, Tail: 4}
@@ -372,7 +372,7 @@ func TestCappedBuffer(t *testing.T) {
 	}
 	big := &CappedBuffer{Head: 2, Tail: 3}
 	big.Write([]byte("0123456789"))
-	if got := big.String(); got != "01\n[… пропущено 5 байт …]\n789" {
+	if got := big.String(); got != "01\n[… 5 bytes skipped …]\n789" {
 		t.Fatalf("%q", got)
 	}
 }
@@ -452,7 +452,7 @@ func TestOnboardKeyNeedsSudoPassword(t *testing.T) {
 	_, err := Onboard(context.Background(), OnboardParams{
 		Addr: ts.addr, User: "admin", LoginKey: ownerSigner, HostKey: ts.hostKey, Key: owner, SSHUser: "srvmon",
 	}, func(string, string) {})
-	if err == nil || !strings.Contains(err.Error(), "пароль sudo") {
+	if err == nil || !strings.Contains(err.Error(), "sudo password") {
 		t.Fatalf("want a sudo password error, got %v", err)
 	}
 }

@@ -11,6 +11,7 @@ import (
 
 	"github.com/askidmobile/srvmon/internal/alerts"
 	"github.com/askidmobile/srvmon/internal/auth"
+	"github.com/askidmobile/srvmon/internal/i18n"
 	"github.com/askidmobile/srvmon/internal/store"
 )
 
@@ -54,8 +55,8 @@ func (s *Server) authFailure(ctx context.Context, ip, stage string) {
 	// The failure that fills the limiter is reported once: further attempts
 	// are rejected before they get here.
 	if blocked, wait := s.limiter.Blocked(ip); blocked {
-		s.alerts.Event(ctx, store.KindBruteforce, 0, "", ip, fmt.Sprintf(
-			"подбор пароля к панели с %s: вход заблокирован на %s", ip, alerts.FormatDuration(wait)))
+		s.alerts.Event(ctx, store.KindBruteforce, 0, "", ip, i18n.T(
+			"panel password guessing from %s: sign-in blocked for %s", ip, alerts.FormatDuration(wait)))
 	}
 }
 
@@ -253,7 +254,33 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 		"authenticated": s.sessionValid(r),
 		"initialized":   initialized,
 		"version":       s.version,
+		// Public: the sign-in page is shown in this language too.
+		"lang": i18n.Current(),
 	})
+}
+
+// handleSetLang switches the interface language (panel, Telegram, alerts,
+// agent replies).
+func (s *Server) handleSetLang(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Lang string `json:"lang"`
+	}
+	if err := readJSON(r, &in); err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request")
+		return
+	}
+	l, ok := i18n.Parse(in.Lang)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "bad_lang")
+		return
+	}
+	if err := s.store.SetSetting(r.Context(), i18n.SettingKey, string(l)); err != nil {
+		s.internalError(w, "set lang", err)
+		return
+	}
+	i18n.Set(string(l))
+	_ = s.store.Audit(r.Context(), s.clientIP(r), "set_lang", string(l))
+	writeJSON(w, http.StatusOK, map[string]string{"lang": string(l)})
 }
 
 func (s *Server) sessionValid(r *http.Request) bool {
@@ -277,14 +304,14 @@ func (s *Server) requireSession(next http.Handler) http.Handler {
 
 // loginText describes a successful login for the login event.
 func loginText(ip, method, ua string) string {
-	via := "код из приложения"
+	via := i18n.T("app code")
 	if method != "totp" {
-		via = "резервный код"
+		via = i18n.T("recovery code")
 	}
 	if r := []rune(ua); len(r) > 80 {
 		ua = string(r[:80]) + "…"
 	}
-	text := fmt.Sprintf("вход в панель с %s (%s)", ip, via)
+	text := i18n.T("panel sign-in from %s (%s)", ip, via)
 	if ua != "" {
 		text += ", " + ua
 	}

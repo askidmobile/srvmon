@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/askidmobile/srvmon/internal/aiagent"
+	"github.com/askidmobile/srvmon/internal/i18n"
 	"github.com/askidmobile/srvmon/internal/store"
 )
 
@@ -149,7 +150,7 @@ type aiSettingsView struct {
 
 func keyHint(k string) string {
 	if len(k) < 12 {
-		return "задан"
+		return i18n.T("set")
 	}
 	return "…" + k[len(k)-4:]
 }
@@ -158,7 +159,7 @@ func (s *Server) aiSettingsView(ctx context.Context) aiSettingsView {
 	a, ok, err := s.loadAISettings(ctx)
 	v := aiSettingsView{aiSettings: a, Saved: ok, Keys: []string{}}
 	if err != nil {
-		v.Error = "настройки повреждены: сохраните их заново"
+		v.Error = i18n.T("the settings are damaged: save them again")
 	}
 	if st, err := s.ai.Status(ctx); err == nil {
 		v.Status = &st
@@ -167,7 +168,7 @@ func (s *Server) aiSettingsView(ctx context.Context) aiSettingsView {
 			v.Provider, v.Model = st.Provider, st.Model
 		}
 	} else {
-		v.Error = "srvmon-ai недоступен"
+		v.Error = i18n.T("srvmon-ai is unavailable")
 	}
 	if v.Thinking == "" {
 		v.Thinking = "low"
@@ -312,7 +313,7 @@ func (s *Server) handleAISaveSettings(w http.ResponseWriter, r *http.Request) {
 		if err := s.setAIKey(ctx, in.Provider, *in.APIKey); err != nil {
 			if errors.Is(err, errAINoSecrets) {
 				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "validation", "field": "api_key",
-					"message": "нет мастер-ключа: ключ API негде хранить"})
+					"message": i18n.T("no master key: nowhere to store the API key")})
 				return
 			}
 			s.internalError(w, "ai key", err)
@@ -328,12 +329,12 @@ func (s *Server) handleAISaveSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	detail := a.Provider + "/" + a.Model
 	if in.APIKey != nil {
-		detail += map[bool]string{true: ", ключ удалён", false: ", новый ключ"}[*in.APIKey == ""]
+		detail += map[bool]string{true: ", key deleted", false: ", new key"}[*in.APIKey == ""]
 	}
 	_ = s.store.Audit(ctx, s.clientIP(r), "ai_settings", detail)
 	v := s.aiSettingsView(ctx)
 	if st, err := s.pushAIConfig(ctx); err != nil {
-		v.Error = "настройки сохранены, но srvmon-ai их не принял: " + err.Error()
+		v.Error = i18n.T("the settings are saved, but srvmon-ai did not accept them: %s", err.Error())
 	} else {
 		v.Status = &st
 	}

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/askidmobile/srvmon/internal/i18n"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -118,10 +119,10 @@ func Onboard(ctx context.Context, p OnboardParams, log Logger) (Result, error) {
 		return res, fmt.Errorf("bad ssh user %q", p.SSHUser)
 	}
 	var auth []ssh.AuthMethod
-	how := "по паролю"
+	how := i18n.T("with a password")
 	if p.LoginKey != nil {
 		auth = []ssh.AuthMethod{ssh.PublicKeys(p.LoginKey)}
-		how = "по ключу " + ssh.FingerprintSHA256(p.LoginKey.PublicKey())
+		how = i18n.T("with key %s", ssh.FingerprintSHA256(p.LoginKey.PublicKey()))
 	} else {
 		auth = []ssh.AuthMethod{ssh.Password(p.Password),
 			ssh.KeyboardInteractive(func(_, _ string, questions []string, _ []bool) ([]string, error) {
@@ -132,22 +133,22 @@ func Onboard(ctx context.Context, p OnboardParams, log Logger) (Result, error) {
 				return ans, nil
 			})}
 	}
-	log(StepRun, fmt.Sprintf("ssh %s@%s — вход %s", p.User, p.Addr, how))
+	log(StepRun, i18n.T("ssh %s@%s — sign-in %s", p.User, p.Addr, how))
 	c, err := Dial(ctx, p.Addr, p.User, p.HostKey, auth...)
 	if err != nil {
 		if strings.Contains(err.Error(), "host key mismatch") {
-			return res, errors.New("host key не совпадает с подтверждённым: возможна подмена сервера")
+			return res, errors.New(i18n.T("the host key does not match the confirmed one: the server may be spoofed"))
 		}
 		if strings.Contains(err.Error(), "unable to authenticate") {
 			if p.LoginKey != nil {
-				return res, fmt.Errorf("сервер не принял ключ для %s: проверьте пользователя и что ключ есть в его ~/.ssh/authorized_keys", p.User)
+				return res, i18n.Errorf("the server did not accept the key for %s: check the user and that the key is in their ~/.ssh/authorized_keys", p.User)
 			}
-			return res, errors.New("неверный пользователь или пароль (или вход по паролю на сервере отключён: выберите вход по ключу)")
+			return res, errors.New(i18n.T("wrong user or password (or password sign-in is off on the server: sign in with a key)"))
 		}
-		return res, fmt.Errorf("подключение: %w", err)
+		return res, i18n.Errorf("connecting: %w", err)
 	}
 	defer c.Close()
-	log(StepOK, fmt.Sprintf("подключено, host key %s совпадает", ssh.FingerprintSHA256(p.HostKey)))
+	log(StepOK, i18n.T("connected, host key %s matches", ssh.FingerprintSHA256(p.HostKey)))
 
 	pr := &priv{c: c, password: p.Password}
 	uid, _, err := Run(ctx, c, "id -u", nil)
@@ -159,41 +160,41 @@ func Onboard(ctx context.Context, p OnboardParams, log Logger) (Result, error) {
 		if _, _, err := Run(ctx, c, "sudo -n true", nil); err == nil {
 			pr.nopass = true
 		} else if p.Password == "" {
-			return res, fmt.Errorf("у %s нет root, а sudo просит пароль: укажите пароль sudo или войдите как root", p.User)
+			return res, i18n.Errorf("%s is not root and sudo asks for a password: give the sudo password or sign in as root", p.User)
 		}
 		if _, _, err := pr.run(ctx, "true\n"); err != nil {
-			return res, fmt.Errorf("у %s нет root и sudo не сработал: нужен root или пользователь с sudo", p.User)
+			return res, i18n.Errorf("%s is not root and sudo failed: root or a user with sudo is needed", p.User)
 		}
-		log(StepOK, "права root через sudo")
+		log(StepOK, i18n.T("root rights via sudo"))
 	}
 
 	out, errOut, err := pr.run(ctx, userScript(p.SSHUser, p.Key.Public, p.Sudo))
 	if err != nil {
-		return res, fmt.Errorf("создание пользователя %s: %s", p.SSHUser, firstLine(errOut, err))
+		return res, i18n.Errorf("creating user %s: %s", p.SSHUser, firstLine(errOut, err))
 	}
-	groups := "без docker"
+	groups := i18n.T("no docker")
 	if strings.Contains(out, "docker-group") {
-		groups = "группа docker"
+		groups = i18n.T("docker group")
 	}
-	log(StepOK, fmt.Sprintf("пользователь %s (%s), authorized_keys ← %s", p.SSHUser, groups, p.Key.Fingerprint))
+	log(StepOK, i18n.T("user %s (%s), authorized_keys ← %s", p.SSHUser, groups, p.Key.Fingerprint))
 	if p.Sudo {
 		if strings.Contains(out, "sudo-ok") {
-			log(StepOK, "sudo без пароля для "+p.SSHUser)
+			log(StepOK, i18n.T("passwordless sudo for %s", p.SSHUser))
 		} else {
-			log(StepWarn, "sudo не настроен (нет sudo/visudo на сервере)")
+			log(StepWarn, i18n.T("sudo not set up (no sudo/visudo on the server)"))
 		}
 	}
 
 	kc, err := DialKey(ctx, p.Addr, p.SSHUser, p.HostKey, p.Key.Private)
 	if err != nil {
-		return res, fmt.Errorf("вход по ключу не прошёл: %w", err)
+		return res, i18n.Errorf("key sign-in failed: %w", err)
 	}
 	who, _, err := Run(ctx, kc, "id -un", nil)
 	kc.Close()
 	if err != nil || strings.TrimSpace(who) != p.SSHUser {
-		return res, fmt.Errorf("вход по ключу: неожиданный ответ %q %v", strings.TrimSpace(who), err)
+		return res, i18n.Errorf("key sign-in: unexpected answer %q %v", strings.TrimSpace(who), err)
 	}
-	log(StepOK, "проверка входа по ключу — ok")
+	log(StepOK, i18n.T("key sign-in check: ok"))
 
 	if p.Commit != nil {
 		if err := p.Commit(ctx); err != nil {
@@ -209,21 +210,21 @@ func Onboard(ctx context.Context, p OnboardParams, log Logger) (Result, error) {
 	if p.DropLoginKey && p.User != p.SSHUser {
 		// Runs as the login user: only their own authorized_keys changes.
 		if _, errOut, err := Run(ctx, c, dropKeyScript(p.Key.Public), nil); err != nil {
-			log(StepWarn, "ключ панели не удалён из authorized_keys "+p.User+": "+firstLine(errOut, err))
+			log(StepWarn, i18n.T("the panel key was not removed from authorized_keys of %s: %s", p.User, firstLine(errOut, err)))
 		} else {
-			log(StepOK, "ключ панели убран из authorized_keys "+p.User+", остался только у "+p.SSHUser)
+			log(StepOK, i18n.T("the panel key is removed from authorized_keys of %s, only %s keeps it", p.User, p.SSHUser))
 		}
 	}
 
 	if a := p.Agent; a != nil {
 		dockerOK := true
 		if _, _, err := Run(ctx, c, "command -v docker", nil); err != nil {
-			log(StepRun, "docker не найден — ставлю (get.docker.com, 1–3 мин)")
+			log(StepRun, i18n.T("docker not found: installing it (get.docker.com, 1–3 min)"))
 			if _, errOut, err := pr.run(ctx, dockerScript(p.SSHUser)); err != nil {
 				dockerOK = false
-				log(StepWarn, "docker не установлен: "+firstLine(errOut, err)+"; агент не запущен")
+				log(StepWarn, i18n.T("docker is not installed: %s; the agent is not started", firstLine(errOut, err)))
 			} else {
-				log(StepOK, "docker установлен, "+p.SSHUser+" в группе docker")
+				log(StepOK, i18n.T("docker installed, %s is in the docker group", p.SSHUser))
 			}
 		}
 		if dockerOK {
@@ -232,11 +233,11 @@ func Onboard(ctx context.Context, p OnboardParams, log Logger) (Result, error) {
 			switch {
 			case err == nil:
 				res.AgentInstalled = true
-				log(StepOK, "srvmon-agent запущен")
+				log(StepOK, i18n.T("srvmon-agent started"))
 			case strings.Contains(errOut, "no-docker"):
-				log(StepWarn, "docker не установлен: агент не запущен, поставьте docker и переустановите агента")
+				log(StepWarn, i18n.T("docker is not installed: the agent is not started, install docker and reinstall the agent"))
 			default:
-				log(StepWarn, "агент не запущен: "+firstLine(errOut, err))
+				log(StepWarn, i18n.T("the agent is not started: %s", firstLine(errOut, err)))
 			}
 		}
 	}
@@ -244,7 +245,7 @@ func Onboard(ctx context.Context, p OnboardParams, log Logger) (Result, error) {
 	if p.DisablePassword {
 		_, errOut, err := pr.run(ctx, disablePasswordScript)
 		if err != nil {
-			log(StepWarn, "PasswordAuthentication не изменён: "+firstLine(errOut, err))
+			log(StepWarn, i18n.T("PasswordAuthentication not changed: %s", firstLine(errOut, err)))
 		} else {
 			res.PasswordDisabled = true
 			log(StepOK, "sshd: PasswordAuthentication no · reload")
@@ -336,18 +337,18 @@ if command -v apk >/dev/null 2>&1; then
   apk add --no-cache docker >"$L" 2>&1
   rc-update add docker default >/dev/null 2>&1 || true
 elif command -v curl >/dev/null 2>&1; then
-  curl -fsSL https://get.docker.com | sh >"$L" 2>&1 || { echo "get.docker.com: ошибка, лог $L" >&2; exit 5; }
+  curl -fsSL https://get.docker.com | sh >"$L" 2>&1 || { echo "get.docker.com: failed, log $L" >&2; exit 5; }
 elif command -v wget >/dev/null 2>&1; then
-  wget -qO- https://get.docker.com | sh >"$L" 2>&1 || { echo "get.docker.com: ошибка, лог $L" >&2; exit 5; }
+  wget -qO- https://get.docker.com | sh >"$L" 2>&1 || { echo "get.docker.com: failed, log $L" >&2; exit 5; }
 else
-  echo "нет curl и wget для get.docker.com" >&2; exit 5
+  echo "no curl or wget for get.docker.com" >&2; exit 5
 fi
-command -v docker >/dev/null 2>&1 || { echo "docker не появился после установки, лог $L" >&2; exit 5; }
+command -v docker >/dev/null 2>&1 || { echo "docker is missing after the install, log $L" >&2; exit 5; }
 if command -v systemctl >/dev/null 2>&1; then systemctl enable --now docker >/dev/null 2>&1 || true
 else service docker start >/dev/null 2>&1 || true; fi
 i=0
 until docker info >/dev/null 2>&1; do
-  i=$((i+1)); [ "$i" -le 30 ] || { echo "dockerd не запустился за 30 с" >&2; exit 5; }
+  i=$((i+1)); [ "$i" -le 30 ] || { echo "dockerd did not start in 30 s" >&2; exit 5; }
   sleep 1
 done
 if command -v usermod >/dev/null 2>&1; then usermod -aG docker "$U"; else addgroup "$U" docker; fi
@@ -370,7 +371,7 @@ if [ -n "$RU" ]; then printf '%s' "$RT" | docker login "$REG" -u "$RU" --passwor
 pulled=0
 docker pull -q "$IMG" >/dev/null 2>&1 && pulled=1
 if [ -n "$RU" ]; then docker logout "$REG" >/dev/null 2>&1 || true; fi
-[ "$pulled" = 1 ] || { rm -f /etc/srvmon/agent.token.new; echo "docker pull $IMG не удался (приватный образ? нужен доступ к реестру)" >&2; exit 4; }
+[ "$pulled" = 1 ] || { rm -f /etc/srvmon/agent.token.new; echo "docker pull $IMG failed (a private image? registry access is needed)" >&2; exit 4; }
 docker rm -f srvmon-agent >/dev/null 2>&1 || true
 mv -f /etc/srvmon/agent.token.new /etc/srvmon/agent.token
 docker run -d --name srvmon-agent --restart unless-stopped \

@@ -1,10 +1,13 @@
 package aiagent
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/askidmobile/srvmon/internal/i18n"
 )
 
 // Schedule is a parsed task schedule: a 5-field cron expression
@@ -43,13 +46,13 @@ func ParseSchedule(expr string) (*Schedule, error) {
 			return nil, fmt.Errorf("@every: %w", err)
 		}
 		if d < MinEvery {
-			return nil, fmt.Errorf("@every: не чаще раза в %s", MinEvery)
+			return nil, i18n.Errorf("@every: at most once every %s", MinEvery)
 		}
 		return &Schedule{every: d}, nil
 	}
 	f := strings.Fields(expr)
 	if len(f) != 5 {
-		return nil, fmt.Errorf("ожидается 5 полей cron (мин час день месяц день_недели) или @every 15m")
+		return nil, errors.New(i18n.T("5 cron fields expected (min hour day month weekday) or @every 15m"))
 	}
 	s := &Schedule{domAny: f[2] == "*", dowAny: f[4] == "*"}
 	steps := []struct {
@@ -58,11 +61,11 @@ func ParseSchedule(expr string) (*Schedule, error) {
 		set    func(int)
 		name   string
 	}{
-		{f[0], 0, 59, func(i int) { s.min[i] = true }, "минуты"},
-		{f[1], 0, 23, func(i int) { s.hour[i] = true }, "часы"},
-		{f[2], 1, 31, func(i int) { s.dom[i] = true }, "день месяца"},
-		{f[3], 1, 12, func(i int) { s.month[i] = true }, "месяц"},
-		{f[4], 0, 7, func(i int) { s.dow[i%7] = true }, "день недели"},
+		{f[0], 0, 59, func(i int) { s.min[i] = true }, i18n.T("minutes")},
+		{f[1], 0, 23, func(i int) { s.hour[i] = true }, i18n.T("hours")},
+		{f[2], 1, 31, func(i int) { s.dom[i] = true }, i18n.T("day of month")},
+		{f[3], 1, 12, func(i int) { s.month[i] = true }, i18n.T("month")},
+		{f[4], 0, 7, func(i int) { s.dow[i%7] = true }, i18n.T("weekday")},
 	}
 	for _, st := range steps {
 		if err := parseField(st.field, st.lo, st.hi, st.set); err != nil {
@@ -84,12 +87,12 @@ func ParseSchedule(expr string) (*Schedule, error) {
 			gap += 60
 		}
 		if gap < 5 {
-			return nil, fmt.Errorf("минуты: не чаще раза в 5 минут")
+			return nil, errors.New(i18n.T("minutes: at most once every 5 minutes"))
 		}
 	}
 	// e.g. "0 0 31 2 *": valid fields, but the date never comes.
 	if s.Next(time.Now()).IsZero() {
-		return nil, fmt.Errorf("расписание никогда не срабатывает")
+		return nil, errors.New(i18n.T("the schedule never fires"))
 	}
 	return s, nil
 }
@@ -100,7 +103,7 @@ func parseField(field string, lo, hi int, set func(int)) error {
 		if base, s, ok := strings.Cut(part, "/"); ok {
 			n, err := strconv.Atoi(s)
 			if err != nil || n <= 0 {
-				return fmt.Errorf("шаг %q", s)
+				return i18n.Errorf("step %q", s)
 			}
 			step, part = n, base
 		}
@@ -112,13 +115,13 @@ func parseField(field string, lo, hi int, set func(int)) error {
 			x, err1 := strconv.Atoi(a)
 			y, err2 := strconv.Atoi(b)
 			if err1 != nil || err2 != nil || x > y {
-				return fmt.Errorf("диапазон %q", part)
+				return i18n.Errorf("range %q", part)
 			}
 			from, to = x, y
 		default:
 			x, err := strconv.Atoi(part)
 			if err != nil {
-				return fmt.Errorf("значение %q", part)
+				return i18n.Errorf("value %q", part)
 			}
 			from, to = x, x
 			if step > 1 {
@@ -126,7 +129,7 @@ func parseField(field string, lo, hi int, set func(int)) error {
 			}
 		}
 		if from < lo || to > hi {
-			return fmt.Errorf("%d-%d вне %d-%d", from, to, lo, hi)
+			return i18n.Errorf("%d-%d outside %d-%d", from, to, lo, hi)
 		}
 		for i := from; i <= to; i += step {
 			set(i)

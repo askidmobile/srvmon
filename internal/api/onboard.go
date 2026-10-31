@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/askidmobile/srvmon/internal/auth"
+	"github.com/askidmobile/srvmon/internal/i18n"
 	"github.com/askidmobile/srvmon/internal/sshgw"
 	"github.com/askidmobile/srvmon/internal/store"
 	"golang.org/x/crypto/ssh"
@@ -385,7 +386,7 @@ func (s *Server) runOnboard(ctx context.Context, j *job, req onboardReq, login l
 		j.log(sshgw.StepFail, text)
 		if created {
 			if err := s.store.DeleteServer(bg, id); err == nil {
-				j.log(sshgw.StepInfo, "карточка сервера удалена (откат)")
+				j.log(sshgw.StepInfo, i18n.T("server card deleted (rollback)"))
 			}
 		}
 		_ = s.store.Audit(bg, ip, "server_onboard_failed", req.Card.Name)
@@ -394,22 +395,22 @@ func (s *Server) runOnboard(ctx context.Context, j *job, req onboardReq, login l
 	defer func() {
 		if p := recover(); p != nil {
 			s.log.Error("onboard panic", "panic", p)
-			fail("внутренняя ошибка")
+			fail(i18n.T("internal error"))
 		}
 	}()
 
 	var key sshgw.KeyPair
 	if login.panelKey != nil {
 		key = *login.panelKey
-		j.log(sshgw.StepOK, "ключ панели: "+key.Fingerprint)
+		j.log(sshgw.StepOK, i18n.T("panel key: %s", key.Fingerprint))
 	} else {
 		var err error
 		key, err = sshgw.GenerateKey("srvmon@" + s.cfg.SelfName)
 		if err != nil {
-			fail("генерация ключа: " + err.Error())
+			fail(i18n.T("key generation: %s", err.Error()))
 			return
 		}
-		j.log(sshgw.StepOK, "ключ ed25519 сгенерирован: "+key.Fingerprint)
+		j.log(sshgw.StepOK, i18n.T("ed25519 key generated: %s", key.Fingerprint))
 	}
 
 	params := sshgw.OnboardParams{
@@ -437,12 +438,12 @@ func (s *Server) runOnboard(ctx context.Context, j *job, req onboardReq, login l
 		j.mu.Unlock()
 		sealed, err := s.secrets.Seal(key.Private, keyAAD(id))
 		if err != nil {
-			return fmt.Errorf("шифрование ключа: %w", err)
+			return i18n.Errorf("key encryption: %w", err)
 		}
 		if err := s.store.SetServerSSH(bg, id, req.Card.Host, req.Card.Port, sshUser, sshgw.FormatHostKey(hostKey), sealed); err != nil {
-			return fmt.Errorf("сохранение ключа: %w", err)
+			return i18n.Errorf("saving the key: %w", err)
 		}
-		j.log(sshgw.StepOK, "приватный ключ сохранён зашифрованным (XChaCha20-Poly1305); установка зафиксирована, отмена больше не откатывает")
+		j.log(sshgw.StepOK, i18n.T("private key saved encrypted (XChaCha20-Poly1305); the setup is committed, cancel no longer rolls back"))
 		if req.SetupKey != "" {
 			s.setupKeys.drop(req.SetupKey)
 		}
@@ -454,12 +455,12 @@ func (s *Server) runOnboard(ctx context.Context, j *job, req onboardReq, login l
 	if req.InstallAgent {
 		token, err := auth.NewToken("a_")
 		if err != nil {
-			fail("токен агента: " + err.Error())
+			fail(i18n.T("agent token: %s", err.Error()))
 			return
 		}
 		tokenHash = auth.HashToken(token)
 		if err := s.store.AddAgentToken(bg, id, tokenHash); err != nil {
-			fail("токен агента: " + err.Error())
+			fail(i18n.T("agent token: %s", err.Error()))
 			return
 		}
 		params.Agent = &sshgw.AgentInstall{
@@ -476,7 +477,7 @@ func (s *Server) runOnboard(ctx context.Context, j *job, req onboardReq, login l
 			_ = s.store.RevokeAgentToken(bg, tokenHash)
 		}
 		if ctx.Err() != nil {
-			fail("отменено или истекло время; на сервере мог остаться пользователь " + sshUser)
+			fail(i18n.T("cancelled or timed out; user %s may be left on the server", sshUser))
 		} else {
 			fail(err.Error())
 		}
@@ -492,17 +493,17 @@ func (s *Server) runOnboard(ctx context.Context, j *job, req onboardReq, login l
 				// The new agent replaced the old container.
 				_ = s.store.RevokeOtherAgentTokens(bg, id, tokenHash)
 			}
-			j.log(sshgw.StepRun, "ждём первый heartbeat агента")
+			j.log(sshgw.StepRun, i18n.T("waiting for the first agent heartbeat"))
 			if s.waitHeartbeat(context.Background(), tokenHash) {
-				j.log(sshgw.StepOK, "агент на связи")
+				j.log(sshgw.StepOK, i18n.T("the agent is online"))
 			} else {
-				j.log(sshgw.StepWarn, "агент пока не прислал метрики: проверьте `docker logs srvmon-agent` на сервере")
+				j.log(sshgw.StepWarn, i18n.T("the agent has not sent metrics yet: check `docker logs srvmon-agent` on the server"))
 			}
 		}
 	}
 	_ = s.store.Audit(bg, ip, "server_onboard", req.Card.Name)
 	s.log.Info("server onboarded", "server", req.Card.Name, "agent", res.AgentInstalled, "password_disabled", res.PasswordDisabled)
-	j.log(sshgw.StepOK, "готово")
+	j.log(sshgw.StepOK, i18n.T("done"))
 	j.finish(true)
 }
 

@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Panel } from "@/components/ui/panel";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { api, type AlertSummary, type ServerView } from "@/lib/api";
+import { locale, t } from "@/lib/i18n";
 import { href, navigate, type Route } from "@/lib/router";
 import { cn, formatBytes, formatUptime } from "@/lib/utils";
 
@@ -71,11 +72,11 @@ function Row({ s, onDelete }: { s: ServerView; onDelete: (s: ServerView) => void
         )}
       </td>
       <td className="pr-4 whitespace-nowrap text-muted-foreground">
-        {r ? `${formatUptime(r.host.uptime_sec)} · ${formatBytes(r.host.mem_total)}` : "нет данных"}
+        {r ? `${formatUptime(r.host.uptime_sec)} · ${formatBytes(r.host.mem_total)}` : t("no data")}
       </td>
       <td className="whitespace-nowrap text-muted-foreground">
         {s.cost != null ? `${s.cost} ${s.currency}` : "—"}
-        {s.next_payment && <div className="text-xs">до {s.next_payment}</div>}
+        {s.next_payment && <div className="text-xs">{t("due {date}", { date: s.next_payment })}</div>}
       </td>
       <td
         className="whitespace-nowrap pl-2 text-right"
@@ -84,18 +85,18 @@ function Row({ s, onDelete }: { s: ServerView; onDelete: (s: ServerView) => void
       >
         {s.has_ssh ? (
           <Button size="sm" variant="outline" asChild>
-            <a href={href.terminal(s.id)} title="терминал">
+            <a href={href.terminal(s.id)} title={t("terminal")}>
               &gt;_
             </a>
           </Button>
         ) : (
           <Button size="sm" variant="ghost" asChild>
-            <a href={href.add(s.id)} title="подключить ssh-доступ">
+            <a href={href.add(s.id)} title={t("connect ssh access")}>
               + ssh
             </a>
           </Button>
         )}
-        <Button size="sm" variant="ghost" className="hover:text-crit" title="удалить" onClick={() => onDelete(s)}>
+        <Button size="sm" variant="ghost" className="hover:text-crit" title={t("delete")} onClick={() => onDelete(s)}>
           ×
         </Button>
       </td>
@@ -122,18 +123,18 @@ function AlertsPanel() {
   if (!sum) return null;
   const sev = { crit: "text-crit", warn: "text-warn", info: "text-tx" } as const;
   return (
-    <Panel title="алерты" right={`${sum.open} активных · ${sum.last24h} за 24ч`}>
+    <Panel title={t("alerts")} right={t("{open} active · {day} in 24h", { open: sum.open, day: sum.last24h })}>
       {sum.latest.length === 0 ? (
-        <div className="text-primary">✓ активных алертов нет</div>
+        <div className="text-primary">✓ {t("no active alerts")}</div>
       ) : (
         <div className="flex flex-col gap-0.5">
           {sum.latest.map((a) => (
             <div key={a.id} className="truncate">
               <span className="text-muted-foreground">
-                {new Date(a.started_at).toLocaleTimeString("ru", { hour: "2-digit", minute: "2-digit" })}
+                {new Date(a.started_at).toLocaleTimeString(locale(), { hour: "2-digit", minute: "2-digit" })}
               </span>{" "}
               <span className={sev[a.severity]}>{a.severity.toUpperCase()}</span>{" "}
-              <span className="text-hi">{a.server_name || "панель"}</span> — {a.message}
+              <span className="text-hi">{a.server_name || t("panel")}</span> — {a.message}
               {a.state === "acked" && <span className="text-primary"> ✓</span>}
               {a.notified && <span className="text-muted-foreground"> → tg</span>}
             </div>
@@ -142,7 +143,7 @@ function AlertsPanel() {
       )}
       <div className="mt-2.5">
         <Button size="sm" variant="outline" asChild>
-          <a href={href.alerts()}>все алерты и правила →</a>
+          <a href={href.alerts()}>{t("all alerts and rules")} →</a>
         </Button>
       </div>
     </Panel>
@@ -152,12 +153,12 @@ function AlertsPanel() {
 export function Overview({ route, version, onLogout }: { route: Route; version: string; onLogout: () => void }) {
   const [servers, setServers] = useState<ServerView[] | null>(null);
   const [error, setError] = useState("");
-  const [group, setGroup] = useState("все");
+  const [group, setGroup] = useState(""); // "" = all
 
   const [reload, setReload] = useState(0);
   const remove = async (s: ServerView) => {
-    if (!confirm(`Удалить ${s.name} из панели? Ключ и токен агента будут отозваны, сам сервер не трогаем.`)) return;
-    await api.deleteServer(s.id).catch(() => setError("не удалось удалить"));
+    if (!confirm(t("Remove {name} from the panel? Its key and agent token are revoked; the server itself is not touched.", { name: s.name }))) return;
+    await api.deleteServer(s.id).catch(() => setError(t("could not delete")));
     setReload((n) => n + 1);
   };
 
@@ -170,18 +171,18 @@ export function Overview({ route, version, onLogout }: { route: Route; version: 
         .catch((e) => {
           if (!alive) return;
           if (e?.status === 401) onLogout();
-          else setError("нет связи с сервером");
+          else setError(t("no connection to the server"));
         });
     load();
-    const t = setInterval(load, 5000);
+    const timer = setInterval(load, 5000);
     return () => {
       alive = false;
-      clearInterval(t);
+      clearInterval(timer);
     };
   }, [onLogout, reload]);
 
-  const groups = useMemo(() => ["все", ...new Set((servers ?? []).map((s) => s.group).filter(Boolean))], [servers]);
-  const visible = (servers ?? []).filter((s) => group === "все" || s.group === group);
+  const groups = useMemo(() => ["", ...new Set((servers ?? []).map((s) => s.group).filter(Boolean))], [servers]);
+  const visible = (servers ?? []).filter((s) => !group || s.group === group);
   const online = (servers ?? []).filter((s) => s.online).length;
 
   return (
@@ -197,50 +198,50 @@ export function Overview({ route, version, onLogout }: { route: Route; version: 
             {servers?.length ?? 0} up
           </span>
           <Button size="sm" asChild>
-            <a href={href.add()}>+ сервер</a>
+            <a href={href.add()}>+ {t("server")}</a>
           </Button>
         </>
       }
       footer={
         <>
-          <Hotkey k="↑↓">выбор</Hotkey>
-          <Hotkey k="enter">экран сервера</Hotkey>
-          <Hotkey k="3">терминал</Hotkey>
-          <Hotkey k="5">алерты</Hotkey>
+          <Hotkey k="↑↓">{t("select")}</Hotkey>
+          <Hotkey k="enter">{t("server screen")}</Hotkey>
+          <Hotkey k="3">{t("terminal")}</Hotkey>
+          <Hotkey k="5">{t("alerts")}</Hotkey>
         </>
       }
-      footerNote="обновление 5с"
+      footerNote={t("refresh 5s")}
     >
-      <nav className="flex flex-wrap gap-2" aria-label="группы">
+      <nav className="flex flex-wrap gap-2" aria-label={t("groups")}>
         {groups.map((g) => (
           <Button key={g} size="sm" variant={g === group ? "default" : "outline"} onClick={() => setGroup(g)}>
-            {g}
+            {g || t("all")}
           </Button>
         ))}
       </nav>
 
-      <Panel title="серверы" right="обновление 5с">
+      <Panel title={t("servers")} right={t("refresh 5s")}>
         {servers && servers.length === 0 ? (
           <div className="py-6 text-muted-foreground">
-            серверов пока нет.{" "}
+            {t("No servers yet.")}{" "}
             <a className="text-primary" href={href.add()}>
-              Добавьте первый
+              {t("Add the first one")}
             </a>
-            : мастер сгенерирует ssh-ключ, пропишет его по паролю и поставит агента.
+            {t(": the wizard generates an ssh key, installs it with the password and sets up the agent.")}
           </div>
         ) : (
           <ScrollArea className="w-full">
             <table className="w-full min-w-[1000px] border-collapse text-left">
               <thead className="text-xs text-muted-foreground">
                 <tr>
-                  <th className="pb-2 font-normal">сервер</th>
-                  <th className="pb-2 font-normal">группа</th>
+                  <th className="pb-2 font-normal">{t("server")}</th>
+                  <th className="pb-2 font-normal">{t("group")}</th>
                   <th className="pb-2 font-normal">cpu</th>
                   <th className="pb-2 font-normal">ram</th>
-                  <th className="pb-2 font-normal">диск</th>
+                  <th className="pb-2 font-normal">{t("disk")}</th>
                   <th className="pb-2 font-normal">docker</th>
                   <th className="pb-2 font-normal">uptime · ram</th>
-                  <th className="pb-2 font-normal">оплата</th>
+                  <th className="pb-2 font-normal">{t("payment")}</th>
                   <th className="pb-2 font-normal" />
                 </tr>
               </thead>

@@ -16,6 +16,7 @@ import {
   type Rule,
   type Severity,
 } from "@/lib/api";
+import { t } from "@/lib/i18n";
 import { href, type Route } from "@/lib/router";
 import { cn } from "@/lib/utils";
 
@@ -27,25 +28,31 @@ const cellField =
 // How each rule kind reads in the table and which fields it has.
 // dur: "for" — the condition must hold this long; "window" — counting
 // window; "silent" — how long the agent is quiet; null — no duration.
+// name, label and unit are English source strings, shown through t().
 const KINDS: Record<
   string,
-  { name: string; label: (t: number) => string; unit?: string; dur: "for" | "window" | "silent" | null }
+  { name: string; label: (v: number) => string; unit?: string; dur: "for" | "window" | "silent" | null }
 > = {
-  agent_silent: { name: "агент молчит", label: () => "агент молчит", dur: "silent" },
-  cpu: { name: "cpu >", label: (t) => `cpu > ${t}%`, unit: "%", dur: "for" },
-  mem: { name: "mem >", label: (t) => `mem > ${t}%`, unit: "%", dur: "for" },
-  disk: { name: "disk >", label: (t) => `disk > ${t}%`, unit: "%", dur: "for" },
-  container_down: { name: "контейнер упал / unhealthy", label: () => "контейнер упал / unhealthy", dur: "for" },
+  agent_silent: { name: "agent silent", label: () => t("agent silent"), dur: "silent" },
+  cpu: { name: "cpu >", label: (v) => `cpu > ${v}%`, unit: "%", dur: "for" },
+  mem: { name: "mem >", label: (v) => `mem > ${v}%`, unit: "%", dur: "for" },
+  disk: { name: "disk >", label: (v) => `disk > ${v}%`, unit: "%", dur: "for" },
+  container_down: { name: "container down / unhealthy", label: () => t("container down / unhealthy"), dur: "for" },
   container_restarts: {
-    name: "рестартов контейнера >",
-    label: (t) => `рестартов контейнера > ${t}`,
-    unit: "раз",
+    name: "container restarts >",
+    label: (v) => `${t("container restarts >")} ${v}`,
+    unit: "times",
     dur: "window",
   },
-  payment_due: { name: "оплата сервера через ≤", label: (t) => `оплата сервера через ≤ ${t} дн.`, unit: "дн.", dur: null },
-  fail2ban: { name: "бан fail2ban", label: () => "бан fail2ban на сервере мониторинга", dur: null },
-  bruteforce: { name: "подбор пароля к панели", label: () => "подбор пароля к панели", dur: null },
-  login: { name: "вход в панель", label: () => "вход в панель", dur: null },
+  payment_due: {
+    name: "server payment due in ≤",
+    label: (v) => t("server payment due in ≤ {n} days", { n: v }),
+    unit: "days",
+    dur: null,
+  },
+  fail2ban: { name: "fail2ban ban", label: () => t("fail2ban ban on the monitoring server"), dur: null },
+  bruteforce: { name: "panel password guessing", label: () => t("panel password guessing"), dur: null },
+  login: { name: "panel sign-in", label: () => t("panel sign-in"), dur: null },
 };
 
 const NEW_DEFAULTS: Record<string, Pick<Rule, "threshold" | "duration_sec">> = {
@@ -63,34 +70,40 @@ const NEW_DEFAULTS: Record<string, Pick<Rule, "threshold" | "duration_sec">> = {
 
 const sevCls: Record<Severity, string> = { crit: "text-crit", warn: "text-warn", info: "text-tx" };
 
-// 300 → "5м", 5400 → "1ч30м". Display keeps two units; full keeps all
+// 300 → "5m", 5400 → "1h30m" (units in the interface language). Display keeps two units; full keeps all
 // (for the editor, so saving does not shorten the value).
 export function fmtDuration(sec: number, full = false): string {
   if (sec <= 0) return "─";
   const parts: string[] = [];
   for (const [n, u] of [
-    [86400, "д"],
-    [3600, "ч"],
-    [60, "м"],
-    [1, "с"],
+    [86400, "{n}d"],
+    [3600, "{n}h"],
+    [60, "{n}m"],
+    [1, "{n}s"],
   ] as const) {
     if (sec >= n) {
-      parts.push(`${Math.floor(sec / n)}${u}`);
+      parts.push(t(u, { n: Math.floor(sec / n) }));
       sec %= n;
     }
   }
   return (full ? parts : parts.slice(0, 2)).join("");
 }
 
-// "1ч30м", "90s", "5m", "10" (minutes) → seconds; null when unreadable.
+// "1h30m", "1ч30м", "90s", "5m", "10" (minutes) → seconds; null when unreadable.
+// Accepts the units of every interface language.
 export function parseDuration(s: string): number | null {
   const t = s.trim().toLowerCase().replace(/\s+/g, "");
   if (t === "" || t === "─" || t === "-" || t === "0") return 0;
   if (/^\d+$/.test(t)) return Number(t) * 60;
-  const mult: Record<string, number> = { д: 86400, d: 86400, ч: 3600, h: 3600, м: 60, m: 60, с: 1, s: 1 };
+  const mult: Record<string, number> = {
+    д: 86400, d: 86400, 天: 86400,
+    ч: 3600, h: 3600, 小时: 3600, 时: 3600,
+    м: 60, m: 60, 分: 60,
+    с: 1, s: 1, 秒: 1,
+  };
   let total = 0;
   let rest = t;
-  const re = /^(\d+)(д|d|ч|h|м|m|с|s)/;
+  const re = /^(\d+)(д|d|天|ч|h|小时|时|м|m|分|с|s|秒)/;
   while (rest) {
     const m = re.exec(rest);
     if (!m) return null;
@@ -134,7 +147,7 @@ function AlertRow({ a, onChange }: { a: Alert; onChange: () => void }) {
             {a.server_name}
           </a>
         ) : (
-          <span className="text-hi">{a.server_name || "панель"}</span>
+          <span className="text-hi">{a.server_name || t("panel")}</span>
         )}
       </td>
       <td className="pr-3">
@@ -154,10 +167,10 @@ function AlertRow({ a, onChange }: { a: Alert; onChange: () => void }) {
           size="sm"
           variant="ghost"
           disabled={busy}
-          title="не присылать уведомления по этому алерту час"
+          title={t("no notifications for this alert for an hour")}
           onClick={() => act(() => api.silenceAlert(a.id, 60))}
         >
-          тишина 1ч
+          {t("mute 1h")}
         </Button>
       </td>
     </tr>
@@ -167,7 +180,7 @@ function AlertRow({ a, onChange }: { a: Alert; onChange: () => void }) {
 function stateText(a: Alert): ReactNode {
   switch (a.state) {
     case "event":
-      return <span className="text-muted-foreground">событие</span>;
+      return <span className="text-muted-foreground">{t("event")}</span>;
     case "resolved": {
       const d = a.resolved_at ? (Date.parse(a.resolved_at) - Date.parse(a.started_at)) / 1000 : 0;
       return <span className="text-primary">resolved {d > 0 ? fmtDuration(Math.round(d)) : ""}</span>;
@@ -205,12 +218,12 @@ function RuleEditor({
   const save = async () => {
     const duration = k.dur ? parseDuration(dur) : 0;
     if (duration === null) {
-      setErr("длительность: например 5м, 1ч, 30с");
+      setErr(t("duration: for example 5m, 1h, 30s"));
       return;
     }
     const threshold = k.unit ? Number(thr.replace(",", ".")) : 0;
     if (!Number.isFinite(threshold)) {
-      setErr("порог — число");
+      setErr(t("the threshold must be a number"));
       return;
     }
     const next = { ...r, threshold, duration_sec: duration };
@@ -219,7 +232,7 @@ function RuleEditor({
       else await api.updateRule(next);
       onDone(true);
     } catch (e) {
-      setErr(errorMessage(e, "не сохранилось"));
+      setErr(errorMessage(e, t("not saved")));
     }
   };
 
@@ -234,15 +247,15 @@ function RuleEditor({
         <td className="pr-2">
           <div className="flex flex-wrap items-center gap-1.5">
             {isNew ? (
-              <select className={cellField} value={r.kind} onChange={(e) => changeKind(e.target.value)} aria-label="тип">
+              <select className={cellField} value={r.kind} onChange={(e) => changeKind(e.target.value)} aria-label={t("type")}>
                 {Object.entries(KINDS).map(([kind, m]) => (
                   <option key={kind} value={kind}>
-                    {m.name}
+                    {t(m.name)}
                   </option>
                 ))}
               </select>
             ) : (
-              <span>{k.name}</span>
+              <span>{t(k.name)}</span>
             )}
             {k.unit && (
               <>
@@ -251,9 +264,9 @@ function RuleEditor({
                   inputMode="decimal"
                   value={thr}
                   onChange={(e) => setThr(e.target.value)}
-                  aria-label="порог"
+                  aria-label={t("threshold")}
                 />
-                <span className="text-xs text-muted-foreground">{k.unit}</span>
+                <span className="text-xs text-muted-foreground">{t(k.unit)}</span>
               </>
             )}
           </div>
@@ -263,9 +276,9 @@ function RuleEditor({
             <input
               className={cn(cellField, "w-20")}
               value={dur}
-              placeholder={k.dur === "for" ? "сразу" : "5м"}
+              placeholder={k.dur === "for" ? t("at once") : t("{n}m", { n: 5 })}
               onChange={(e) => setDur(e.target.value)}
-              aria-label="длительность"
+              aria-label={t("duration")}
             />
           ) : (
             "─"
@@ -276,7 +289,7 @@ function RuleEditor({
             className={cn(cellField, sevCls[r.severity])}
             value={r.severity}
             onChange={(e) => setR({ ...r, severity: e.target.value as Severity })}
-            aria-label="уровень"
+            aria-label={t("level")}
           >
             <option value="crit">crit</option>
             <option value="warn">warn</option>
@@ -288,7 +301,7 @@ function RuleEditor({
             className={cellField}
             value={r.channel}
             onChange={(e) => setR({ ...r, channel: e.target.value as Channel })}
-            aria-label="канал"
+            aria-label={t("channel")}
           >
             <option value="tg">tg</option>
             <option value="web">web</option>
@@ -296,10 +309,10 @@ function RuleEditor({
         </td>
         <td className="whitespace-nowrap text-right">
           <Button size="sm" onClick={save}>
-            ок
+            {t("ok")}
           </Button>{" "}
           <Button size="sm" variant="ghost" onClick={() => onDone(false)}>
-            отмена
+            {t("cancel")}
           </Button>
         </td>
       </tr>
@@ -324,7 +337,7 @@ function RulesPanel() {
     api
       .rules()
       .then(setRules)
-      .catch(() => setErr("не удалось загрузить правила"));
+      .catch(() => setErr(t("could not load the rules")));
   }, []);
   useEffect(load, [load]);
 
@@ -333,12 +346,12 @@ function RulesPanel() {
       await api.updateRule({ ...r, enabled: !r.enabled });
       load();
     } catch (e) {
-      setErr(errorMessage(e, "не сохранилось"));
+      setErr(errorMessage(e, t("not saved")));
     }
   };
   const remove = async (r: Rule) => {
-    if (!confirm(`Удалить правило «${KINDS[r.kind]?.label(r.threshold) ?? r.kind}»?`)) return;
-    await api.deleteRule(r.id).catch(() => setErr("не удалось удалить"));
+    if (!confirm(t("Delete the rule “{rule}”?", { rule: KINDS[r.kind]?.label(r.threshold) ?? r.kind }))) return;
+    await api.deleteRule(r.id).catch(() => setErr(t("could not delete")));
     load();
   };
   const done = (changed: boolean) => {
@@ -347,16 +360,16 @@ function RulesPanel() {
   };
 
   return (
-    <Panel title="правила алертов" right="проверка каждые 15с">
+    <Panel title={t("alert rules")} right={t("checked every 15s")}>
       <ScrollArea className="w-full">
         <table className="w-full min-w-[560px] border-collapse text-left">
           <thead className="text-xs text-muted-foreground">
             <tr>
-              <th className="pb-2 font-normal">вкл</th>
-              <th className="pb-2 font-normal">условие</th>
-              <th className="pb-2 font-normal">длит.</th>
-              <th className="pb-2 font-normal">уровень</th>
-              <th className="pb-2 font-normal">канал</th>
+              <th className="pb-2 font-normal">{t("on")}</th>
+              <th className="pb-2 font-normal">{t("condition")}</th>
+              <th className="pb-2 font-normal">{t("dur.")}</th>
+              <th className="pb-2 font-normal">{t("level")}</th>
+              <th className="pb-2 font-normal">{t("channel")}</th>
               <th className="pb-2 font-normal" />
             </tr>
           </thead>
@@ -370,7 +383,7 @@ function RulesPanel() {
                     <button
                       type="button"
                       className={cn("whitespace-pre", r.enabled ? "text-primary" : "text-muted-foreground")}
-                      title={r.enabled ? "выключить" : "включить"}
+                      title={r.enabled ? t("turn off") : t("turn on")}
                       onClick={() => toggle(r)}
                     >
                       {r.enabled ? "[x]" : "[ ]"}
@@ -384,9 +397,9 @@ function RulesPanel() {
                   <td className="pr-2 text-muted-foreground">{r.channel}</td>
                   <td className="whitespace-nowrap text-right">
                     <Button size="sm" variant="ghost" onClick={() => setEditing(r.id)}>
-                      изм.
+                      {t("edit")}
                     </Button>
-                    <Button size="sm" variant="ghost" className="hover:text-crit" title="удалить" onClick={() => remove(r)}>
+                    <Button size="sm" variant="ghost" className="hover:text-crit" title={t("delete")} onClick={() => remove(r)}>
                       ×
                     </Button>
                   </td>
@@ -406,13 +419,12 @@ function RulesPanel() {
       {err && <div className="mt-2 text-sm text-crit">{err}</div>}
       <div className="mt-3 flex flex-wrap items-center gap-3">
         <Button variant="outline" disabled={editing !== null} onClick={() => setEditing("new")}>
-          + правило
+          + {t("rule")}
         </Button>
         <QuietHours />
       </div>
       <p className="mt-2 text-xs text-muted-foreground">
-        tg — уведомление в Telegram и на панели, web — только на панели. Контейнеры, остановленные с кодом 0, алертом
-        не считаются.
+        {t("tg: notify in Telegram and in the panel, web: only in the panel. Containers stopped with exit code 0 do not count as alerts.")}
       </p>
     </Panel>
   );
@@ -431,28 +443,28 @@ function QuietHours() {
   const save = async () => {
     try {
       setQ(await api.saveQuiet(q));
-      setSaved("сохранено");
+      setSaved(t("saved"));
     } catch (e) {
-      setSaved(errorMessage(e, "ошибка"));
+      setSaved(errorMessage(e, t("error")));
     }
     setTimeout(() => setSaved(""), 3000);
   };
   return (
     <div className="flex flex-wrap items-center gap-1.5 text-sm text-muted-foreground">
-      <span>тишина</span>
-      <input type="time" className={cn(cellField, "h-7")} value={q.from} onChange={(e) => setQ({ ...q, from: e.target.value })} aria-label="с" />
+      <span>{t("quiet hours")}</span>
+      <input type="time" className={cn(cellField, "h-7")} value={q.from} onChange={(e) => setQ({ ...q, from: e.target.value })} aria-label={t("from")} />
       <span>–</span>
-      <input type="time" className={cn(cellField, "h-7")} value={q.to} onChange={(e) => setQ({ ...q, to: e.target.value })} aria-label="до" />
+      <input type="time" className={cn(cellField, "h-7")} value={q.to} onChange={(e) => setQ({ ...q, to: e.target.value })} aria-label={t("to")} />
       <input
         className={cn(cellField, "h-7 w-36")}
         value={q.tz}
         placeholder="Europe/Moscow"
         onChange={(e) => setQ({ ...q, tz: e.target.value })}
-        aria-label="часовой пояс"
+        aria-label={t("time zone")}
       />
-      <span>кроме crit</span>
+      <span>{t("except crit")}</span>
       <Button size="sm" variant="outline" onClick={save}>
-        сохранить
+        {t("save")}
       </Button>
       {saved && <span className="text-xs">{saved}</span>}
     </div>
@@ -494,25 +506,26 @@ function TelegramPanel() {
       setToken("");
       await load(true);
     } catch (e) {
-      setMsg({ ok: false, text: e instanceof ApiError && e.code === "no_master_key" ? "нет мастер-ключа на сервере" : errorMessage(e, "ошибка") });
+      setMsg({ ok: false, text: e instanceof ApiError && e.code === "no_master_key" ? t("no master key on the server") : errorMessage(e, t("error")) });
     }
     setBusy(false);
   };
 
-  if (!n) return <Panel title="telegram-бот">загрузка…</Panel>;
+  if (!n) return <Panel title={t("telegram bot")}>{t("loading…")}</Panel>;
   const tg = n.telegram;
   const status = !tg.configured ? (
-    <span className="text-muted-foreground">○ не настроен</span>
+    <span className="text-muted-foreground">○ {t("not set up")}</span>
   ) : tg.connected ? (
-    <span className="text-primary">● подключён{tg.bot_name ? ` · @${tg.bot_name}` : ""}</span>
+    <span className="text-primary">● {t("connected")}
+      {tg.bot_name ? ` · @${tg.bot_name}` : ""}</span>
   ) : tg.last_error ? (
     <span className="text-crit">✕ {tg.last_error}</span>
   ) : (
-    <span className="text-warn">… подключается</span>
+    <span className="text-warn">… {t("connecting")}</span>
   );
 
   return (
-    <Panel title="telegram-бот">
+    <Panel title={t("telegram bot")}>
       <div className="flex flex-col gap-2.5">
         <div className="flex flex-col gap-1">
           <label className="text-sm text-muted-foreground" htmlFor="tg-token">
@@ -524,67 +537,70 @@ function TelegramPanel() {
             autoComplete="off"
             className={fieldCls}
             value={token}
-            placeholder={tg.configured ? "сохранён · оставьте пустым, чтобы не менять" : "123456789:AA…"}
+            placeholder={tg.configured ? t("saved · leave empty to keep it") : "123456789:AA…"}
             onChange={(e) => setToken(e.target.value)}
           />
         </div>
         <div className="flex flex-col gap-1">
           <label className="text-sm text-muted-foreground" htmlFor="tg-chat">
-            chat id (бот отвечает только этому чату)
+            {t("chat id (the bot replies to this chat only)")}
           </label>
           <input
             id="tg-chat"
             className={fieldCls}
             inputMode="numeric"
             value={chat}
-            placeholder="напишите боту /start — id появится ниже"
+            placeholder={t("send /start to the bot, the id shows up below")}
             onChange={(e) => setChat(e.target.value)}
           />
         </div>
         {tg.pending_chat && (
           <div className="flex flex-wrap items-center gap-2 text-sm">
-            <span className="text-muted-foreground">боту написал</span>
+            <span className="text-muted-foreground">{t("wrote to the bot:")}</span>
             <span className="text-hi">
-              {tg.pending_chat.title || "чат"} · {tg.pending_chat.id}
+              {tg.pending_chat.title || t("chat")} · {tg.pending_chat.id}
             </span>
             <Button
               size="sm"
               variant="outline"
               disabled={busy}
-              onClick={() => run(() => api.saveTelegram(tg.pending_chat!.id), "чат сохранён")}
+              onClick={() => run(() => api.saveTelegram(tg.pending_chat!.id), t("chat saved"))}
             >
-              использовать этот чат
+              {t("use this chat")}
             </Button>
           </div>
         )}
         <div className="text-sm">
-          <span className="text-muted-foreground">статус</span> {status}
-          {tg.last_message && <span className="text-muted-foreground"> · последняя команда {when(tg.last_message)}</span>}
-          {tg.last_sent && <span className="text-muted-foreground"> · отправлено {when(tg.last_sent)}</span>}
+          <span className="text-muted-foreground">{t("status")}</span> {status}
+          {tg.last_message && <span className="text-muted-foreground"> · {t("last command")} {when(tg.last_message)}</span>}
+          {tg.last_sent && <span className="text-muted-foreground"> · {t("sent")} {when(tg.last_sent)}</span>}
         </div>
         <div className="text-sm text-muted-foreground">
-          команды: <span className="text-hi">/status</span> · <span className="text-hi">/server &lt;имя&gt;</span> ·{" "}
+          {t("commands:")} <span className="text-hi">/status</span> · <span className="text-hi">/server &lt;{t("name")}&gt;</span> ·{" "}
           <span className="text-hi">/alerts</span> · <span className="text-hi">/ack &lt;id&gt;</span> ·{" "}
-          <span className="text-hi">/bills</span> · <span className="text-hi">/ask &lt;вопрос&gt;</span>
+          <span className="text-hi">/bills</span> · <span className="text-hi">/ask &lt;{t("question")}&gt;</span>
         </div>
         <div className="flex flex-wrap gap-2">
           <Button
             disabled={busy}
-            onClick={() => run(() => api.saveTelegram(chat.trim(), token.trim() || undefined), "сохранено")}
+            onClick={() => run(() => api.saveTelegram(chat.trim(), token.trim() || undefined), t("saved"))}
           >
-            сохранить
+            {t("save")}
           </Button>
-          <Button variant="outline" disabled={busy || !tg.configured || !tg.chat_id} onClick={() => run(api.testTelegram, "тест отправлен")}>
-            отправить тест
+          <Button variant="outline" disabled={busy || !tg.configured || !tg.chat_id} onClick={() => run(api.testTelegram, t("test sent"))}>
+            {t("send a test")}
           </Button>
           {tg.configured && (
             <Button
               variant="ghost"
               className="hover:text-crit"
               disabled={busy}
-              onClick={() => confirm("Отключить бота? Токен будет удалён.") && run(() => api.saveTelegram(chat.trim(), ""), "бот отключён")}
+              onClick={() =>
+                confirm(t("Disconnect the bot? The token will be deleted.")) &&
+                run(() => api.saveTelegram(chat.trim(), ""), t("bot disconnected"))
+              }
             >
-              отключить
+              {t("disconnect")}
             </Button>
           )}
         </div>
@@ -592,12 +608,12 @@ function TelegramPanel() {
         {!tg.configured && (
           <ol className="list-decimal space-y-0.5 pl-5 text-xs text-muted-foreground">
             <li>
-              В Telegram откройте <span className="text-hi">@BotFather</span> → <span className="text-hi">/newbot</span>,
-              задайте имя и username (на «bot»).
+              {t("In Telegram open")} <span className="text-hi">@BotFather</span> → <span className="text-hi">/newbot</span>,{" "}
+              {t("set a name and a username (ending in “bot”).")}
             </li>
-            <li>Скопируйте токен в поле выше и нажмите «сохранить».</li>
+            <li>{t("Copy the token into the field above and press “save”.")}</li>
             <li>
-              Напишите своему боту <span className="text-hi">/start</span> и нажмите «использовать этот чат».
+              {t("Send your bot")} <span className="text-hi">/start</span> {t("and press “use this chat”.")}
             </li>
           </ol>
         )}
@@ -622,7 +638,7 @@ export function AlertsPage({ route, version, onLogout }: { route: Route; version
       })
       .catch((e) => {
         if (e?.status === 401) onLogout();
-        else setError("нет связи с сервером");
+        else setError(t("no connection to the server"));
       });
   }, [onLogout]);
   useEffect(() => {
@@ -641,19 +657,19 @@ export function AlertsPage({ route, version, onLogout }: { route: Route; version
       status={error && <span className="text-crit">{error}</span>}
       footer={
         <>
-          <Hotkey k="1">обзор</Hotkey>
-          <Hotkey k="5">алерты</Hotkey>
+          <Hotkey k="1">{t("overview")}</Hotkey>
+          <Hotkey k="5">{t("alerts")}</Hotkey>
         </>
       }
-      footerNote="обновление 10с"
+      footerNote={t("refresh 10s")}
     >
       <Panel
-        title="активные алерты"
-        right={view ? `${view.open.length} активных · ${view.last24h} за 24ч` : undefined}
+        title={t("active alerts")}
+        right={view ? t("{open} active · {day} in 24h", { open: view.open.length, day: view.last24h }) : undefined}
         accent={!!view?.open.some((a) => a.severity === "crit" && a.state === "firing")}
       >
         {view && view.open.length === 0 ? (
-          <div className="py-2 text-primary">✓ всё спокойно</div>
+          <div className="py-2 text-primary">✓ {t("all quiet")}</div>
         ) : (
           <ScrollArea className="w-full">
             <table className="w-full min-w-[720px] border-collapse text-left">
@@ -672,9 +688,9 @@ export function AlertsPage({ route, version, onLogout }: { route: Route; version
         <TelegramPanel />
       </div>
 
-      <Panel title="история" right="события и алерты за 90 дней">
+      <Panel title={t("history")} right={t("events and alerts for 90 days")}>
         {history.length === 0 ? (
-          <div className="py-2 text-muted-foreground">пока пусто</div>
+          <div className="py-2 text-muted-foreground">{t("empty so far")}</div>
         ) : (
           <ScrollArea className="w-full">
             <table className="w-full min-w-[720px] border-collapse text-left">
@@ -683,7 +699,7 @@ export function AlertsPage({ route, version, onLogout }: { route: Route; version
                   <tr key={a.id} className="border-t border-border/60 align-top">
                     <td className="py-1 pr-3 whitespace-nowrap text-muted-foreground">{when(a.started_at)}</td>
                     <td className={cn("pr-3 uppercase", sevCls[a.severity])}>{a.severity}</td>
-                    <td className="pr-3 whitespace-nowrap text-hi">{a.server_name || "панель"}</td>
+                    <td className="pr-3 whitespace-nowrap text-hi">{a.server_name || t("panel")}</td>
                     <td className="pr-3">
                       {a.message}
                       {a.notified && <span className="text-muted-foreground"> → tg</span>}
@@ -697,7 +713,7 @@ export function AlertsPage({ route, version, onLogout }: { route: Route; version
         )}
         {!allHistory && (view?.recent.length ?? 0) > 30 && (
           <Button className="mt-2" size="sm" variant="outline" onClick={() => setAllHistory(true)}>
-            показать все ({view?.recent.length})
+            {t("show all")} ({view?.recent.length})
           </Button>
         )}
       </Panel>

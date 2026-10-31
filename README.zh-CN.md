@@ -4,7 +4,7 @@
 
 自托管的服务器监控面板：主机指标与 Docker 容器、浏览器内的 SSH 终端、经你确认后才在服务器上执行操作的 AI 代理，以及 Telegram 告警。登录方式为密码 + TOTP 动态码（Google Authenticator 及兼容应用），并由 fail2ban 防护暴力破解。
 
-界面为深色 TUI 风格（类似 btop），绿色强调色。目前界面语言为俄语。
+界面为深色 TUI 风格（类似 btop），绿色强调色。界面支持英语（默认）、俄语和中文，可在设置中切换；该语言同样用于 Telegram 机器人消息和 AI 智能体的回复。
 
 - 架构：[docs/architecture.md](docs/architecture.md)（俄语）
 - 设计稿：[docs/design](docs/design)

@@ -88,11 +88,11 @@ export class Setup {
     const modelId = (cfg.model || "").trim();
     // Check what can be checked before touching the runtime, so a bad setup
     // leaves the working one in place.
-    if (!provider || !modelId) throw new Error("provider и model обязательны");
+    if (!provider || !modelId) throw new Error("provider and model are required");
     if (provider === CUSTOM) {
-      if (!(cfg.base_url ?? "").trim()) throw new Error("для своего провайдера нужен URL");
+      if (!(cfg.base_url ?? "").trim()) throw new Error("a custom provider needs a URL");
     } else if (!this.rt.getProvider(provider)) {
-      throw new Error(`провайдер ${provider} неизвестен`);
+      throw new Error(`unknown provider ${provider}`);
     }
     try {
       await this.applyNow(cfg, provider, modelId);
@@ -123,7 +123,7 @@ export class Setup {
     if (provider === CUSTOM) {
       const api = customAPIs.includes(cfg.api ?? "") ? cfg.api : "openai-completions";
       this.rt.registerProvider(CUSTOM, {
-        name: "Свой провайдер",
+        name: "Custom provider",
         baseUrl,
         api: api as never,
         // Local servers often need no key; pi still wants one.
@@ -133,7 +133,7 @@ export class Setup {
       this.overridden.add(CUSTOM);
     } else {
       const p = this.rt.getProvider(provider);
-      if (!p) throw new Error(`провайдер ${provider} неизвестен`);
+      if (!p) throw new Error(`unknown provider ${provider}`);
       const catalog = this.rt.getModels(provider);
       if (!this.originals.has(provider)) {
         this.originals.set(provider, { baseUrl: p.baseUrl ?? catalog[0]?.baseUrl ?? "", catalog });
@@ -155,11 +155,11 @@ export class Setup {
       }
     }
 
-    if (!this.rt.getModel(provider, modelId)) error = `модель ${provider}/${modelId} не найдена`;
+    if (!this.rt.getModel(provider, modelId)) error = `model ${provider}/${modelId} not found`;
     else {
       const available = await this.rt.getAvailable(provider).catch(() => []);
       if (!available.some((m: { id: string }) => m.id === modelId)) {
-        error = `нет API-ключа для ${provider}`;
+        error = `no API key for ${provider}`;
       }
     }
     Object.assign(this, { provider, modelId, thinking, allowed, key, error });
@@ -197,7 +197,7 @@ export class Setup {
     let api = req.api ?? "";
     if (provider !== CUSTOM) {
       const p = this.rt.getProvider(provider);
-      if (!p) return { models: [], live: false, error: `провайдер ${provider} неизвестен` };
+      if (!p) return { models: [], live: false, error: `unknown provider ${provider}` };
       // While we override the provider, the runtime holds our address and
       // models: list against pi's own ones.
       const orig = this.overridden.has(provider) ? this.originals.get(provider) : undefined;
@@ -215,7 +215,7 @@ export class Setup {
     }
     let error: string | undefined;
     let live = false;
-    if (!base) error = "у провайдера нет адреса API";
+    if (!base) error = "the provider has no API address";
     else {
       try {
         for (const id of await fetchModelIds(provider, base, api, key)) {
@@ -254,15 +254,15 @@ export async function fetchModelIds(provider: string, base: string, api: string,
   for (const url of urls) {
     const res = await fetch(url, { headers, signal });
     if (res.status === 404) {
-      last = "провайдер не отдаёт список моделей (404)";
+      last = "the provider does not list models (404)";
       continue;
     }
-    if (res.status === 401 || res.status === 403) throw new Error("провайдер отклонил ключ API");
-    if (!res.ok) throw new Error(`провайдер ответил ${res.status}`);
+    if (res.status === 401 || res.status === 403) throw new Error("the provider rejected the API key");
+    if (!res.ok) throw new Error(`the provider answered ${res.status}`);
     const body = (await res.json()) as { data?: { id?: string; name?: string }[]; models?: { id?: string; name?: string }[] };
     const items = body.data ?? body.models ?? [];
     const ids = items.map((m) => m.id ?? m.name?.replace(/^models\//, "") ?? "").filter(Boolean);
     return [...new Set(ids)];
   }
-  throw new Error(last || "список моделей недоступен");
+  throw new Error(last || "the model list is unavailable");
 }

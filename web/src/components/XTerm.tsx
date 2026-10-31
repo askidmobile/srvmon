@@ -4,6 +4,7 @@ import "@xterm/xterm/css/xterm.css";
 import { useEffect, useRef } from "react";
 
 import { terminalURL } from "@/lib/api";
+import { t } from "@/lib/i18n";
 
 const THEME = {
   background: "#050806",
@@ -86,8 +87,11 @@ export function XTerm({
     };
     ws.onclose = (ev) => {
       cb.current.onStatus("closed");
-      const why = ev.code === 1000 ? "" : ` (код ${ev.code}${ev.code === 1006 ? ": нет связи или нет доступа" : ""})`;
-      term.write(`\r\n\x1b[90m[соединение закрыто${why}]\x1b[0m\r\n`);
+      const why =
+        ev.code === 1000
+          ? ""
+          : ` (${t("code {code}", { code: ev.code })}${ev.code === 1006 ? ": " + t("no connection or no access") : ""})`;
+      term.write(`\r\n\x1b[90m[${t("connection closed")}${why}]\x1b[0m\r\n`);
     };
     const onData = term.onData((d) => ws.readyState === WebSocket.OPEN && ws.send(enc.encode(d)));
     const onBinary = term.onBinary((d) => {

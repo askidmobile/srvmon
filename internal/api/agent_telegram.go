@@ -3,11 +3,11 @@ package api
 import (
 	"context"
 	"errors"
-	"fmt"
 	"html"
 	"strings"
 
 	"github.com/askidmobile/srvmon/internal/aiagent"
+	"github.com/askidmobile/srvmon/internal/i18n"
 	"github.com/askidmobile/srvmon/internal/store"
 	"github.com/askidmobile/srvmon/internal/telegram"
 )
@@ -37,12 +37,12 @@ func (s *Server) wireAgentTelegram(b *telegram.Bot) {
 
 func actionText(a store.AgentAction) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "🤖 <b>агент просит выполнить</b> #%d на <b>%s</b>:\n<code>%s</code>", a.ID,
-		html.EscapeString(a.ServerName), html.EscapeString(a.Command))
+	b.WriteString("🤖 " + i18n.T("<b>the agent asks to run</b> #%d on <b>%s</b>:\n<code>%s</code>", a.ID,
+		html.EscapeString(a.ServerName), html.EscapeString(a.Command)))
 	if a.Reason != "" {
-		fmt.Fprintf(&b, "\nзачем: %s", html.EscapeString(a.Reason))
+		b.WriteString("\n" + i18n.T("why: %s", html.EscapeString(a.Reason)))
 	}
-	b.WriteString("\nЖдёт решения 15 минут.")
+	b.WriteString("\n" + i18n.T("Waits for a decision for 15 minutes."))
 	return b.String()
 }
 
@@ -52,17 +52,17 @@ func (s *Server) telegramDecide(ctx context.Context, id int64, approve bool) str
 		state = store.ActionApproved
 	}
 	if !s.DecideAgentAction(ctx, id, state, "telegram") {
-		return fmt.Sprintf("действие #%d уже не ждёт решения", id)
+		return i18n.T("action #%d no longer waits for a decision", id)
 	}
 	if approve {
-		return fmt.Sprintf("✓ #%d выполняется", id)
+		return "✓ " + i18n.T("#%d is running", id)
 	}
-	return fmt.Sprintf("✗ #%d отклонено", id)
+	return "✗ " + i18n.T("#%d rejected", id)
 }
 
 func (s *Server) telegramAsk(ctx context.Context, question string) (string, error) {
 	var tr transcript
-	text := "Вопрос владельца из Telegram. Ответ уйдёт сообщением в Telegram: будь краток, без таблиц.\n\n" + question
+	text := "A question from the owner in Telegram. The reply goes back as a Telegram message: be brief, no tables.\n\n" + question
 	err := s.ai.Run(ctx, 0, aiagent.RunRequest{Text: text}, tr.add)
 	msg := tr.message()
 	if msg.Error != "" {
