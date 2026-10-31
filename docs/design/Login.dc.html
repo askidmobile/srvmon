@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>srvmon — вход</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&amp;display=swap">
+<style>
+body{margin:0;background:#0a0e0b}
+.r{font-family:'JetBrains Mono',ui-monospace,Menlo,monospace;font-size:14px;line-height:1.55;color:#c9e4cf;background:#0a0e0b;min-height:900px;display:flex;align-items:center;justify-content:center;padding:24px;box-sizing:border-box}
+.box{position:relative;border:1px solid #3ddc6e;padding:28px 24px 20px;width:100%;max-width:480px;box-sizing:border-box}
+.t{position:absolute;top:-11px;left:12px;background:#0a0e0b;padding:0 6px;color:#3ddc6e}
+.dim{color:#7f9c86}.acc{color:#3ddc6e}.warn{color:#f2c14e}.err{color:#ff6b5e}.hi{color:#e8fff0}
+input.in{width:100%;box-sizing:border-box;background:#050806;border:1px solid #2a4a33;color:#e8fff0;font:inherit;padding:10px 12px;min-height:44px}
+input.in:focus{outline:1px solid #3ddc6e}
+input.code{font-size:24px;letter-spacing:12px;text-align:center}
+.btn{width:100%;border:1px solid #3ddc6e;color:#0a0e0b;background:#3ddc6e;font:inherit;font-weight:700;padding:10px 12px;min-height:44px;cursor:pointer}
+.btn:hover{background:#8cffb0}
+.lnk{background:none;border:none;color:#7f9c86;font:inherit;cursor:pointer;padding:8px 0;min-height:44px}
+.lnk:hover{color:#3ddc6e}
+pre{margin:0;line-height:1.15;font-size:12px}
+</style>
+</helmet>
+<div class="r">
+<div style="display: flex; flex-direction: column; align-items: center; gap: 28px; width: 100%">
+<pre class="acc" aria-hidden="true">  ___ _ ____   ___ __ ___   ___  _ __
+ / __| '__\ \ / / '_ ` _ \ / _ \| '_ \
+ \__ \ |   \ V /| | | | | | (_) | | | |
+ |___/_|    \_/ |_| |_| |_|\___/|_| |_|</pre>
+
+<sc-if value="{{isPw}}" hint-placeholder-val="{{true}}">
+<div class="box"><span class="t">вход ── шаг 1/2</span>
+<div style="display: flex; flex-direction: column; gap: 14px">
+<label for="pw" class="dim">пароль</label>
+<input class="in" id="pw" type="password" value="••••••••••••" autocomplete="current-password">
+<button class="btn" type="button" onClick="{{toTotp}}">продолжить ⏎</button>
+<div class="dim" style="font-size: 12px">логина нет · 5 неверных попыток → бан ip на 1ч (fail2ban)</div>
+</div>
+</div>
+</sc-if>
+
+<sc-if value="{{isTotp}}" hint-placeholder-val="{{false}}">
+<div class="box"><span class="t">вход ── шаг 2/2 · google authenticator</span>
+<div style="display: flex; flex-direction: column; gap: 14px">
+<label for="code" class="dim">6-значный код из приложения</label>
+<input class="in code" id="code" type="text" inputmode="numeric" autocomplete="one-time-code" value="482 913">
+<button class="btn" type="button" onClick="{{toOk}}">войти ⏎</button>
+<div style="display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px">
+<button class="lnk" type="button" onClick="{{toPw}}">← назад</button>
+<span class="dim" style="align-self: center; font-size: 12px">код обновится через 17с</span>
+</div>
+</div>
+</div>
+</sc-if>
+
+<sc-if value="{{isOk}}" hint-placeholder-val="{{false}}">
+<div class="box"><span class="t">доступ разрешён</span>
+<div class="acc">✓ сессия создана · 12ч · привязана к ip</div>
+<div class="dim" style="margin-top: 8px">переход в обзор…</div>
+<button class="lnk" type="button" onClick="{{toPw}}">↺ показать снова</button>
+</div>
+</sc-if>
+
+<div class="dim" style="font-size: 12px; text-align: center">tls · попытки входа логируются · уведомление в telegram о каждом входе</div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+constructor(props) { super(props); this.state = { step: 'pw' }; }
+renderVals() {
+const s = this.state.step;
+return {
+isPw: s === 'pw', isTotp: s === 'totp', isOk: s === 'ok',
+toTotp: () => this.setState({ step: 'totp' }),
+toOk: () => this.setState({ step: 'ok' }),
+toPw: () => this.setState({ step: 'pw' })
+};
+}
+}
+</script>
+</body>
+</html>

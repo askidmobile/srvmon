@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>srvmon — prod-api-01</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&amp;display=swap">
+<style>
+body{margin:0;background:#0a0e0b}
+.r{font-family:'JetBrains Mono',ui-monospace,Menlo,monospace;font-size:12.5px;line-height:1.5;color:#c9e4cf;background:#0a0e0b;min-height:1400px;display:flex;flex-direction:column}
+.box{position:relative;border:1px solid #2a4a33;border-radius:6px;padding:16px 12px 10px;min-width:0;box-sizing:border-box}
+.t{position:absolute;top:-10px;left:10px;background:#0a0e0b;padding:0 6px;color:#3ddc6e;font-weight:700}
+.tr{position:absolute;top:-10px;right:10px;background:#0a0e0b;padding:0 6px;color:#7f9c86}
+.dim{color:#7f9c86}.acc{color:#3ddc6e}.warn{color:#f2c14e}.err{color:#ff6b5e}.hi{color:#e8fff0}.blu{color:#5ab0ff}
+a{color:#3ddc6e;text-decoration:none}a:hover{color:#8cffb0}
+table{border-collapse:collapse;width:100%}
+th{text-align:left;font-weight:400;color:#7f9c86;border-bottom:1px solid #2a4a33;padding:3px 6px;white-space:nowrap}
+td{padding:2px 6px;white-space:nowrap;vertical-align:middle}
+tr.sel td{background:#12361d;color:#e8fff0}
+.num{text-align:right}
+.k{background:#3ddc6e;color:#0a0e0b;padding:0 4px}
+.nav a{padding:2px 8px}.nav a.on{background:#3ddc6e;color:#0a0e0b}
+.btn,.btn2{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:32px;padding:0 12px;box-sizing:border-box;font:inherit;line-height:1;cursor:pointer;white-space:nowrap;text-decoration:none}
+.btn{border:1px solid #3ddc6e;background:#3ddc6e;color:#0a0e0b}
+.btn2{border:1px solid #3ddc6e;background:transparent;color:#3ddc6e}
+.btn2:hover{background:#3ddc6e;color:#0a0e0b}
+.sm{height:22px;padding:0 7px;font-size:11.5px}
+.tag{display:inline-block;border:1px solid #2a4a33;color:#9fc3a7;padding:0 5px;font-size:11px;line-height:17px;margin-right:4px}
+.graph{display:flex;align-items:flex-end;gap:1px;height:132px;width:100%;background-image:linear-gradient(to top, rgba(42,74,51,.5) 1px, transparent 1px);background-size:100% 33px}
+.gb{flex:1 1 0;min-width:0;background:linear-gradient(to top,#1f8f45,#3ddc6e)}
+.trk{flex:1 1 auto;height:8px;background:#16261b;min-width:0;display:flex}
+.fil{height:100%}
+.mrow{display:grid;grid-template-columns:96px minmax(0,1fr) 44px 56px;gap:10px;align-items:center}
+.core{display:grid;grid-template-columns:28px minmax(0,1fr) 40px;gap:8px;align-items:center}
+.netup{display:flex;align-items:flex-end;gap:1px;height:56px}
+.netdn{display:flex;align-items:flex-start;gap:1px;height:40px}
+.nb{flex:1 1 0;min-width:0}
+.sc{overflow:auto;scrollbar-width:thin;scrollbar-color:#2a4a33 transparent}
+.sc::-webkit-scrollbar{width:6px;height:6px}
+.sc::-webkit-scrollbar-track{background:transparent}
+.sc::-webkit-scrollbar-thumb{background:#2a4a33;border-radius:3px}
+.sc::-webkit-scrollbar-thumb:hover{background:#3ddc6e}
+.sc::-webkit-scrollbar-corner{background:transparent}
+.kv{display:grid;grid-template-columns:120px minmax(0,1fr);gap:3px 12px}
+</style>
+</helmet>
+<div class="r">
+<header style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px 24px; padding: 10px 20px; border-bottom: 1px solid #2a4a33">
+<span class="acc" style="font-weight: 700">▌srvmon</span>
+<nav class="nav" style="display: flex; flex-wrap: wrap; gap: 4px; flex: 1 1 auto">
+<a href="Main.dc.html">[1] обзор</a>
+<a class="on" href="Server.dc.html">[2] серверы</a>
+<a href="Terminal.dc.html">[3] терминал</a>
+<a href="Terminal.dc.html">[4] агент</a>
+<a href="Settings.dc.html">[5] алерты</a>
+<a href="Settings.dc.html">[6] настройки</a>
+</nav>
+<span><span class="acc">●</span> 12/13 up</span>
+<span class="warn">▲ 2 алерта</span>
+<span class="dim">08:12:44 UTC</span>
+</header>
+
+<main style="flex: 1 1 auto; padding: 16px 20px; display: flex; flex-direction: column; gap: 22px">
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px">
+<span class="dim"><a href="Main.dc.html">серверы</a> / prod / crm /</span>
+<span class="hi" style="font-size: 18px; font-weight: 700">prod-api-01</span>
+<span class="acc">● online 41d</span>
+<span class="dim">10.0.1.11 · ubuntu 24.04 · Selectel · 4 900 ₽/мес · оплата 14.11</span>
+<span><span class="tag">#api</span><span class="tag">#public</span></span>
+<span style="flex: 1 1 auto"></span>
+<a class="btn" href="Terminal.dc.html">&gt;_ терминал</a>
+<a class="btn2" href="Terminal.dc.html">◆ агент</a>
+<button class="btn2" type="button">✎ паспорт</button>
+<span class="dim">обновление <span class="hi">− 2с +</span></span>
+</div>
+
+<div style="display: flex; flex-wrap: wrap; gap: 22px 16px; align-items: stretch">
+<div style="flex: 999 1 760px; min-width: 0; display: flex; flex-direction: column; gap: 22px">
+
+<section class="box"><span class="t">cpu</span><span class="tr">Xeon Gold 6338 · 8 vCPU · load 3.12 2.80 2.41 · 54°C</span>
+<div style="display: flex; flex-wrap: wrap; gap: 16px">
+<div style="flex: 999 1 380px; min-width: 0">
+<div style="display: flex; justify-content: space-between"><span class="hi" style="font-size: 20px; font-weight: 700">48%</span><span class="dim">15 мин · usr 38% · sys 7% · iowait 1.2% · steal 0.4%</span></div>
+<div class="graph"><sc-for list="{{cpu}}" as="b" hint-placeholder-count="96"><div class="gb" style="height: {{b.h}}"></div></sc-for></div>
+</div>
+<div style="flex: 1 1 260px; min-width: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 16px; align-content: start; padding-top: 6px">
+<sc-for list="{{cores}}" as="c" hint-placeholder-count="8">
+<div class="core"><span class="dim">{{c.n}}</span><div class="trk"><div class="fil" style="width: {{c.w}}; background: {{c.col}}"></div></div><span class="num">{{c.v}}</span></div>
+</sc-for>
+</div>
+</div>
+</section>
+
+<div style="display: flex; flex-wrap: wrap; gap: 22px 16px">
+<section class="box" style="flex: 1 1 360px"><span class="t">память</span><span class="tr">16.0 GiB</span>
+<div style="display: flex; flex-direction: column; gap: 8px">
+<sc-for list="{{mem}}" as="m" hint-placeholder-count="5">
+<div class="mrow"><span class="dim">{{m.n}}</span><div class="trk"><div class="fil" style="width: {{m.w}}; background: {{m.col}}"></div></div><span class="num">{{m.p}}</span><span class="num hi">{{m.v}}</span></div>
+</sc-for>
+</div>
+<div style="border-top: 1px solid #2a4a33; margin-top: 10px; padding-top: 8px; display: flex; flex-direction: column; gap: 4px">
+<div class="mrow"><span class="dim">/</span><div class="trk"><div class="fil" style="width: 41%; background: #3ddc6e"></div></div><span class="num">41%</span><span class="num hi">160G</span></div>
+<div class="mrow"><span class="dim">/var/lib/dock</span><div class="trk"><div class="fil" style="width: 57%; background: #3ddc6e"></div></div><span class="num">57%</span><span class="num hi">300G</span></div>
+<div class="dim">io: read <span class="hi">1.2 MB/s</span> · write <span class="hi">4.8 MB/s</span></div>
+</div>
+</section>
+<section class="box" style="flex: 1 1 360px"><span class="t">сеть</span><span class="tr">eth0 · 10.0.1.11</span>
+<div style="display: flex; justify-content: space-between"><span>↓ rx <span class="acc" style="font-weight: 700">12.0 MB/s</span></span><span class="dim">пик 31 MB/s · всего 1.4 TB</span></div>
+<div class="netup"><sc-for list="{{rx}}" as="b" hint-placeholder-count="72"><div class="nb" style="height: {{b.h}}; background: #3ddc6e"></div></sc-for></div>
+<div style="border-top: 1px solid #2a4a33"></div>
+<div class="netdn"><sc-for list="{{tx}}" as="b" hint-placeholder-count="72"><div class="nb" style="height: {{b.h}}; background: #5ab0ff"></div></sc-for></div>
+<div style="display: flex; justify-content: space-between"><span>↑ tx <span class="blu" style="font-weight: 700">3.1 MB/s</span></span><span class="dim">пик 9 MB/s · соединений 412</span></div>
+</section>
+</div>
+</div>
+
+<section class="box" style="flex: 1 1 380px; display: flex; flex-direction: column"><span class="t">процессы</span><span class="tr">сорт: cpu ▾ · 214 всего</span>
+<div style="display: flex; gap: 8px; margin-bottom: 8px"><label for="pf" class="dim" style="align-self: center">/</label><input id="pf" type="text" placeholder="фильтр" style="flex: 1 1 auto; min-width: 0; height: 26px; box-sizing: border-box; background: #050806; border: 1px solid #2a4a33; color: #e8fff0; font: inherit; padding: 0 8px"></div>
+<div class="sc" style="flex: 1 1 auto; max-height: 520px">
+<table>
+<thead><tr><th class="num">pid</th><th>программа</th><th>контейнер</th><th class="num">cpu</th><th class="num">mem</th></tr></thead>
+<tbody>
+<sc-for list="{{procs}}" as="p" hint-placeholder-count="20">
+<tr><td class="num dim">{{p.pid}}</td><td class="hi">{{p.n}}</td><td class="dim">{{p.c}}</td><td class="num" style="color: {{p.col}}">{{p.cpu}}</td><td class="num">{{p.mem}}</td></tr>
+</sc-for>
+</tbody>
+</table>
+</div>
+<div class="dim" style="margin-top: 6px">↑↓ выбор · k kill (с подтверждением) · enter детали</div>
+</section>
+</div>
+
+<section class="box"><span class="t">docker</span><span class="tr">14 running · 0 stopped · compose: crm</span>
+<div class="sc">
+<table>
+<thead><tr><th>st</th><th>имя</th><th>образ</th><th>статус</th><th>cpu</th><th class="num">mem</th><th>порты</th><th class="num">рест.</th><th>health</th><th>действия</th></tr></thead>
+<tbody>
+<tr class="sel"><td class="acc">●</td><td>crm-api</td><td class="dim">ghcr.io/acme/crm-api:2.14.0</td><td>Up 6 days</td><td><div style="display: flex; align-items: center; gap: 6px; width: 110px"><div class="trk"><div class="fil" style="width: 22%; background: #3ddc6e"></div></div><span>22%</span></div></td><td class="num">1.4G</td><td>8080→80</td><td class="num">0</td><td class="acc">healthy</td><td><span style="display: inline-flex; gap: 6px"><button class="btn2 sm" type="button">logs</button><button class="btn2 sm" type="button">restart</button><a class="btn2 sm" href="Terminal.dc.html">sh</a></span></td></tr>
+<tr><td class="acc">●</td><td>crm-worker</td><td class="dim">ghcr.io/acme/crm-api:2.14.0</td><td>Up 6 days</td><td><div style="display: flex; align-items: center; gap: 6px; width: 110px"><div class="trk"><div class="fil" style="width: 11%; background: #3ddc6e"></div></div><span>11%</span></div></td><td class="num">820M</td><td class="dim">─</td><td class="num">0</td><td class="acc">healthy</td><td><span style="display: inline-flex; gap: 6px"><button class="btn2 sm" type="button">logs</button><button class="btn2 sm" type="button">restart</button><button class="btn2 sm" type="button">sh</button></span></td></tr>
+<tr><td class="warn">▲</td><td>crm-scheduler</td><td class="dim">ghcr.io/acme/crm-api:2.14.0</td><td>Up 2 hours</td><td><div style="display: flex; align-items: center; gap: 6px; width: 110px"><div class="trk"><div class="fil" style="width: 4%; background: #3ddc6e"></div></div><span>4%</span></div></td><td class="num">290M</td><td class="dim">─</td><td class="num warn">3</td><td class="warn">starting</td><td><span style="display: inline-flex; gap: 6px"><button class="btn2 sm" type="button">logs</button><button class="btn2 sm" type="button">restart</button><button class="btn2 sm" type="button">sh</button></span></td></tr>
+<tr><td class="acc">●</td><td>redis</td><td class="dim">redis:7.4-alpine</td><td>Up 41 days</td><td><div style="display: flex; align-items: center; gap: 6px; width: 110px"><div class="trk"><div class="fil" style="width: 2%; background: #3ddc6e"></div></div><span>2%</span></div></td><td class="num">310M</td><td class="dim">6379</td><td class="num">0</td><td class="dim">─</td><td><span style="display: inline-flex; gap: 6px"><button class="btn2 sm" type="button">logs</button><button class="btn2 sm" type="button">restart</button><button class="btn2 sm" type="button">sh</button></span></td></tr>
+<tr><td class="acc">●</td><td>srvmon-agent</td><td class="dim">ghcr.io/askidmobile/srvmon-agent:0.3.1</td><td>Up 41 days</td><td><div style="display: flex; align-items: center; gap: 6px; width: 110px"><div class="trk"><div class="fil" style="width: 1%; background: #3ddc6e"></div></div><span>0.4%</span></div></td><td class="num">18M</td><td class="dim">─</td><td class="num">0</td><td class="acc">healthy</td><td><span style="display: inline-flex; gap: 6px"><button class="btn2 sm" type="button">logs</button></span></td></tr>
+</tbody>
+</table>
+</div>
+</section>
+
+<div style="display: flex; flex-wrap: wrap; gap: 22px 16px">
+<section class="box" style="flex: 999 1 760px"><span class="t">логи</span><span class="tr">journald + docker · warn и выше · 2 ошибки за час</span>
+<div class="sc">
+<table>
+<thead><tr><th>время</th><th>ур.</th><th>источник</th><th>сообщение</th></tr></thead>
+<tbody>
+<tr><td class="dim">08:10:02</td><td class="warn">WARN</td><td>crm-scheduler</td><td>redis lock timeout, retry 1/5</td></tr>
+<tr><td class="dim">08:09:58</td><td class="err">ERR</td><td>kernel</td><td>Memory cgroup out of memory: Killed process 31207 (node) crm-scheduler</td></tr>
+<tr><td class="dim">07:44:12</td><td class="warn">WARN</td><td>nginx</td><td>upstream timed out (110) while reading response header, /api/export</td></tr>
+<tr><td class="dim">07:30:00</td><td class="dim">INFO</td><td>cron</td><td>logrotate.service: Deactivated successfully</td></tr>
+<tr><td class="dim">06:12:40</td><td class="err">ERR</td><td>sshd</td><td>Invalid user admin from 103.xx.xx.7 port 51022 → fail2ban</td></tr>
+<tr><td class="dim">06:00:01</td><td class="dim">INFO</td><td>unattended-upgr</td><td>3 security updates pending</td></tr>
+</tbody>
+</table>
+</div>
+</section>
+<section class="box" style="flex: 1 1 380px"><span class="t">паспорт</span><span class="tr">e изменить</span>
+<div class="kv">
+<span class="dim">описание</span><span style="white-space: normal">API CRM, основной инстанс за балансером</span>
+<span class="dim">проект · группа</span><span>crm · prod</span>
+<span class="dim">провайдер</span><span>Selectel · ru-9 · <a href="#">панель ↗</a></span>
+<span class="dim">тариф</span><span>8 vCPU · 16 GB · 160 GB</span>
+<span class="dim">стоимость</span><span class="hi">4 900 ₽ / мес</span>
+<span class="dim">след. оплата</span><span>14.11.2026 <span class="dim">· через 14 дн</span></span>
+<span class="dim">ssh-ключ</span><span>ed25519 …9fA2 <span class="acc">✓</span></span>
+<span class="dim">агент</span><span>v0.3.1 · push 2s назад</span>
+</div>
+</section>
+</div>
+</main>
+
+<footer style="display: flex; flex-wrap: wrap; gap: 4px 16px; padding: 6px 20px; border-top: 1px solid #2a4a33">
+<span><span class="k">F1</span> help</span><span><span class="k">t</span> терминал</span><span><span class="k">a</span> агент</span><span><span class="k">p</span> процессы</span><span><span class="k">l</span> логи</span><span><span class="k">+/-</span> частота</span><span><span class="k">esc</span> назад</span>
+<span class="dim" style="margin-left: auto">live · детальные метрики шлются, пока экран открыт</span>
+</footer>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1400}}'>
+class Component extends DCLogic {
+renderVals() {
+const col = (v) => v >= 85 ? '#ff6b5e' : v >= 60 ? '#f2c14e' : '#3ddc6e';
+const cpuV = [30,34,36,42,38,50,44,46,58,52,44,38,42,50,60,72,54,46,44,38,42,52,46,40,44,52,50,46,40,38,44,48,56,62,58,50,46,42,40,44,50,54,48,46,44,48,50,48,36,40,44,52,60,66,58,48,44,40,38,42,46,50,54,52,48,44,40,42,46,52,58,64,70,62,54,48,44,42,46,50,48,44,42,46,50,52,48,46,44,48,50,52,49,47,48,48];
+const coreV = [62,41,55,38,72,29,47,40];
+const rxV = [30,32,40,22,30,48,70,50,32,30,24,32,40,42,30,22,30,50,60,40,32,24,30,32,40,30,22,30,34,40,46,38,30,28,36,44,52,40,30,26,30,36,42,38,30,26,30,34,40,56,90,62,40,32,30,28,34,40,38,30,26,30,34,38,42,40,36,32,30,34,38,40];
+const txV = [20,24,30,18,22,40,60,44,26,24,20,26,30,34,24,18,24,40,50,32,26,20,24,26,30,24,18,24,28,32,38,30,24,22,30,36,42,32,24,22,24,30,34,30,24,22,24,28,32,44,80,50,32,26,24,22,28,32,30,24,22,24,28,30,34,32,30,26,24,28,30,32];
+const memRows = [
+{ n: 'used', p: 67, v: '10.7G', col: '#3ddc6e' },
+{ n: 'available', p: 33, v: '5.3G', col: '#5ab0ff' },
+{ n: 'cached', p: 22, v: '3.5G', col: '#9b8cff' },
+{ n: 'free', p: 8, v: '1.3G', col: '#7f9c86' },
+{ n: 'swap', p: 10, v: '0.2G', col: '#f2c14e' }
+];
+const procs = [
+[31877,'node','crm-api','18.2','1.1G'],[32011,'node','crm-worker','9.6','640M'],[1204,'postgres','─','6.1','410M'],[884,'dockerd','─','3.4','120M'],[31207,'node','crm-scheduler','3.1','260M'],[2201,'nginx','nginx','1.2','42M'],[2202,'nginx','nginx','0.9','40M'],[1501,'redis-server','redis','1.8','300M'],[901,'containerd','─','0.8','64M'],[33010,'srvmon-agent','srvmon-agent','0.4','18M'],[612,'systemd-journal','─','0.3','58M'],[1,'systemd','─','0.1','12M'],[701,'sshd','─','0.0','8M'],[34001,'bash','─','0.0','4M'],[740,'cron','─','0.0','3M'],[655,'rsyslogd','─','0.0','6M'],[420,'systemd-udevd','─','0.0','7M'],[598,'systemd-resolve','─','0.0','11M']
+];
+return {
+cpu: cpuV.map((v) => ({ h: v + '%' })),
+cores: coreV.map((v, i) => ({ n: 'C' + i, w: v + '%', v: v + '%', col: col(v) })),
+rx: rxV.map((v) => ({ h: v + '%' })),
+tx: txV.map((v) => ({ h: v + '%' })),
+mem: memRows.map((m) => ({ n: m.n, p: m.p + '%', w: m.p + '%', v: m.v, col: m.col })),
+procs: procs.map((p) => ({ pid: p[0], n: p[1], c: p[2], cpu: p[3], mem: p[4], col: col(Number(p[3]) * 4) }))
+};
+}
+}
+</script>
+</body>
+</html>

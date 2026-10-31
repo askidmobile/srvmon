@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>srvmon — обзор</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&amp;display=swap">
+<style>
+body{margin:0;background:#0a0e0b}
+.r{font-family:'JetBrains Mono',ui-monospace,Menlo,monospace;font-size:13px;line-height:1.55;color:#c9e4cf;background:#0a0e0b;min-height:1000px;display:flex;flex-direction:column}
+.box{position:relative;border:1px solid #2a4a33;padding:16px 12px 10px;min-width:0}
+.t{position:absolute;top:-11px;left:10px;background:#0a0e0b;padding:0 6px;color:#3ddc6e}
+.dim{color:#7f9c86}.acc{color:#3ddc6e}.warn{color:#f2c14e}.err{color:#ff6b5e}.hi{color:#e8fff0}
+a{color:#3ddc6e;text-decoration:none}a:hover{color:#8cffb0}
+table{border-collapse:collapse;width:100%}
+th{text-align:left;font-weight:400;color:#7f9c86;border-bottom:1px solid #2a4a33;padding:4px 8px;white-space:nowrap}
+td{padding:4px 8px;white-space:nowrap;vertical-align:middle}
+tr.sel td{background:#12361d;color:#e8fff0}
+.k{background:#3ddc6e;color:#0a0e0b;padding:0 4px}
+.nav a{padding:2px 8px}.nav a.on{background:#3ddc6e;color:#0a0e0b}
+.big{font-size:28px;line-height:1.2;font-weight:700}
+.btn,.btn2{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:36px;padding:0 14px;box-sizing:border-box;font:inherit;line-height:1;cursor:pointer;white-space:nowrap;text-decoration:none}
+.btn{border:1px solid #3ddc6e;background:#3ddc6e;color:#0a0e0b}
+.btn2{border:1px solid #3ddc6e;background:transparent;color:#3ddc6e}
+.btn2:hover{background:#3ddc6e;color:#0a0e0b}
+.sm{height:28px;padding:0 10px;font-size:12px}
+.chip{display:inline-flex;align-items:center;height:28px;padding:0 10px;box-sizing:border-box;border:1px solid #2a4a33;color:#9fc3a7;background:transparent;font:inherit;font-size:12px;cursor:pointer}
+.chip.on{border-color:#3ddc6e;color:#0a0e0b;background:#3ddc6e}
+.tag{display:inline-block;border:1px solid #2a4a33;color:#9fc3a7;padding:0 5px;font-size:11px;line-height:17px;margin-right:4px}
+.sc{overflow:auto;scrollbar-width:thin;scrollbar-color:#2a4a33 transparent}
+.sc::-webkit-scrollbar{width:6px;height:6px}
+.sc::-webkit-scrollbar-track{background:transparent}
+.sc::-webkit-scrollbar-thumb{background:#2a4a33;border-radius:3px}
+.sc::-webkit-scrollbar-thumb:hover{background:#3ddc6e}
+.sc::-webkit-scrollbar-corner{background:transparent}
+</style>
+</helmet>
+<div class="r">
+<header style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px 24px; padding: 10px 20px; border-bottom: 1px solid #2a4a33">
+<span class="acc" style="font-weight: 700">▌srvmon</span>
+<nav class="nav" style="display: flex; flex-wrap: wrap; gap: 4px; flex: 1 1 auto">
+<a class="on" href="Main.dc.html">[1] обзор</a>
+<a href="Server.dc.html">[2] серверы</a>
+<a href="Terminal.dc.html">[3] терминал</a>
+<a href="Terminal.dc.html">[4] агент</a>
+<a href="Settings.dc.html">[5] алерты</a>
+<a href="Settings.dc.html">[6] настройки</a>
+</nav>
+<span><span class="acc">●</span> 12/13 up</span>
+<span class="warn">▲ 2 алерта</span>
+<span class="dim">tg: ok</span>
+<span class="dim">08:12:44 UTC</span>
+</header>
+
+<main style="flex: 1 1 auto; padding: 24px 20px; display: flex; flex-direction: column; gap: 28px">
+
+<section style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 24px">
+<div class="box"><span class="t">серверы</span>
+<div class="big"><span class="acc">12</span><span class="dim">/13</span></div>
+<div class="dim">онлайн · <span class="err">1 down</span> (backup-01, 14 мин)</div>
+</div>
+<div class="box"><span class="t">docker</span>
+<div class="big hi">87</div>
+<div class="dim"><span class="acc">84 running</span> · <span class="warn">2 restarting</span> · <span class="err">1 exited</span></div>
+</div>
+<div class="box"><span class="t">алерты</span>
+<div class="big warn">2</div>
+<div class="dim">активных · 14 за 24ч · tg доставлено</div>
+</div>
+<div class="box"><span class="t">расходы</span>
+<div class="big hi">≈ 21 400 ₽</div>
+<div class="dim">в месяц · ближайшая оплата <span class="warn">03.11</span> shop-web</div>
+</div>
+<div class="box"><span class="t">агент</span>
+<div class="big hi">5</div>
+<div class="dim">задач по расписанию · последняя 07:00 ok</div>
+</div>
+</section>
+
+<section class="box"><span class="t">серверы</span>
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px">
+<span class="dim" style="margin-right: 4px">группа</span>
+<button class="chip on" type="button">все 13</button>
+<button class="chip" type="button">prod 6</button>
+<button class="chip" type="button">staging 2</button>
+<button class="chip" type="button">infra 4</button>
+<button class="chip" type="button">личные 1</button>
+<span class="dim" style="margin: 0 4px 0 12px">теги</span>
+<button class="chip" type="button">#db</button>
+<button class="chip" type="button">#public</button>
+<button class="chip" type="button">#gpu</button>
+<span style="flex: 1 1 auto"></span>
+<label for="q" class="dim">/</label>
+<input id="q" type="text" placeholder="поиск: имя, ip, тег, провайдер" style="height: 28px; box-sizing: border-box; width: 280px; max-width: 100%; background: #050806; border: 1px solid #2a4a33; color: #e8fff0; font: inherit; font-size: 12px; padding: 0 10px">
+<a class="btn sm" href="AddServer.dc.html">+ сервер</a>
+</div>
+<div class="sc">
+<table>
+<thead><tr><th>st</th><th>имя</th><th>проект</th><th>теги</th><th>cpu</th><th>mem</th><th>disk</th><th>docker</th><th>провайдер</th><th>в месяц</th><th>оплата</th><th>seen</th></tr></thead>
+<tbody>
+<tr class="sel"><td class="acc">●</td><td><a href="Server.dc.html" style="color: inherit">prod-api-01</a></td><td>crm</td><td><span class="tag">#api</span><span class="tag">#public</span></td><td><span class="acc">██████</span><span class="dim">░░░░░░</span> 48%</td><td><span class="acc">████████</span><span class="dim">░░░░</span> 67%</td><td><span class="acc">█████</span><span class="dim">░░░░░░░</span> 41%</td><td>14<span class="dim">/14</span></td><td>Selectel</td><td>4 900 ₽</td><td>14.11</td><td class="dim">2s</td></tr>
+<tr><td class="acc">●</td><td>prod-api-02</td><td>crm</td><td><span class="tag">#api</span><span class="tag">#public</span></td><td><span class="acc">████</span><span class="dim">░░░░░░░░</span> 33%</td><td><span class="acc">███████</span><span class="dim">░░░░░</span> 61%</td><td><span class="acc">█████</span><span class="dim">░░░░░░░</span> 40%</td><td>14<span class="dim">/14</span></td><td>Selectel</td><td>4 900 ₽</td><td>14.11</td><td class="dim">3s</td></tr>
+<tr><td class="warn">▲</td><td>db-main</td><td>crm</td><td><span class="tag">#db</span></td><td><span class="warn">███████████</span><span class="dim">░</span> 92%</td><td><span class="acc">█████████</span><span class="dim">░░░</span> 78%</td><td><span class="warn">██████████</span><span class="dim">░░</span> 86%</td><td>3<span class="dim">/3</span></td><td>Selectel</td><td>7 200 ₽</td><td>14.11</td><td class="dim">1s</td></tr>
+<tr><td class="acc">●</td><td>shop-web</td><td>shop</td><td><span class="tag">#public</span></td><td><span class="acc">██</span><span class="dim">░░░░░░░░░░</span> 17%</td><td><span class="acc">█████</span><span class="dim">░░░░░░░</span> 44%</td><td><span class="acc">███</span><span class="dim">░░░░░░░░░</span> 22%</td><td>9<span class="dim">/9</span></td><td>Hetzner</td><td>€ 15.90</td><td class="warn">03.11</td><td class="dim">2s</td></tr>
+<tr><td class="warn">▲</td><td>shop-worker</td><td>shop</td><td><span class="tag">#queue</span></td><td><span class="acc">███</span><span class="dim">░░░░░░░░░</span> 25%</td><td><span class="acc">██████</span><span class="dim">░░░░░░</span> 52%</td><td><span class="acc">████</span><span class="dim">░░░░░░░░</span> 31%</td><td><span class="warn">6</span><span class="dim">/8</span></td><td>Hetzner</td><td>€ 7.50</td><td class="warn">03.11</td><td class="dim">2s</td></tr>
+<tr><td class="acc">●</td><td>ci-runner</td><td>infra</td><td><span class="tag">#ci</span></td><td><span class="acc">█████</span><span class="dim">░░░░░░░</span> 39%</td><td><span class="acc">████</span><span class="dim">░░░░░░░░</span> 30%</td><td><span class="acc">███████</span><span class="dim">░░░░░</span> 58%</td><td>5<span class="dim">/5</span></td><td>Timeweb</td><td>1 800 ₽</td><td>22.11</td><td class="dim">4s</td></tr>
+<tr><td class="acc">●</td><td>vpn-gw</td><td>infra</td><td><span class="tag">#vpn</span><span class="tag">#public</span></td><td><span class="acc">█</span><span class="dim">░░░░░░░░░░░</span> 4%</td><td><span class="acc">██</span><span class="dim">░░░░░░░░░░</span> 12%</td><td><span class="acc">██</span><span class="dim">░░░░░░░░░░</span> 14%</td><td>1<span class="dim">/1</span></td><td>Aeza</td><td>450 ₽</td><td>09.12 <span class="dim">год</span></td><td class="dim">2s</td></tr>
+<tr><td class="err">✕</td><td>backup-01</td><td>infra</td><td><span class="tag">#backup</span></td><td class="dim">─</td><td class="dim">─</td><td class="dim">─</td><td class="dim">?</td><td>Hetzner SB</td><td>€ 3.81</td><td>18.11</td><td class="err">14m</td></tr>
+</tbody>
+</table>
+</div>
+<div class="dim" style="margin-top: 8px">8 из 13 · ↑↓ выбор · enter открыть · t терминал · a агент · итого по фильтру ≈ 21 400 ₽/мес (€ по курсу ЦБ)</div>
+</section>
+
+<section style="display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 24px">
+<div class="box"><span class="t">алерты</span>
+<div><span class="dim">08:01</span> <span class="err">CRIT</span> backup-01 — агент не отвечает &gt; 5 мин <span class="dim">→ tg</span></div>
+<div><span class="dim">07:56</span> <span class="warn">WARN</span> db-main — cpu &gt; 90% 5 мин <span class="dim">→ tg</span></div>
+<div><span class="dim">07:40</span> <span class="warn">WARN</span> shop-worker — контейнер mailer restarting (x4)</div>
+<div><span class="dim">07:00</span> <span class="warn">BILL</span> shop-web, shop-worker — оплата Hetzner через 3 дня</div>
+<div style="margin-top: 10px"><a class="btn2 sm" href="Settings.dc.html">все алерты и правила →</a></div>
+</div>
+<div class="box"><span class="t">агент ── задачи и события</span>
+<div><span class="dim">07:00</span> <span class="acc">done</span> ежедневный отчёт по дискам → tg</div>
+<div><span class="dim">06:10</span> <span class="acc">done</span> db-main: очистка старых WAL (по запросу)</div>
+<div><span class="dim">каждые 15м</span> <span class="hi">sched</span> проверка ssl-сертификатов shop-web</div>
+<div><span class="dim">ждёт</span> <span class="warn">confirm</span> shop-worker: перезапустить mailer?</div>
+<div style="margin-top: 10px"><a class="btn2 sm" href="Terminal.dc.html">открыть агента →</a></div>
+</div>
+</section>
+</main>
+
+<footer style="display: flex; flex-wrap: wrap; gap: 4px 16px; padding: 6px 20px; border-top: 1px solid #2a4a33">
+<span><span class="k">F1</span> help</span><span><span class="k">F2</span> + сервер</span><span><span class="k">F3</span> поиск</span><span><span class="k">F5</span> обновить</span><span><span class="k">F9</span> агент</span><span><span class="k">F10</span> выход</span>
+<span class="dim" style="margin-left: auto">ws: live · метрики раз в 5с</span>
+</footer>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1000}}'>
+class Component extends DCLogic {
+renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

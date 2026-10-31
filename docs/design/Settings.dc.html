@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>srvmon — алерты и настройки</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&amp;display=swap">
+<style>
+body{margin:0;background:#0a0e0b}
+.r{font-family:'JetBrains Mono',ui-monospace,Menlo,monospace;font-size:13px;line-height:1.55;color:#c9e4cf;background:#0a0e0b;min-height:1000px;display:flex;flex-direction:column}
+.box{position:relative;border:1px solid #2a4a33;padding:18px 14px 12px;min-width:0}
+.t{position:absolute;top:-11px;left:10px;background:#0a0e0b;padding:0 6px;color:#3ddc6e}
+.dim{color:#7f9c86}.acc{color:#3ddc6e}.warn{color:#f2c14e}.err{color:#ff6b5e}.hi{color:#e8fff0}
+a{color:#3ddc6e;text-decoration:none}a:hover{color:#8cffb0}
+.k{background:#3ddc6e;color:#0a0e0b;padding:0 4px}
+.nav a{padding:2px 8px}.nav a.on{background:#3ddc6e;color:#0a0e0b}
+table{border-collapse:collapse;width:100%}
+th{text-align:left;font-weight:400;color:#7f9c86;border-bottom:1px solid #2a4a33;padding:4px 8px;white-space:nowrap}
+td{padding:4px 8px;white-space:nowrap;vertical-align:middle}
+.f{display:flex;flex-direction:column;gap:4px}
+.in{width:100%;height:36px;box-sizing:border-box;background:#050806;border:1px solid #2a4a33;color:#e8fff0;font:inherit;padding:0 10px}
+.btn,.btn2{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:36px;padding:0 14px;box-sizing:border-box;font:inherit;line-height:1;cursor:pointer;white-space:nowrap;text-decoration:none}
+.btn{border:1px solid #3ddc6e;background:#3ddc6e;color:#0a0e0b}
+.btn2{border:1px solid #3ddc6e;background:transparent;color:#3ddc6e}
+.btn2:hover{background:#3ddc6e;color:#0a0e0b}
+.sm{height:24px;padding:0 8px;font-size:12px}
+.kv{display:grid;grid-template-columns:140px minmax(0,1fr) auto;gap:8px 12px;align-items:center}
+.sc{overflow:auto;scrollbar-width:thin;scrollbar-color:#2a4a33 transparent}
+.sc::-webkit-scrollbar{width:6px;height:6px}
+.sc::-webkit-scrollbar-track{background:transparent}
+.sc::-webkit-scrollbar-thumb{background:#2a4a33;border-radius:3px}
+.sc::-webkit-scrollbar-thumb:hover{background:#3ddc6e}
+</style>
+</helmet>
+<div class="r">
+<header style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px 24px; padding: 10px 20px; border-bottom: 1px solid #2a4a33">
+<span class="acc" style="font-weight: 700">▌srvmon</span>
+<nav class="nav" style="display: flex; flex-wrap: wrap; gap: 4px; flex: 1 1 auto">
+<a href="Main.dc.html">[1] обзор</a>
+<a href="Server.dc.html">[2] серверы</a>
+<a href="Terminal.dc.html">[3] терминал</a>
+<a href="Terminal.dc.html">[4] агент</a>
+<a class="on" href="Settings.dc.html">[5] алерты</a>
+<a class="on" href="Settings.dc.html">[6] настройки</a>
+</nav>
+<span class="dim">08:12:44 UTC</span>
+</header>
+
+<main style="flex: 1 1 auto; padding: 24px 20px; display: grid; grid-template-columns: repeat(auto-fit, minmax(440px, 1fr)); gap: 28px 24px; align-content: start">
+
+<section class="box"><span class="t">правила алертов</span>
+<div class="sc">
+<table>
+<thead><tr><th>вкл</th><th>условие</th><th>длит.</th><th>уровень</th><th>канал</th></tr></thead>
+<tbody>
+<tr><td class="acc">[x]</td><td>агент молчит</td><td>&gt; 2м</td><td class="err">crit</td><td>tg</td></tr>
+<tr><td class="acc">[x]</td><td>cpu &gt; 90%</td><td>5м</td><td class="warn">warn</td><td>tg</td></tr>
+<tr><td class="acc">[x]</td><td>disk &gt; 85%</td><td>─</td><td class="warn">warn</td><td>tg</td></tr>
+<tr><td class="acc">[x]</td><td>контейнер exited / unhealthy</td><td>1м</td><td class="err">crit</td><td>tg</td></tr>
+<tr><td class="acc">[x]</td><td>рестартов контейнера &gt; 2</td><td>1ч</td><td class="warn">warn</td><td>tg</td></tr>
+<tr><td class="acc">[x]</td><td>оплата сервера через ≤ 3 дня</td><td>─</td><td class="warn">bill</td><td>tg</td></tr>
+<tr><td class="dim">[ ]</td><td>mem &gt; 95%</td><td>5м</td><td class="warn">warn</td><td>web</td></tr>
+</tbody>
+</table>
+</div>
+<div style="margin-top: 12px; display: flex; gap: 12px; flex-wrap: wrap; align-items: center"><button class="btn2" type="button">+ правило</button><span class="dim">тишина 01:00–07:00 кроме crit</span></div>
+</section>
+
+<section class="box"><span class="t">telegram-бот</span>
+<div style="display: flex; flex-direction: column; gap: 10px">
+<div class="f"><label class="dim" for="tok">bot token</label><input class="in" id="tok" type="password" value="••••••••••••••••••••"></div>
+<div class="f"><label class="dim" for="chat">chat id (бот отвечает только этому чату)</label><input class="in" id="chat" type="text" value="[ВАШ CHAT ID]"></div>
+<div><span class="dim">статус</span> <span class="acc">● подключён</span> <span class="dim">· long polling · последнее сообщение 07:56</span></div>
+<div class="dim">команды: <span class="hi">/status</span> · <span class="hi">/server &lt;имя&gt;</span> · <span class="hi">/alerts</span> · <span class="hi">/ack &lt;id&gt;</span> · <span class="hi">/bills</span> · <span class="hi">/ask &lt;вопрос&gt;</span></div>
+<div><button class="btn2" type="button">отправить тест</button></div>
+</div>
+</section>
+
+<section class="box"><span class="t">безопасность входа</span>
+<div class="kv">
+<span class="dim">пароль</span><span>argon2id · изменён 31.10.2026</span><button class="btn2 sm" type="button">сменить</button>
+<span class="dim">2fa (totp)</span><span><span class="acc">включена</span> · google authenticator</span><button class="btn2 sm" type="button">перевыпустить</button>
+<span class="dim">резерв. коды</span><span>8 из 10 осталось</span><button class="btn2 sm" type="button">новые</button>
+<span class="dim">сессия</span><span>12ч · привязка к ip · httpOnly cookie</span><span></span>
+<span class="dim">fail2ban</span><span>5 попыток / 10 мин → бан 1ч · повтор → 24ч</span><span></span>
+</div>
+</section>
+
+<section class="box"><span class="t">fail2ban ── забаненные ip</span>
+<div class="sc">
+<table>
+<thead><tr><th>ip</th><th>jail</th><th>попыток</th><th>до</th><th></th></tr></thead>
+<tbody>
+<tr><td>185.xx.xx.41</td><td>srvmon-auth</td><td>5</td><td>09:02</td><td style="text-align: right"><button class="btn2 sm" type="button">разбанить</button></td></tr>
+<tr><td>45.xx.xx.200</td><td>srvmon-auth</td><td>11</td><td>01.11 07:30</td><td style="text-align: right"><button class="btn2 sm" type="button">разбанить</button></td></tr>
+<tr><td>103.xx.xx.7</td><td>sshd</td><td>32</td><td>01.11 03:14</td><td style="text-align: right"><button class="btn2 sm" type="button">разбанить</button></td></tr>
+</tbody>
+</table>
+</div>
+<div class="dim" style="margin-top: 8px">последний успешный вход: 08:10 · 10.0.0.2 · chrome/macos</div>
+</section>
+</main>
+
+<footer style="display: flex; flex-wrap: wrap; gap: 4px 16px; padding: 6px 20px; border-top: 1px solid #2a4a33">
+<span><span class="k">F1</span> help</span><span><span class="k">^S</span> сохранить</span><span><span class="k">esc</span> назад</span>
+</footer>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1000}}'>
+class Component extends DCLogic {
+renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

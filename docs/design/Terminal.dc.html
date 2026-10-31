@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>srvmon — терминал и агент</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&amp;display=swap">
+<style>
+body{margin:0;background:#0a0e0b}
+.r{font-family:'JetBrains Mono',ui-monospace,Menlo,monospace;font-size:13px;line-height:1.55;color:#c9e4cf;background:#0a0e0b;min-height:900px;display:flex;flex-direction:column}
+.box{position:relative;border:1px solid #2a4a33;padding:16px 12px 10px;min-width:0}
+.t{position:absolute;top:-11px;left:10px;background:#0a0e0b;padding:0 6px;color:#3ddc6e}
+.dim{color:#7f9c86}.acc{color:#3ddc6e}.warn{color:#f2c14e}.err{color:#ff6b5e}.hi{color:#e8fff0}
+a{color:#3ddc6e;text-decoration:none}a:hover{color:#8cffb0}
+.k{background:#3ddc6e;color:#0a0e0b;padding:0 4px}
+.nav a{padding:2px 8px}.nav a.on{background:#3ddc6e;color:#0a0e0b}
+.btn,.btn2,.tab{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:32px;padding:0 12px;box-sizing:border-box;font:inherit;line-height:1;cursor:pointer;white-space:nowrap;text-decoration:none}
+.btn{border:1px solid #3ddc6e;background:#3ddc6e;color:#0a0e0b;height:40px}
+.btn2{border:1px solid #3ddc6e;background:transparent;color:#3ddc6e}
+.btn2:hover{background:#3ddc6e;color:#0a0e0b}
+.tab{border:1px solid #2a4a33;border-bottom:none;background:transparent;color:#c9e4cf}
+.tab.on{background:#12361d;color:#e8fff0;border-color:#3ddc6e}
+.term{background:#050806;padding:12px;font-size:13px;line-height:1.5}
+.ln{white-space:pre}
+.msg{padding:8px 10px;border-left:2px solid #2a4a33}
+.me{border-left-color:#3ddc6e}
+input.in{flex:1 1 auto;min-width:0;height:40px;box-sizing:border-box;background:#050806;border:1px solid #2a4a33;color:#e8fff0;font:inherit;padding:0 10px}
+input.in:focus{outline:1px solid #3ddc6e}
+.sc{overflow:auto;scrollbar-width:thin;scrollbar-color:#2a4a33 transparent}
+.sc::-webkit-scrollbar{width:6px;height:6px}
+.sc::-webkit-scrollbar-track{background:transparent}
+.sc::-webkit-scrollbar-thumb{background:#2a4a33;border-radius:3px}
+.sc::-webkit-scrollbar-thumb:hover{background:#3ddc6e}
+.sc::-webkit-scrollbar-corner{background:transparent}
+</style>
+</helmet>
+<div class="r">
+<header style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px 24px; padding: 10px 20px; border-bottom: 1px solid #2a4a33">
+<span class="acc" style="font-weight: 700">▌srvmon</span>
+<nav class="nav" style="display: flex; flex-wrap: wrap; gap: 4px; flex: 1 1 auto">
+<a href="Main.dc.html">[1] обзор</a>
+<a href="Server.dc.html">[2] серверы</a>
+<a class="on" href="Terminal.dc.html">[3] терминал</a>
+<a class="on" href="Terminal.dc.html">[4] агент</a>
+<a href="Settings.dc.html">[5] алерты</a>
+<a href="Settings.dc.html">[6] настройки</a>
+</nav>
+<span><span class="acc">●</span> 12/13 up</span>
+<span class="dim">08:12:44 UTC</span>
+</header>
+
+<main style="flex: 1 1 auto; padding: 20px; display: flex; flex-wrap: wrap; gap: 24px; align-items: stretch">
+
+<section style="flex: 999 1 640px; min-width: 0; display: flex; flex-direction: column">
+<div style="display: flex; gap: 4px; align-items: flex-end">
+<div class="sc" style="display: flex; gap: 4px; align-items: flex-end; min-width: 0; flex: 1 1 auto">
+<button class="tab on" type="button">[1] deploy@prod-api-01 ×</button>
+<button class="tab" type="button">[2] root@db-main ×</button>
+<button class="tab" type="button">[3] shop-worker:mailer ×</button>
+</div>
+<button class="btn2" type="button" aria-label="Новая сессия">+ сессия</button>
+</div>
+<div class="term sc" style="flex: 1 1 auto; min-height: 480px; border: 1px solid #3ddc6e">
+<div class="ln dim">Welcome to Ubuntu 24.04.1 LTS (GNU/Linux 6.8.0-45-generic x86_64)</div>
+<div class="ln dim">Last login: Fri Oct 30 21:44:02 2026 from 10.0.0.2 (srvmon-gateway)</div>
+<div class="ln"><span class="acc">deploy@prod-api-01</span>:<span class="hi">~</span>$ docker compose -f /srv/crm/compose.yml ps</div>
+<div class="ln">NAME             IMAGE                          STATUS                     PORTS</div>
+<div class="ln">crm-api          ghcr.io/acme/crm-api:2.14.0    Up 6 days (healthy)        0.0.0.0:8080-&gt;80/tcp</div>
+<div class="ln">crm-worker       ghcr.io/acme/crm-api:2.14.0    Up 6 days (healthy)</div>
+<div class="ln">crm-scheduler    ghcr.io/acme/crm-api:2.14.0    Up 2 hours <span class="warn">(health: starting)</span></div>
+<div class="ln">redis            redis:7.4-alpine               Up 41 days                 6379/tcp</div>
+<div class="ln"><span class="acc">deploy@prod-api-01</span>:<span class="hi">~</span>$ docker logs --tail 3 crm-scheduler</div>
+<div class="ln">2026-10-31T08:10:02Z INFO  scheduler started, 12 jobs</div>
+<div class="ln">2026-10-31T08:10:02Z <span class="warn">WARN</span>  redis lock timeout, retry 1/5</div>
+<div class="ln">2026-10-31T08:10:04Z INFO  lock acquired</div>
+<div class="ln"><span class="acc">deploy@prod-api-01</span>:<span class="hi">~</span>$ <span style="background: #3ddc6e; color: #050806"> </span></div>
+</div>
+<div class="dim" style="display: flex; flex-wrap: wrap; gap: 4px 16px; padding-top: 6px">
+<span>ssh ed25519 · 10.0.1.11:22</span><span>182×46</span><span>запись сессии: вкл</span><span>через srvmon-gateway</span>
+</div>
+</section>
+
+<aside class="box" style="flex: 1 1 400px; display: flex; flex-direction: column; gap: 12px"><span class="t">агент ── dsh · контекст: prod-api-01</span>
+<div style="display: flex; flex-wrap: wrap; gap: 8px">
+<button class="btn2" type="button" style="background: #3ddc6e; color: #0a0e0b">чат</button>
+<button class="btn2" type="button">задачи (5)</button>
+<button class="btn2" type="button">история</button>
+</div>
+<div class="sc" style="flex: 1 1 auto; display: flex; flex-direction: column; gap: 10px; max-height: 560px">
+<div class="msg me"><span class="acc">вы ›</span> почему crm-scheduler рестартовал 3 раза за ночь?</div>
+<div class="msg"><span class="hi">агент ›</span> Смотрю логи и события docker на prod-api-01…
+<div class="dim" style="margin-top: 4px">$ docker events --since 12h --filter container=crm-scheduler</div>
+<div style="margin-top: 4px">Причина: OOMKilled (лимит 256M), пик в 02:14 во время ночного экспорта. Предлагаю поднять лимит до 512M в compose.yml и пересоздать контейнер.</div>
+<div style="display: flex; gap: 8px; margin-top: 8px"><button class="btn2" type="button">✓ выполнить</button><button class="btn2" type="button">показать diff</button></div>
+</div>
+<div class="msg me"><span class="acc">вы ›</span> и поставь задачу: каждые 15 минут проверять рестарты контейнеров, если &gt; 2 за час — в телеграм</div>
+<div class="msg"><span class="hi">агент ›</span> Создал задачу <span class="acc">#6 restart-watch</span> · */15 * * * * · все серверы · уведомление: tg critical.</div>
+</div>
+<div style="display: flex; gap: 8px; align-items: center">
+<label for="ask" class="dim">›</label>
+<input class="in" id="ask" type="text" placeholder="спросить агента или поставить задачу…">
+<button class="btn" type="button" aria-label="Отправить">⏎</button>
+</div>
+</aside>
+</main>
+
+<footer style="display: flex; flex-wrap: wrap; gap: 4px 16px; padding: 6px 20px; border-top: 1px solid #2a4a33">
+<span><span class="k">^T</span> новая сессия</span><span><span class="k">^W</span> закрыть</span><span><span class="k">^\</span> split</span><span><span class="k">F9</span> агент ⇄ терминал</span>
+<span class="dim" style="margin-left: auto">приватный ключ не покидает сервер мониторинга</span>
+</footer>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

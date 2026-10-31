@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>srvmon — добавить сервер</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&amp;display=swap">
+<style>
+body{margin:0;background:#0a0e0b}
+.r{font-family:'JetBrains Mono',ui-monospace,Menlo,monospace;font-size:13px;line-height:1.55;color:#c9e4cf;background:#0a0e0b;min-height:1150px;display:flex;flex-direction:column}
+.box{position:relative;border:1px solid #2a4a33;padding:18px 14px 14px;min-width:0}
+.box.on{border-color:#3ddc6e}
+.t{position:absolute;top:-11px;left:10px;background:#0a0e0b;padding:0 6px;color:#3ddc6e}
+.dim{color:#7f9c86}.acc{color:#3ddc6e}.warn{color:#f2c14e}.err{color:#ff6b5e}.hi{color:#e8fff0}
+a{color:#3ddc6e;text-decoration:none}a:hover{color:#8cffb0}
+.k{background:#3ddc6e;color:#0a0e0b;padding:0 4px}
+.nav a{padding:2px 8px}.nav a.on{background:#3ddc6e;color:#0a0e0b}
+.f{display:flex;flex-direction:column;gap:4px;min-width:0}
+.row2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.in{width:100%;height:36px;box-sizing:border-box;background:#050806;border:1px solid #2a4a33;color:#e8fff0;font:inherit;padding:0 10px}
+.in:focus{outline:1px solid #3ddc6e}
+textarea.in{height:64px;padding:8px 10px;resize:vertical}
+.btn,.btn2{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:36px;padding:0 14px;box-sizing:border-box;font:inherit;line-height:1;cursor:pointer;white-space:nowrap;text-decoration:none}
+.btn{border:1px solid #3ddc6e;background:#3ddc6e;color:#0a0e0b;font-weight:700}
+.btn2{border:1px solid #3ddc6e;background:transparent;color:#3ddc6e}
+.btn2:hover{background:#3ddc6e;color:#0a0e0b}
+.tag{display:inline-flex;align-items:center;height:22px;border:1px solid #2a4a33;color:#9fc3a7;padding:0 6px;font-size:12px}
+.log{background:#050806;padding:10px 12px;border:1px solid #2a4a33;line-height:1.5}
+.ln{white-space:pre}
+.sc{overflow:auto;scrollbar-width:thin;scrollbar-color:#2a4a33 transparent}
+.sc::-webkit-scrollbar{width:6px;height:6px}
+.sc::-webkit-scrollbar-track{background:transparent}
+.sc::-webkit-scrollbar-thumb{background:#2a4a33;border-radius:3px}
+.sc::-webkit-scrollbar-thumb:hover{background:#3ddc6e}
+</style>
+</helmet>
+<div class="r">
+<header style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px 24px; padding: 10px 20px; border-bottom: 1px solid #2a4a33">
+<span class="acc" style="font-weight: 700">▌srvmon</span>
+<nav class="nav" style="display: flex; flex-wrap: wrap; gap: 4px; flex: 1 1 auto">
+<a href="Main.dc.html">[1] обзор</a>
+<a class="on" href="Server.dc.html">[2] серверы</a>
+<a href="Terminal.dc.html">[3] терминал</a>
+<a href="Terminal.dc.html">[4] агент</a>
+<a href="Settings.dc.html">[5] алерты</a>
+<a href="Settings.dc.html">[6] настройки</a>
+</nav>
+<span class="dim">08:12:44 UTC</span>
+</header>
+
+<main style="flex: 1 1 auto; padding: 20px; display: flex; flex-direction: column; gap: 28px; max-width: 1320px; width: 100%; box-sizing: border-box">
+<div style="display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: baseline">
+<span class="hi" style="font-size: 20px; font-weight: 700">+ новый сервер</span>
+<span class="acc">[1 описание]</span><span class="dim">──</span><span class="acc">[2 оплата]</span><span class="dim">──</span><span class="acc">[3 доступ]</span><span class="dim">──</span><span class="hi" style="background: #12361d; padding: 0 6px">[4 ключ и агент]</span>
+</div>
+
+<section style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 24px">
+<div class="box"><span class="t">1 · описание ✓</span>
+<div style="display: flex; flex-direction: column; gap: 10px">
+<div class="row2">
+<div class="f"><label class="dim" for="nm">имя</label><input class="in" id="nm" type="text" value="shop-db"></div>
+<div class="f"><label class="dim" for="hs">host : port</label><input class="in" id="hs" type="text" value="95.xx.xx.16:22"></div>
+</div>
+<div class="row2">
+<div class="f"><label class="dim" for="pr">проект</label><select class="in" id="pr"><option>shop</option><option>crm</option><option>infra</option></select></div>
+<div class="f"><label class="dim" for="gr">группа</label><select class="in" id="gr"><option>prod</option><option>staging</option><option>infra</option><option>личные</option></select></div>
+</div>
+<div class="f"><label class="dim" for="tg">теги</label>
+<div style="display: flex; flex-wrap: wrap; gap: 6px; align-items: center; min-height: 36px; box-sizing: border-box; border: 1px solid #2a4a33; background: #050806; padding: 0 6px"><span class="tag">#db ×</span><span class="tag">#postgres ×</span><input id="tg" type="text" placeholder="+ тег" style="flex: 1 1 60px; min-width: 60px; background: transparent; border: none; color: #e8fff0; font: inherit; height: 30px"></div>
+</div>
+<div class="f"><label class="dim" for="ds">описание</label><textarea class="in" id="ds">Postgres магазина, реплика на shop-db-2</textarea></div>
+</div>
+</div>
+
+<div class="box"><span class="t">2 · провайдер и оплата ✓</span>
+<div style="display: flex; flex-direction: column; gap: 10px">
+<div class="row2">
+<div class="f"><label class="dim" for="pv">провайдер</label><select class="in" id="pv"><option>Hetzner</option><option>Selectel</option><option>Timeweb</option><option>Aeza</option><option>+ новый</option></select></div>
+<div class="f"><label class="dim" for="pl">тариф</label><input class="in" id="pl" type="text" value="CPX31"></div>
+</div>
+<div class="row2">
+<div class="f"><label class="dim" for="cs">стоимость</label><input class="in" id="cs" type="text" value="15.90"></div>
+<div class="f"><label class="dim" for="cr">валюта</label><select class="in" id="cr"><option>EUR</option><option>RUB</option><option>USD</option></select></div>
+</div>
+<div class="row2">
+<div class="f"><label class="dim" for="pd">период</label><select class="in" id="pd"><option>месяц</option><option>год</option><option>час (почасовой)</option></select></div>
+<div class="f"><label class="dim" for="nx">след. оплата</label><input class="in" id="nx" type="text" value="03.11.2026"></div>
+</div>
+<div class="f"><label class="dim" for="ln">ссылка на панель провайдера</label><input class="in" id="ln" type="text" value="https://console.hetzner.cloud/…"></div>
+<div class="dim" style="font-size: 12px">напоминание в tg за 3 дня до оплаты · можно пропустить шаг</div>
+</div>
+</div>
+
+<div class="box"><span class="t">3 · разовый доступ ✓</span>
+<div style="display: flex; flex-direction: column; gap: 10px">
+<div class="f"><label class="dim" for="us">пользователь</label><input class="in" id="us" type="text" value="root"></div>
+<div class="f"><label class="dim" for="pw">пароль (один раз)</label><input class="in" id="pw" type="password" value="••••••••••"></div>
+<div class="warn" style="font-size: 12px">пароль нужен только для установки ключа: не пишется в бд и логи, затирается из памяти после шага 4</div>
+</div>
+</div>
+
+<div class="box on"><span class="t">4 · ключ и агент</span>
+<div style="display: flex; flex-direction: column; gap: 6px">
+<div><span class="dim">ключ </span> ed25519, генерируется здесь</div>
+<div><span class="dim">fp   </span> SHA256:Vn3k…P0qe</div>
+<div><span class="dim">юзер </span> srvmon (группа docker)</div>
+<div style="margin-top: 6px"><span class="acc">[x]</span> отключить вход по паролю</div>
+<div><span class="acc">[x]</span> установить srvmon-agent</div>
+<div><span class="dim">[ ]</span> ssh только с ip мониторинга</div>
+</div>
+</div>
+</section>
+
+<section class="box on"><span class="t">журнал установки</span>
+<div class="log sc">
+<div class="ln"><span class="acc">✓</span> ssh root@95.xx.xx.16:22 — подключено по паролю</div>
+<div class="ln"><span class="acc">✓</span> host key: SHA256:2bQ…kL1 — сохранён (TOFU)</div>
+<div class="ln"><span class="acc">✓</span> useradd srvmon · usermod -aG docker srvmon</div>
+<div class="ln"><span class="acc">✓</span> authorized_keys ← ed25519 srvmon@monitor</div>
+<div class="ln"><span class="acc">✓</span> проверка входа по ключу — ok</div>
+<div class="ln"><span class="acc">✓</span> пароль удалён из памяти</div>
+<div class="ln"><span class="hi">⟳</span> docker run -d --name srvmon-agent ghcr.io/askidmobile/srvmon-agent:0.3.1 <span class="dim">…pulling 12.4/18.0 MB</span></div>
+<div class="ln dim">○ ждём первый heartbeat агента</div>
+<div class="ln dim">○ sshd: PasswordAuthentication no · reload</div>
+</div>
+<div style="display: flex; flex-wrap: wrap; gap: 12px; margin-top: 14px">
+<button class="btn2" type="button">← назад</button>
+<button class="btn2" type="button">отмена (откат)</button>
+<span style="flex: 1 1 auto"></span>
+<a class="btn" href="Server.dc.html">открыть сервер →</a>
+</div>
+</section>
+</main>
+
+<footer style="display: flex; flex-wrap: wrap; gap: 4px 16px; padding: 6px 20px; border-top: 1px solid #2a4a33">
+<span><span class="k">tab</span> поле</span><span><span class="k">⏎</span> далее</span><span><span class="k">esc</span> отмена</span>
+<span class="dim" style="margin-left: auto">агент получает свой токен для push-метрик · ssh-ключ хранится зашифрованным</span>
+</footer>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1150}}'>
+class Component extends DCLogic {
+renderVals() { return {}; }
+}
+</script>
+</body>
+</html>
