@@ -35,10 +35,18 @@ var (
 // line's own level field.
 var logfmtRe = regexp.MustCompile(`"(?:[^"\\]|\\.)*"|(?:^|\s)(?:level|lvl|severity)="?([A-Za-z]+)`)
 
+var (
+	jsonPrefixRe = regexp.MustCompile(`^\s*(?:[\w.\-/]+(?:\[\d+\])?:\s*)?$`)
+	logfmtMsgRe  = regexp.MustCompile(`(?:^|\s)msg=`)
+)
+
 // explicitLevel returns the level field of a structured line: a JSON object
 // ("level", "lvl" or "severity") or logfmt. ok is false for free text.
 func explicitLevel(msg string) (string, bool) {
-	if i := strings.IndexByte(msg, '{'); i >= 0 && strings.HasSuffix(strings.TrimSpace(msg), "}") {
+	// JSON counts only when the whole line is the object, optionally after a
+	// syslog tag ("app[12]: {...}"); a JSON payload at the end of free text
+	// is message content.
+	if i := strings.IndexByte(msg, '{'); i >= 0 && jsonPrefixRe.MatchString(msg[:i]) && strings.HasSuffix(strings.TrimSpace(msg), "}") {
 		var obj map[string]any
 		if json.Unmarshal([]byte(msg[i:]), &obj) == nil {
 			for _, k := range []string{"level", "lvl", "severity"} {
@@ -48,6 +56,11 @@ func explicitLevel(msg string) (string, bool) {
 			}
 			return "", false
 		}
+	}
+	// logfmt: only lines that carry a msg= field, so "ERROR x: level=info"
+	// in free text is not taken for structured.
+	if !logfmtMsgRe.MatchString(msg) {
+		return "", false
 	}
 	for _, m := range logfmtRe.FindAllStringSubmatch(msg, -1) {
 		if m[1] != "" {
