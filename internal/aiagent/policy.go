@@ -132,16 +132,6 @@ func hasArg(words []string, bad ...string) string {
 	return ""
 }
 
-func positional(words []string) []string {
-	var out []string
-	for _, w := range words[1:] {
-		if !strings.HasPrefix(w, "-") {
-			out = append(out, w)
-		}
-	}
-	return out
-}
-
 func checkProgram(words []string) string {
 	prog := words[0]
 	if strings.ContainsAny(prog, "/=") {
@@ -179,10 +169,12 @@ func checkProgram(words []string) string {
 		}
 		return ""
 	case "uniq":
-		if len(positional(words)) > 1 {
-			return "uniq с файлом вывода"
+		// uniq [INPUT [OUTPUT]]: "-" is stdin and still an operand.
+		pos, why := parseOpts(words, uniqOpts)
+		if why == "" && len(pos) > 1 {
+			why = "uniq с файлом вывода"
 		}
-		return ""
+		return why
 	case "dmesg":
 		_, why := parseOpts(words, dmesgOpts)
 		return why
@@ -304,6 +296,9 @@ var journalOpts = spec(
 	"-u --unit --user-unit -n --lines -S --since -U --until -p --priority -g --grep -o --output "+
 		"-t --identifier -T --exclude-identifier --output-fields -F --field --boot --facility -c --cursor "+
 		"--after-cursor -M --machine")
+
+var uniqOpts = spec("-c --count -d --repeated -D --all-repeated -u --unique -i --ignore-case -z --zero-terminated "+
+	"--group --version --help", "-f --skip-fields -s --skip-chars -w --check-chars")
 
 var dmesgOpts = spec("-T --ctime -H --human -k --kernel -u --userspace -x --decode -L -t --notime -r --raw "+
 	"-d --show-delta -e --reltime -P --nopager -w --follow -W --follow-new -S --syslog --version --help",
