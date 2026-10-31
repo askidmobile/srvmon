@@ -122,6 +122,10 @@ services:
     image: crazymax/fail2ban:1.1.0
     restart: unless-stopped
     network_mode: host
+    # fail2ban refuses to start when a jail's log file is missing: recidive
+    # reads fail2ban's own log, which only appears after the start.
+    entrypoint: ["/bin/sh", "-c", "touch /data/fail2ban.log && exec /entrypoint.sh \"$$@\"", "--"]
+    command: ["fail2ban-server", "-f", "-x", "-v", "start"]
     cap_add:
       - NET_ADMIN
       - NET_RAW
@@ -136,6 +140,10 @@ services:
       - ./fail2ban/action.d:/data/action.d:ro
       - srvmon-logs:/var/log/srvmon
       - /var/log:/var/log/host:ro # host sshd log, jail sshd
+    depends_on:
+      # srvmon-server creates auth.log (jail srvmon-auth) when it starts.
+      server:
+        condition: service_healthy
 
   victoriametrics:
     image: victoriametrics/victoria-metrics:v1.155.0
