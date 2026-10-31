@@ -3,14 +3,19 @@ package api
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	"golang.org/x/crypto/ssh"
 
 	"github.com/askidmobile/srvmon/internal/secret"
 	"github.com/askidmobile/srvmon/internal/sshgw"
@@ -240,5 +245,86 @@ func TestDeleteRefusedDuringOnboarding(t *testing.T) {
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusConflict {
 		t.Fatalf("delete during onboarding: %d", resp.StatusCode)
+	}
+}
+
+func TestLoginFor(t *testing.T) {
+	s := &Server{setupKeys: &setupKeys{m: map[string]setupKey{}}}
+	plain, _ := sshgw.GenerateKey("")
+	_, priv, _ := ed25519.GenerateKey(rand.Reader)
+	block, _ := ssh.MarshalPrivateKeyWithPassphrase(priv, "", []byte("open sesame"))
+	encrypted := string(pem.EncodeToMemory(block))
+	panel, _ := sshgw.GenerateKey("")
+	setupID, _ := s.setupKeys.add(panel)
+
+	cases := []struct {
+		req  onboardReq
+		want string
+	}{
+		{onboardReq{}, "password_required"},
+		{onboardReq{Password: "pw"}, ""},
+		{onboardReq{Method: "key"}, "private_key_required"},
+		{onboardReq{Method: "key", PrivateKey: plain.Public}, "public_key_given"},
+		{onboardReq{Method: "key", PrivateKey: "garbage"}, "bad_private_key"},
+		{onboardReq{Method: "key", PrivateKey: string(plain.Private)}, ""},
+		{onboardReq{Method: "key", PrivateKey: encrypted}, "passphrase_required"},
+		{onboardReq{Method: "key", PrivateKey: encrypted, Passphrase: "nope"}, "bad_passphrase"},
+		{onboardReq{Method: "key", PrivateKey: encrypted, Passphrase: "open sesame"}, ""},
+		{onboardReq{Method: "panel_key", SetupKey: "k_missing"}, "setup_key_expired"},
+		{onboardReq{Method: "panel_key", SetupKey: setupID}, ""},
+		{onboardReq{Method: "telnet"}, "bad_method"},
+	}
+	for i, c := range cases {
+		l, code := s.loginFor(&c.req)
+		if code != c.want {
+			t.Errorf("case %d: got %q want %q", i, code, c.want)
+		}
+		if code == "" && c.req.Method != "" && c.req.Method != "password" && l.signer == nil {
+			t.Errorf("case %d: no signer", i)
+		}
+		if c.req.PrivateKey != "" || c.req.Passphrase != "" {
+			t.Errorf("case %d: key material kept in the request", i)
+		}
+	}
+	l, _ := s.loginFor(&onboardReq{Method: "panel_key", SetupKey: setupID})
+	if l.panelKey == nil || l.panelKey.Public != panel.Public {
+		t.Fatal("panel key not used as the srvmon key")
+	}
+	s.setupKeys.drop(setupID)
+	if _, code := s.loginFor(&onboardReq{Method: "panel_key", SetupKey: setupID}); code != "setup_key_expired" {
+		t.Fatal("dropped setup key still usable")
+	}
+}
+
+func TestSetupKeyEndpoint(t *testing.T) {
+	e := newEnv(t)
+	e.loginSSH(t)
+	var out map[string]string
+	if code := e.postJSON(t, "/api/servers/setup-key", map[string]any{}, &out); code != http.StatusOK {
+		t.Fatalf("setup-key: %d", code)
+	}
+	if out["id"] == "" || !strings.HasPrefix(out["public_key"], "ssh-ed25519 ") || !strings.Contains(out["command"], out["public_key"]) {
+		t.Fatalf("setup-key: %v", out)
+	}
+	if strings.Contains(fmt.Sprint(out), "PRIVATE") {
+		t.Fatal("private key leaked")
+	}
+}
+
+// A large private key plus a full card must fit into the onboarding body.
+func TestOnboardBodyFitsLargeKey(t *testing.T) {
+	e := newEnv(t)
+	e.loginSSH(t)
+	hostKey, _ := sshgw.GenerateKey("")
+	req := onboardReq{
+		Card: cardInput{Name: "big", Host: "127.0.0.1", Port: 1, Description: strings.Repeat("d", 500)},
+		User: "root", Method: "key", HostKey: hostKey.Public,
+		PrivateKey: "-----BEGIN OPENSSH PRIVATE KEY-----\n" + strings.Repeat("A", 12<<10) + "\n-----END OPENSSH PRIVATE KEY-----\n",
+	}
+	var out map[string]string
+	code := e.postJSON(t, "/api/servers/onboard", req, &out)
+	// The fake key is rejected by the key parser, not cut off by the body limit.
+	if code != http.StatusBadRequest || out["error"] != "bad_private_key" {
+		t.Fatalf("got %d %v", code, out)
 	}
 }

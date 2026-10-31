@@ -36,10 +36,18 @@ type AgentInstall struct {
 
 // OnboardParams are the inputs of Onboard.
 type OnboardParams struct {
-	Addr     string
-	User     string // login used once with the password (root or a sudoer)
+	Addr string
+	User string // login used once (root or a sudoer)
+	// Password logs in when LoginKey is nil; otherwise it is only the sudo
+	// password and may be empty (root, or sudo without a password).
 	Password string
-	HostKey  ssh.PublicKey // confirmed by the owner after ProbeHostKey
+	// LoginKey logs in instead of the password: the owner's own key, used
+	// once, or the panel key (Key) the owner added to User's authorized_keys.
+	LoginKey ssh.Signer
+	// DropLoginKey removes Key from User's authorized_keys once SSHUser
+	// works: the panel key is only meant for SSHUser.
+	DropLoginKey bool
+	HostKey      ssh.PublicKey // confirmed by the owner after ProbeHostKey
 
 	Key             KeyPair // installed for SSHUser
 	SSHUser         string  // account srvmon uses from now on, normally "srvmon"
@@ -100,8 +108,8 @@ func sudoPasswordCmd(password, script string) (cmd, stdin string) {
 	return cmd, password + "\n" + marker + "\n" + script
 }
 
-// Onboard performs the one-time setup: password login with the pinned host
-// key, account and authorized_keys for SSHUser, a key login check, then the
+// Onboard performs the one-time setup: a login (password or key) with the
+// pinned host key, account and authorized_keys for SSHUser, a key login check, then the
 // optional agent install and sshd hardening. The password is only held in
 // params and in the SSH auth exchange; callers drop params afterwards.
 func Onboard(ctx context.Context, p OnboardParams, log Logger) (Result, error) {
@@ -109,22 +117,32 @@ func Onboard(ctx context.Context, p OnboardParams, log Logger) (Result, error) {
 	if !userRe.MatchString(p.SSHUser) {
 		return res, fmt.Errorf("bad ssh user %q", p.SSHUser)
 	}
-	log(StepRun, fmt.Sprintf("ssh %s@%s — вход по паролю", p.User, p.Addr))
-	c, err := Dial(ctx, p.Addr, p.User, p.HostKey,
-		ssh.Password(p.Password),
-		ssh.KeyboardInteractive(func(_, _ string, questions []string, _ []bool) ([]string, error) {
-			ans := make([]string, len(questions))
-			for i := range ans {
-				ans[i] = p.Password
-			}
-			return ans, nil
-		}))
+	var auth []ssh.AuthMethod
+	how := "по паролю"
+	if p.LoginKey != nil {
+		auth = []ssh.AuthMethod{ssh.PublicKeys(p.LoginKey)}
+		how = "по ключу " + ssh.FingerprintSHA256(p.LoginKey.PublicKey())
+	} else {
+		auth = []ssh.AuthMethod{ssh.Password(p.Password),
+			ssh.KeyboardInteractive(func(_, _ string, questions []string, _ []bool) ([]string, error) {
+				ans := make([]string, len(questions))
+				for i := range ans {
+					ans[i] = p.Password
+				}
+				return ans, nil
+			})}
+	}
+	log(StepRun, fmt.Sprintf("ssh %s@%s — вход %s", p.User, p.Addr, how))
+	c, err := Dial(ctx, p.Addr, p.User, p.HostKey, auth...)
 	if err != nil {
 		if strings.Contains(err.Error(), "host key mismatch") {
 			return res, errors.New("host key не совпадает с подтверждённым: возможна подмена сервера")
 		}
 		if strings.Contains(err.Error(), "unable to authenticate") {
-			return res, errors.New("неверный пользователь или пароль (или вход по паролю на сервере отключён)")
+			if p.LoginKey != nil {
+				return res, fmt.Errorf("сервер не принял ключ для %s: проверьте пользователя и что ключ есть в его ~/.ssh/authorized_keys", p.User)
+			}
+			return res, errors.New("неверный пользователь или пароль (или вход по паролю на сервере отключён: выберите вход по ключу)")
 		}
 		return res, fmt.Errorf("подключение: %w", err)
 	}
@@ -140,6 +158,8 @@ func Onboard(ctx context.Context, p OnboardParams, log Logger) (Result, error) {
 	if !pr.root {
 		if _, _, err := Run(ctx, c, "sudo -n true", nil); err == nil {
 			pr.nopass = true
+		} else if p.Password == "" {
+			return res, fmt.Errorf("у %s нет root, а sudo просит пароль: укажите пароль sudo или войдите как root", p.User)
 		}
 		if _, _, err := pr.run(ctx, "true\n"); err != nil {
 			return res, fmt.Errorf("у %s нет root и sudo не сработал: нужен root или пользователь с sudo", p.User)
@@ -186,6 +206,15 @@ func Onboard(ctx context.Context, p OnboardParams, log Logger) (Result, error) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), AfterCommitTimeout)
 	defer cancel()
 
+	if p.DropLoginKey && p.User != p.SSHUser {
+		// Runs as the login user: only their own authorized_keys changes.
+		if _, errOut, err := Run(ctx, c, dropKeyScript(p.Key.Public), nil); err != nil {
+			log(StepWarn, "ключ панели не удалён из authorized_keys "+p.User+": "+firstLine(errOut, err))
+		} else {
+			log(StepOK, "ключ панели убран из authorized_keys "+p.User+", остался только у "+p.SSHUser)
+		}
+	}
+
 	if a := p.Agent; a != nil {
 		log(StepRun, "docker run srvmon-agent ("+a.Image+")")
 		_, errOut, err := pr.run(ctx, agentScript(*a))
@@ -224,6 +253,25 @@ func firstLine(s string, err error) string {
 		s = s[:300] + "…"
 	}
 	return s
+}
+
+// dropKeyScript removes every authorized_keys line carrying the key's blob
+// (whatever comment or options the owner pasted it with), keeping the file
+// and its permissions in place.
+func dropKeyScript(pubLine string) string {
+	f := strings.Fields(pubLine)
+	if len(f) < 2 || f[1] == "" {
+		return "exit 0\n"
+	}
+	blob := f[1]
+	return fmt.Sprintf(`set -e
+F="$HOME/.ssh/authorized_keys"
+[ -f "$F" ] || exit 0
+T=$(mktemp)
+grep -vF %s "$F" > "$T" || true
+cat "$T" > "$F"
+rm -f "$T"
+`, shq(blob))
 }
 
 // userScript creates the account, adds it to docker, installs the public key

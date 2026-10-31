@@ -37,6 +37,7 @@ type Server struct {
 	version   string
 	secrets   *secret.Box
 	jobs      *jobs
+	setupKeys *setupKeys
 	csp       string
 
 	totpMu  sync.Mutex    // serializes TOTP replay check-and-set
@@ -66,20 +67,21 @@ func New(o Options) *Server {
 		o.Log = slog.New(slog.NewTextHandler(io.Discard, nil))
 	}
 	srv := &Server{
-		cfg:     o.Config,
-		store:   o.Store,
-		log:     o.Log,
-		authLog: o.AuthLog,
-		limiter: auth.NewLimiter(5, 10*time.Minute),
-		vm:      o.VM,
-		vmRead:  o.VMRead,
-		latest:  metrics.NewLatest(),
-		web:     o.Web,
-		version: o.Version,
-		secrets: o.Secrets,
-		jobs:    &jobs{m: map[string]*job{}},
-		now:     time.Now,
-		hashSem: make(chan struct{}, 2),
+		cfg:       o.Config,
+		store:     o.Store,
+		log:       o.Log,
+		authLog:   o.AuthLog,
+		limiter:   auth.NewLimiter(5, 10*time.Minute),
+		vm:        o.VM,
+		vmRead:    o.VMRead,
+		latest:    metrics.NewLatest(),
+		web:       o.Web,
+		version:   o.Version,
+		secrets:   o.Secrets,
+		jobs:      &jobs{m: map[string]*job{}},
+		setupKeys: &setupKeys{m: map[string]setupKey{}},
+		now:       time.Now,
+		hashSem:   make(chan struct{}, 2),
 	}
 	// 'self' covers same-origin WebSocket in current browsers; older Safari
 	// needs the wss:// origin spelled out.
@@ -110,6 +112,7 @@ func (s *Server) Handler() http.Handler {
 
 	mux.Handle("GET /api/servers", s.requireSession(http.HandlerFunc(s.handleServers)))
 	mux.Handle("POST /api/servers/probe", s.requireSession(http.HandlerFunc(s.handleProbe)))
+	mux.Handle("POST /api/servers/setup-key", s.requireSession(http.HandlerFunc(s.handleSetupKey)))
 	mux.Handle("POST /api/servers/onboard", s.requireSession(http.HandlerFunc(s.handleOnboard)))
 	mux.Handle("GET /api/onboard/{job}", s.requireSession(http.HandlerFunc(s.handleOnboardStatus)))
 	mux.Handle("DELETE /api/onboard/{job}", s.requireSession(http.HandlerFunc(s.handleOnboardCancel)))
@@ -201,8 +204,11 @@ func writeError(w http.ResponseWriter, status int, code string) {
 	writeJSON(w, status, map[string]string{"error": code})
 }
 
-func readJSON(r *http.Request, v any) error {
-	dec := json.NewDecoder(io.LimitReader(r.Body, 8<<10))
+func readJSON(r *http.Request, v any) error { return readJSONLimit(r, v, 8<<10) }
+
+// readJSONLimit is readJSON with a body limit for larger requests.
+func readJSONLimit(r *http.Request, v any, limit int64) error {
+	dec := json.NewDecoder(io.LimitReader(r.Body, limit))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(v); err != nil {
 		return fmt.Errorf("bad json: %w", err)

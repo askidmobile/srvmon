@@ -332,3 +332,102 @@ func TestSudoPasswordLineNeverExecuted(t *testing.T) {
 		}
 	}
 }
+
+// Password logins are off: the owner's key (or the panel key added by hand)
+// logs in instead. With DropLoginKey the panel key leaves root's
+// authorized_keys once srvmon has it.
+func TestOnboardWithLoginKey(t *testing.T) {
+	ts := newTestServer(t)
+	owner, _ := GenerateKey("owner")
+	ownerPub, _ := ParseHostKey(owner.Public)
+	ownerSigner, _ := ssh.ParsePrivateKey(owner.Private)
+	panel, _ := GenerateKey("panel")
+	panelPub, _ := ParseHostKey(panel.Public)
+	panelSigner, _ := ssh.ParsePrivateKey(panel.Private)
+	ts.handler = func(cmd, stdin string) (string, uint32) {
+		switch {
+		case cmd == "id -u":
+			return "0\n", 0
+		case strings.Contains(stdin, "authorized_keys"):
+			ts.mu.Lock()
+			ts.authorized = append(ts.authorized, panelPub)
+			ts.mu.Unlock()
+			return "", 0
+		}
+		return "", 0
+	}
+	for _, c := range []struct {
+		name   string
+		signer ssh.Signer
+		drop   bool
+	}{{"owner key", ownerSigner, false}, {"panel key", panelSigner, true}} {
+		ts.mu.Lock()
+		ts.authorized = []ssh.PublicKey{ownerPub}
+		if c.drop {
+			ts.authorized = []ssh.PublicKey{panelPub}
+		}
+		ts.execs = nil
+		ts.mu.Unlock()
+		_, err := Onboard(context.Background(), OnboardParams{
+			Addr: ts.addr, User: "root", LoginKey: c.signer, DropLoginKey: c.drop,
+			HostKey: ts.hostKey, Key: panel, SSHUser: "srvmon",
+		}, func(string, string) {})
+		if err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		ts.mu.Lock()
+		dropped := false
+		for _, e := range ts.execs {
+			if strings.HasPrefix(e, "root: ") && strings.Contains(e, "grep -vF") {
+				dropped = true
+			}
+		}
+		ts.mu.Unlock()
+		if dropped != c.drop {
+			t.Fatalf("%s: drop ran = %v", c.name, dropped)
+		}
+	}
+}
+
+// A non-root login with a key and no sudo password must stop early when
+// sudo wants one, instead of failing halfway.
+func TestOnboardKeyNeedsSudoPassword(t *testing.T) {
+	ts := newTestServer(t)
+	owner, _ := GenerateKey("owner")
+	ownerPub, _ := ParseHostKey(owner.Public)
+	ownerSigner, _ := ssh.ParsePrivateKey(owner.Private)
+	ts.authorized = []ssh.PublicKey{ownerPub}
+	ts.handler = func(cmd, _ string) (string, uint32) {
+		if cmd == "id -u" {
+			return "1000\n", 0
+		}
+		return "", 1 // sudo -n fails: a password is required
+	}
+	_, err := Onboard(context.Background(), OnboardParams{
+		Addr: ts.addr, User: "admin", LoginKey: ownerSigner, HostKey: ts.hostKey, Key: owner, SSHUser: "srvmon",
+	}, func(string, string) {})
+	if err == nil || !strings.Contains(err.Error(), "пароль sudo") {
+		t.Fatalf("want a sudo password error, got %v", err)
+	}
+}
+
+func TestDropKeyScript(t *testing.T) {
+	if dropKeyScript("") != "exit 0\n" {
+		t.Fatal("an empty key must not match every line")
+	}
+	k, _ := GenerateKey("c")
+	dir := t.TempDir()
+	lines := []string{"ssh-ed25519 AAAAother keep", "from=\"1.2.3.4\" " + k.Public + " pasted", "ssh-rsa AAAArsa keep2"}
+	if err := writeFile(dir+"/.ssh/authorized_keys", strings.Join(lines, "\n")+"\n"); err != nil {
+		t.Fatal(err)
+	}
+	c := exec.Command("sh", "-c", dropKeyScript(k.Public))
+	c.Env = []string{"HOME=" + dir, "PATH=/usr/bin:/bin"}
+	if out, err := c.CombinedOutput(); err != nil {
+		t.Fatalf("%v %s", err, out)
+	}
+	got, _ := readFile(dir + "/.ssh/authorized_keys")
+	if got != "ssh-ed25519 AAAAother keep\nssh-rsa AAAArsa keep2\n" {
+		t.Fatalf("authorized_keys = %q", got)
+	}
+}
