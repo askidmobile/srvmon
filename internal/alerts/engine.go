@@ -28,6 +28,8 @@ const (
 	startupGrace = time.Minute
 	// keepHistory is how long closed alerts and events are kept.
 	keepHistory = 90 * 24 * time.Hour
+	// eventRetry: how long an undelivered event is still worth sending.
+	eventRetry = 12 * time.Hour
 )
 
 // Notification is an alert that fired, resolved or an event.
@@ -167,6 +169,13 @@ func (e *Engine) Evaluate(ctx context.Context) error {
 		for _, srv := range servers {
 			conds, ok := e.check(r, srv, now)
 			if !ok {
+				// No fresh data: open alerts stay, but unobserved time
+				// must not count towards a duration.
+				for k := range e.pending {
+					if k.rule == r.ID && k.server == srv.ID {
+						delete(e.pending, k)
+					}
+				}
 				continue
 			}
 			holds := map[string]cond{}
@@ -257,6 +266,15 @@ func (e *Engine) Evaluate(ctx context.Context) error {
 				}
 			}
 		}
+	}
+	// Events held back by quiet hours (or sent before the bot was set up)
+	// go out once they may.
+	events, err := e.st.UnnotifiedEvents(ctx, now.Add(-eventRetry))
+	if err != nil {
+		return err
+	}
+	for _, a := range events {
+		e.notify(ctx, a, false)
 	}
 	return nil
 }

@@ -264,6 +264,13 @@ func (s *Store) RecentAlerts(ctx context.Context, limit int) ([]Alert, error) {
 	return s.queryAlerts(ctx, `ORDER BY started_at DESC, id DESC LIMIT ?`, limit)
 }
 
+// UnnotifiedEvents returns Telegram events since t that were not delivered,
+// oldest first.
+func (s *Store) UnnotifiedEvents(ctx context.Context, since time.Time) ([]Alert, error) {
+	return s.queryAlerts(ctx, `WHERE state = 'event' AND notified = 0 AND channel = 'tg' AND started_at >= ?
+		ORDER BY started_at, id LIMIT 20`, since.Unix())
+}
+
 // GetAlert returns one alert or ErrNotFound.
 func (s *Store) GetAlert(ctx context.Context, id int64) (Alert, error) {
 	list, err := s.queryAlerts(ctx, `WHERE id = ?`, id)

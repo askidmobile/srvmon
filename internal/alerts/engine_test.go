@@ -497,3 +497,34 @@ func TestResetRuleDropsTimers(t *testing.T) {
 		t.Fatal("pending timers kept")
 	}
 }
+
+func TestEventsDeferredByQuietHours(t *testing.T) {
+	te := newTestEnv(t)
+	ctx := context.Background()
+	now := te.now.UTC()
+	_ = SaveQuiet(ctx, te.st, Quiet{From: now.Add(-time.Hour).Format("15:04"), To: now.Add(time.Hour).Format("15:04"), TZ: "UTC"})
+	te.e.Event(ctx, store.KindBruteforce, 0, "", "1.2.3.4", "подбор")
+	te.eval(t)
+	if len(te.n.list()) != 0 {
+		t.Fatal("event sent during quiet hours")
+	}
+	_ = SaveQuiet(ctx, te.st, Quiet{})
+	te.eval(t)
+	te.eval(t)
+	if got := te.n.list(); len(got) != 1 || got[0].Alert.Kind != store.KindBruteforce {
+		t.Fatalf("after quiet hours: %+v", got)
+	}
+}
+
+func TestStaleDataResetsPendingTimer(t *testing.T) {
+	te := newTestEnv(t)
+	te.push(protocol.Report{Host: host(97)})
+	te.eval(t)
+	te.now = te.now.Add(10 * time.Minute) // agent silent: snapshot is stale
+	te.eval(t)
+	for k := range te.e.pending {
+		if k.rule == te.rule(t, store.KindCPU).ID {
+			t.Fatal("pending timer survived stale data")
+		}
+	}
+}
