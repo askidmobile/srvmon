@@ -1,0 +1,22 @@
+# srvmon-agent for a monitored server.
+#   SRVMON_URL=https://mon.example.com SRVMON_TOKEN=a_xxx docker compose up -d
+# The agent only pushes metrics; it opens no ports and runs no commands.
+name: srvmon-agent
+
+services:
+  agent:
+    image: ghcr.io/askidmobile/srvmon-agent:${SRVMON_TAG:-latest}
+    restart: unless-stopped
+    network_mode: host # real host interfaces in /proc/net/dev
+    pid: host          # host processes (server screen, stage 2)
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      SRVMON_URL: ${SRVMON_URL:?set SRVMON_URL}
+      SRVMON_TOKEN: ${SRVMON_TOKEN:?set SRVMON_TOKEN}
+      SRVMON_INTERVAL: ${SRVMON_INTERVAL:-5s}
+    volumes:
+      - /proc:/host/proc:ro
+      - /:/host:ro,rslave
+      - /var/run/docker.sock:/var/run/docker.sock:ro

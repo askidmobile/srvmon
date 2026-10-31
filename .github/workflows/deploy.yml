@@ -1,0 +1,116 @@
+name: Deploy
+
+# Deploys the stack to the monitoring server after a successful Release on
+# main, or manually with a chosen tag. Configure in the GitHub Environment
+# "production" (Settings → Environments):
+#   secrets: DEPLOY_HOST, DEPLOY_USER, DEPLOY_SSH_KEY, DEPLOY_KNOWN_HOSTS
+#            DEPLOY_PORT (optional, default 22)
+#            GHCR_PULL_TOKEN (optional PAT with read:packages; default GITHUB_TOKEN)
+#   vars:    DEPLOY_PATH (default /opt/srvmon), SRVMON_DOMAIN, ACME_EMAIL
+# While DEPLOY_HOST is not set the job is skipped with a notice.
+on:
+  workflow_run:
+    workflows: [Release]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Image tag to deploy (e.g. sha-abc1234, latest, 1.2.0)"
+        required: true
+        default: latest
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+      DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+      DEPLOY_PORT: ${{ secrets.DEPLOY_PORT || '22' }}
+      DEPLOY_PATH: ${{ vars.DEPLOY_PATH || '/opt/srvmon' }}
+    steps:
+      - name: check configuration
+        id: cfg
+        run: |
+          if [ -z "$DEPLOY_HOST" ] || [ -z "$DEPLOY_USER" ]; then
+            echo "::notice::Deploy skipped: set DEPLOY_HOST, DEPLOY_USER, DEPLOY_SSH_KEY and DEPLOY_KNOWN_HOSTS in the 'production' environment."
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: resolve tag
+        if: steps.cfg.outputs.enabled == 'true'
+        id: tag
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+          RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          if [ -n "$INPUT_TAG" ]; then tag="$INPUT_TAG"; else tag="sha-${RUN_SHA::7}"; fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "Deploying $tag"
+
+      - uses: actions/checkout@v5
+        if: steps.cfg.outputs.enabled == 'true'
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - name: ssh setup
+        if: steps.cfg.outputs.enabled == 'true'
+        env:
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          if [ -n "$KNOWN_HOSTS" ]; then
+            printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          else
+            echo "::warning::DEPLOY_KNOWN_HOSTS is empty, trusting the host key on first use. Set it from: ssh-keyscan -p $DEPLOY_PORT $DEPLOY_HOST"
+            ssh-keyscan -p "$DEPLOY_PORT" "$DEPLOY_HOST" > ~/.ssh/known_hosts
+          fi
+          cat > ~/.ssh/config <<CFG
+          Host deploy
+            HostName $DEPLOY_HOST
+            User $DEPLOY_USER
+            Port $DEPLOY_PORT
+            IdentityFile ~/.ssh/id_deploy
+            IdentitiesOnly yes
+            BatchMode yes
+          CFG
+
+      - name: upload stack files
+        if: steps.cfg.outputs.enabled == 'true'
+        run: |
+          # shellcheck disable=SC2029 # expand locally on purpose
+          ssh deploy "mkdir -p '$DEPLOY_PATH'"
+          scp deploy/docker-compose.yml deploy/Caddyfile deploy/.env.example deploy/remote-deploy.sh "deploy:$DEPLOY_PATH/"
+
+      - name: deploy
+        if: steps.cfg.outputs.enabled == 'true'
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+          GHCR_TOKEN: ${{ secrets.GHCR_PULL_TOKEN || secrets.GITHUB_TOKEN }}
+          GHCR_USER: ${{ github.actor }}
+          SRVMON_DOMAIN: ${{ vars.SRVMON_DOMAIN }}
+          ACME_EMAIL: ${{ vars.ACME_EMAIL }}
+        run: |
+          # shellcheck disable=SC2029 # expand locally on purpose
+          printf '%s' "$GHCR_TOKEN" | ssh deploy "docker login ghcr.io -u '$GHCR_USER' --password-stdin"
+          # shellcheck disable=SC2029
+          ssh deploy "cd '$DEPLOY_PATH' && SRVMON_DOMAIN='$SRVMON_DOMAIN' ACME_EMAIL='$ACME_EMAIL' bash remote-deploy.sh '$TAG'"
+
+      - name: logout registry
+        if: always() && steps.cfg.outputs.enabled == 'true'
+        run: ssh deploy "docker logout ghcr.io" || true
