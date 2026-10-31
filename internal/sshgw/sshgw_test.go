@@ -143,7 +143,12 @@ func TestProbeAndPinnedDial(t *testing.T) {
 	}
 }
 
-func TestOnboard(t *testing.T) {
+func TestOnboard(t *testing.T) { testOnboard(t, true) }
+
+// Without docker on the target the wizard installs it before the agent.
+func TestOnboardInstallsDocker(t *testing.T) { testOnboard(t, false) }
+
+func testOnboard(t *testing.T, hasDocker bool) {
 	ts := newTestServer(t)
 	key, err := GenerateKey("srvmon@test")
 	if err != nil {
@@ -154,6 +159,11 @@ func TestOnboard(t *testing.T) {
 		switch {
 		case cmd == "id -u":
 			return "0\n", 0
+		case cmd == "command -v docker":
+			if hasDocker {
+				return "/usr/bin/docker\n", 0
+			}
+			return "", 1
 		case cmd == "sh -s":
 			scripts = append(scripts, stdin)
 			if strings.Contains(stdin, "authorized_keys") {
@@ -184,8 +194,18 @@ func TestOnboard(t *testing.T) {
 	if strings.Contains(all, "S3cr3t") {
 		t.Fatal("password leaked into log")
 	}
-	if len(scripts) != 3 {
-		t.Fatalf("want user, agent, sshd scripts, got %d", len(scripts))
+	want := 3
+	if !hasDocker {
+		want = 4
+	}
+	if len(scripts) != want {
+		t.Fatalf("want %d scripts (user, [docker,] agent, sshd), got %d", want, len(scripts))
+	}
+	if !hasDocker {
+		if !strings.Contains(scripts[1], "get.docker.com") || !strings.Contains(scripts[1], "U='srvmon'") ||
+			!strings.Contains(scripts[2], "docker run") {
+			t.Fatalf("docker must be installed right before the agent:\n%s", scripts[1])
+		}
 	}
 	for _, s := range scripts {
 		if strings.Contains(s, "S3cr3t") {
@@ -236,6 +256,8 @@ func TestOnboardCancelAfterCommitFinishesSteps(t *testing.T) {
 		switch {
 		case cmd == "id -u":
 			return "0\n", 0
+		case cmd == "command -v docker":
+			return "/usr/bin/docker\n", 0
 		case strings.Contains(stdin, "authorized_keys"):
 			pub, _ := ParseHostKey(key.Public)
 			ts.mu.Lock()
@@ -275,6 +297,8 @@ func TestOnboardCancelBeforeCommit(t *testing.T) {
 		switch {
 		case cmd == "id -u":
 			return "0\n", 0
+		case cmd == "command -v docker":
+			return "/usr/bin/docker\n", 0
 		case strings.Contains(stdin, "authorized_keys"):
 			pub, _ := ParseHostKey(key.Public)
 			ts.mu.Lock()
@@ -368,6 +392,8 @@ func TestOnboardWithLoginKey(t *testing.T) {
 		switch {
 		case cmd == "id -u":
 			return "0\n", 0
+		case cmd == "command -v docker":
+			return "/usr/bin/docker\n", 0
 		case strings.Contains(stdin, "authorized_keys"):
 			ts.mu.Lock()
 			ts.authorized = append(ts.authorized, panelPub)

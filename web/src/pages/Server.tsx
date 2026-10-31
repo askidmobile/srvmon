@@ -356,17 +356,17 @@ function ProcessPanel({ data, filterRef }: { data: ServerDetailView; filterRef: 
             <tbody>
               {rows.map((p) => (
                 <tr key={p.pid} className="hover:bg-secondary/60">
-                  <td className="px-1.5 text-right text-muted-foreground">{p.pid}</td>
+                  <td className="px-1.5 text-right whitespace-nowrap text-muted-foreground">{p.pid}</td>
                   <td
-                    className="max-w-[130px] truncate px-1.5 text-hi"
+                    className="w-full max-w-0 truncate px-1.5 text-hi"
                     title={`${p.cmd || p.name}${p.user ? `\nuser: ${p.user}` : ""}`}
                   >
                     {p.name}
                   </td>
-                  <td className="max-w-[90px] truncate px-1.5 text-muted-foreground" title={p.container}>
+                  <td className="max-w-[72px] truncate px-1.5 text-muted-foreground" title={p.container}>
                     {p.container || "─"}
                   </td>
-                  <td className="px-1.5 text-right" style={{ color: levelColor(p.cpu / Math.max(1, d.cores.length) * 4) }}>
+                  <td className="px-1.5 text-right whitespace-nowrap" style={{ color: levelColor(p.cpu / Math.max(1, d.cores.length) * 4) }}>
                     {p.cpu.toFixed(1)}
                   </td>
                   <td className="px-1.5 text-right whitespace-nowrap">{formatBytes(p.mem)}</td>

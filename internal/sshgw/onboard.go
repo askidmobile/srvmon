@@ -216,16 +216,28 @@ func Onboard(ctx context.Context, p OnboardParams, log Logger) (Result, error) {
 	}
 
 	if a := p.Agent; a != nil {
-		log(StepRun, "docker run srvmon-agent ("+a.Image+")")
-		_, errOut, err := pr.run(ctx, agentScript(*a))
-		switch {
-		case err == nil:
-			res.AgentInstalled = true
-			log(StepOK, "srvmon-agent запущен")
-		case strings.Contains(errOut, "no-docker"):
-			log(StepWarn, "docker не установлен: агент не запущен, поставьте docker и переустановите агента")
-		default:
-			log(StepWarn, "агент не запущен: "+firstLine(errOut, err))
+		dockerOK := true
+		if _, _, err := Run(ctx, c, "command -v docker", nil); err != nil {
+			log(StepRun, "docker не найден — ставлю (get.docker.com, 1–3 мин)")
+			if _, errOut, err := pr.run(ctx, dockerScript(p.SSHUser)); err != nil {
+				dockerOK = false
+				log(StepWarn, "docker не установлен: "+firstLine(errOut, err)+"; агент не запущен")
+			} else {
+				log(StepOK, "docker установлен, "+p.SSHUser+" в группе docker")
+			}
+		}
+		if dockerOK {
+			log(StepRun, "docker run srvmon-agent ("+a.Image+")")
+			_, errOut, err := pr.run(ctx, agentScript(*a))
+			switch {
+			case err == nil:
+				res.AgentInstalled = true
+				log(StepOK, "srvmon-agent запущен")
+			case strings.Contains(errOut, "no-docker"):
+				log(StepWarn, "docker не установлен: агент не запущен, поставьте docker и переустановите агента")
+			default:
+				log(StepWarn, "агент не запущен: "+firstLine(errOut, err))
+			}
 		}
 	}
 
@@ -312,6 +324,34 @@ fi
 `)
 	}
 	return b.String()
+}
+
+// dockerScript installs docker (Alpine: apk, otherwise the official
+// get.docker.com script), starts the daemon and adds user to the docker
+// group, which did not exist yet when userScript ran.
+func dockerScript(user string) string {
+	return "U=" + shq(user) + "\n" + `set -e
+L=/var/log/srvmon-docker-install.log
+if command -v apk >/dev/null 2>&1; then
+  apk add --no-cache docker >"$L" 2>&1
+  rc-update add docker default >/dev/null 2>&1 || true
+elif command -v curl >/dev/null 2>&1; then
+  curl -fsSL https://get.docker.com | sh >"$L" 2>&1 || { echo "get.docker.com: ошибка, лог $L" >&2; exit 5; }
+elif command -v wget >/dev/null 2>&1; then
+  wget -qO- https://get.docker.com | sh >"$L" 2>&1 || { echo "get.docker.com: ошибка, лог $L" >&2; exit 5; }
+else
+  echo "нет curl и wget для get.docker.com" >&2; exit 5
+fi
+command -v docker >/dev/null 2>&1 || { echo "docker не появился после установки, лог $L" >&2; exit 5; }
+if command -v systemctl >/dev/null 2>&1; then systemctl enable --now docker >/dev/null 2>&1 || true
+else service docker start >/dev/null 2>&1 || true; fi
+i=0
+until docker info >/dev/null 2>&1; do
+  i=$((i+1)); [ "$i" -le 30 ] || { echo "dockerd не запустился за 30 с" >&2; exit 5; }
+  sleep 1
+done
+if command -v usermod >/dev/null 2>&1; then usermod -aG docker "$U"; else addgroup "$U" docker; fi
+`
 }
 
 // agentScript writes the token to a root-only file and (re)starts the agent
