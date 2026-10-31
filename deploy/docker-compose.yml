@@ -50,6 +50,10 @@ services:
       SRVMON_AI_URL: http://ai:8090
       SRVMON_AI_TOKEN: ${SRVMON_AI_TOKEN:-}
       SRVMON_AI_TOOLS_LISTEN: ":8081"
+      # Bans of the host fail2ban (action srvmon-notify, see install-host.sh).
+      SRVMON_FAIL2BAN_EVENTS: /var/log/srvmon/fail2ban-events.log
+      # Bot API base URL, e.g. a proxy if api.telegram.org is unreachable.
+      SRVMON_TELEGRAM_API: ${SRVMON_TELEGRAM_API:-}
     volumes:
       - srvmon-data:/data
       # fail2ban on the host reads this file (jail srvmon-auth).

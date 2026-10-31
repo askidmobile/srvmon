@@ -10,6 +10,12 @@ export class ApiError extends Error {
   }
 }
 
+// Validation errors carry a message for the user.
+export function errorMessage(e: unknown, fallback: string): string {
+  if (e instanceof ApiError && e.message && e.message !== e.code) return e.message;
+  return fallback;
+}
+
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   const res = await fetch(path, {
     method,
@@ -20,7 +26,10 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     const retry = Number(res.headers.get("Retry-After") ?? "") || undefined;
-    throw new ApiError(res.status, (data as { error?: string }).error ?? "error", retry);
+    const err = new ApiError(res.status, (data as { error?: string }).error ?? "error", retry);
+    const msg = (data as { message?: string }).message;
+    if (msg) err.message = msg;
+    throw err;
   }
   return data as T;
 }
@@ -111,7 +120,89 @@ export const api = {
   deleteServer: (id: number) => request<unknown>("DELETE", `/api/servers/${id}`),
   containerAction: (id: number, name: string, action: "restart" | "stop" | "start") =>
     request<{ ok: boolean }>("POST", `/api/servers/${id}/containers/${encodeURIComponent(name)}/${action}`),
+  alerts: () => request<AlertsView>("GET", "/api/alerts"),
+  alertSummary: () => request<AlertSummary>("GET", "/api/alerts/summary"),
+  ackAlert: (id: number) => request<Alert>("POST", `/api/alerts/${id}/ack`),
+  silenceAlert: (id: number, minutes: number) =>
+    request<{ alert: Alert; until: string }>("POST", `/api/alerts/${id}/silence`, { minutes }),
+  rules: () => request<Rule[]>("GET", "/api/alert-rules"),
+  createRule: (r: Omit<Rule, "id">) => request<Rule>("POST", "/api/alert-rules", r),
+  updateRule: (r: Rule) => request<Rule>("PUT", `/api/alert-rules/${r.id}`, r),
+  deleteRule: (id: number) => request<unknown>("DELETE", `/api/alert-rules/${id}`),
+  notify: () => request<NotifyView>("GET", "/api/notify"),
+  saveTelegram: (chat_id: string, token?: string) =>
+    request<TelegramStatus>("PUT", "/api/notify/telegram", token === undefined ? { chat_id } : { chat_id, token }),
+  testTelegram: () => request<unknown>("POST", "/api/notify/telegram/test"),
+  saveQuiet: (q: Quiet) => request<Quiet>("PUT", "/api/notify/quiet", q),
 };
+
+// --- stage 4: alerts and Telegram ---
+
+export type Severity = "crit" | "warn" | "info";
+export type Channel = "tg" | "web";
+
+export interface Alert {
+  id: number;
+  rule_id: number;
+  kind: string;
+  server_id: number;
+  server_name: string;
+  subject: string;
+  severity: Severity;
+  channel: Channel;
+  state: "firing" | "acked" | "resolved" | "event";
+  message: string;
+  started_at: string;
+  acked_at?: string;
+  resolved_at?: string;
+  notified: boolean;
+}
+
+export interface AlertsView {
+  open: Alert[];
+  recent: Alert[];
+  last24h: number;
+}
+
+export interface AlertSummary {
+  open: number;
+  crit: number;
+  last24h: number;
+  telegram: "ok" | "off" | "error";
+  latest: Alert[];
+}
+
+export interface Rule {
+  id: number;
+  kind: string;
+  enabled: boolean;
+  threshold: number;
+  duration_sec: number;
+  severity: Severity;
+  channel: Channel;
+}
+
+export interface TelegramStatus {
+  configured: boolean;
+  chat_id: string;
+  connected: boolean;
+  bot_name?: string;
+  last_error?: string;
+  last_message?: string;
+  last_sent?: string;
+  pending_chat?: { id: string; title: string; at: string };
+}
+
+export interface Quiet {
+  from: string;
+  to: string;
+  tz: string;
+}
+
+export interface NotifyView {
+  telegram: TelegramStatus;
+  quiet: Quiet;
+}
 
 // --- server screen (stage 2) ---
 

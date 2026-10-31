@@ -77,6 +77,9 @@ if [[ -f /etc/fail2ban/jail.d/srvmon.conf ]]; then
     echo "::warning::fail2ban jail srvmon-auth bans in $have, proxy mode $PROXY needs $want: run sudo bash $(pwd)/install-host.sh"
   fi
 fi
+if [[ -f /etc/fail2ban/jail.d/srvmon.conf && ! -f /etc/fail2ban/action.d/srvmon-notify.conf ]]; then
+  echo "::warning::fail2ban bans are not reported to the panel yet: run sudo bash $(pwd)/install-host.sh"
+fi
 
 wait_healthy() {
   local id status

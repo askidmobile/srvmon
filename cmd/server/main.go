@@ -122,6 +122,8 @@ func serve() error {
 		Web:     web.Dist(),
 		Version: version,
 		Secrets: box,
+
+		TelegramAPI: cfg.TelegramAPI,
 	})
 	hs := &http.Server{
 		Addr:              cfg.Listen,
@@ -170,6 +172,7 @@ func serve() error {
 		}()
 		log.Info("ai agent enabled", "ai", cfg.AIURL, "tools", cfg.AIToolsListen)
 	}
+	srv.Start(ctx, cfg.Fail2banEvents, cfg.SelfName)
 	log.Info("srvmon-server started", "listen", cfg.Listen, "version", version)
 	if err := hs.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return err

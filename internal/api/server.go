@@ -17,11 +17,13 @@ import (
 	"time"
 
 	"github.com/askidmobile/srvmon/internal/aiagent"
+	"github.com/askidmobile/srvmon/internal/alerts"
 	"github.com/askidmobile/srvmon/internal/auth"
 	"github.com/askidmobile/srvmon/internal/config"
 	"github.com/askidmobile/srvmon/internal/metrics"
 	"github.com/askidmobile/srvmon/internal/secret"
 	"github.com/askidmobile/srvmon/internal/store"
+	"github.com/askidmobile/srvmon/internal/telegram"
 )
 
 // Server wires dependencies for the HTTP handlers.
@@ -41,6 +43,8 @@ type Server struct {
 	jobs      *jobs
 	setupKeys *setupKeys
 	csp       string
+	alerts    *alerts.Engine
+	bot       *telegram.Bot // nil when its settings cannot be loaded
 
 	ai              *aiagent.Client // nil: agent disabled
 	agent           *agentState
@@ -63,12 +67,16 @@ type Options struct {
 	Web     fs.FS           // built frontend (contents of web/dist)
 	Version string
 	Secrets *secret.Box // seals SSH private keys; nil disables the add wizard
-	// Notify sends a critical message (Telegram) for agent tasks; optional.
+	// Notify sends a critical HTML message for agent tasks; default: the
+	// Telegram bot.
 	Notify func(ctx context.Context, text string) error
 	// OnActionPending is called when the agent asks to run a command that
-	// needs confirmation (e.g. to offer approve buttons in Telegram, which
-	// then call Server.DecideAgentAction); optional.
+	// needs confirmation; default: Telegram approve / reject buttons, which
+	// call Server.DecideAgentAction.
 	OnActionPending func(store.AgentAction)
+	// TelegramAPI overrides the Bot API base URL (tests, or a proxy where
+	// api.telegram.org is blocked).
+	TelegramAPI string
 }
 
 // New builds the server.
@@ -101,6 +109,17 @@ func New(o Options) *Server {
 		notify:          o.Notify,
 		onActionPending: o.OnActionPending,
 	}
+	srv.alerts = alerts.New(o.Store, srv.latest, o.Log)
+	bot, err := telegram.New(context.Background(), telegram.Options{
+		Store: o.Store, Secrets: o.Secrets, Engine: srv.alerts, Latest: srv.latest, Log: o.Log, API: o.TelegramAPI,
+	})
+	if err != nil {
+		o.Log.Error("telegram: load settings", "err", err)
+	} else {
+		srv.bot = bot
+		srv.alerts.SetNotifier(bot)
+		srv.wireAgentTelegram(bot)
+	}
 	// 'self' covers same-origin WebSocket in current browsers; older Safari
 	// needs the wss:// origin spelled out.
 	connect := "'self'"
@@ -115,6 +134,21 @@ func New(o Options) *Server {
 		connect + "; frame-ancestors 'none'"
 	return srv
 }
+
+// Start runs the background work: alert evaluation, the Telegram bot and,
+// when fail2banEvents is set, following fail2ban bans of the host.
+func (s *Server) Start(ctx context.Context, fail2banEvents, hostName string) {
+	go s.alerts.Run(ctx)
+	if s.bot != nil {
+		go s.bot.Run(ctx)
+	}
+	if fail2banEvents != "" {
+		go s.alerts.TailFail2ban(ctx, fail2banEvents, hostName)
+	}
+}
+
+// Bot returns the Telegram bot (nil if it failed to load).
+func (s *Server) Bot() *telegram.Bot { return s.bot }
 
 // Handler returns the root HTTP handler.
 func (s *Server) Handler() http.Handler {
@@ -157,6 +191,7 @@ func (s *Server) Handler() http.Handler {
 	agent("DELETE /api/agent/tasks/{id}", s.handleAgentDeleteTask)
 	agent("POST /api/agent/tasks/{id}/run", s.handleAgentRunTask)
 
+	s.alertRoutes(mux)
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "not_found")
 	})

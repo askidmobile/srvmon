@@ -588,6 +588,7 @@ func (s *Server) handleDeleteServer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.latest.Forget(id)
+	s.alerts.Forget(id)
 	_ = s.store.Audit(r.Context(), s.clientIP(r), "server_delete", strconv.FormatInt(id, 10))
 	writeJSON(w, http.StatusOK, map[string]bool{"deleted": true})
 }

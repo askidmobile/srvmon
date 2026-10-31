@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"fmt"
+	"html"
 	"strings"
 	"time"
 
@@ -111,7 +112,7 @@ func (s *Server) runTask(t store.AgentTask, trigger string) {
 	}
 	_ = s.store.Audit(context.Background(), "agent", "agent_task_run", fmt.Sprintf("%s %s", t.Name, status))
 	if t.Notify == "telegram" && s.notify != nil && (status == "error" || strings.HasPrefix(result, "ALERT")) {
-		text := fmt.Sprintf("🤖 задача #%d %s: %s", t.ID, t.Name, result)
+		text := fmt.Sprintf("🤖 <b>задача #%d %s</b>\n%s", t.ID, html.EscapeString(t.Name), html.EscapeString(result))
 		if err := s.notify(context.Background(), text); err != nil {
 			s.log.Warn("agent task notify", "err", err)
 		}

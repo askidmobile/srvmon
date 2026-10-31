@@ -54,6 +54,7 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.latest.Put(serverID, reports...)
+	s.alerts.Observe(serverID, reports...)
 	writeJSON(w, http.StatusOK, protocol.IngestResponse{Detail: s.latest.Watching(serverID)})
 }
 

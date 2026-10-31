@@ -46,11 +46,6 @@ func (s *Server) agentEnabled(w http.ResponseWriter) bool {
 	return true
 }
 
-func pathID(r *http.Request, name string) (int64, bool) {
-	id, err := strconv.ParseInt(r.PathValue(name), 10, 64)
-	return id, err == nil && id > 0
-}
-
 func (s *Server) handleAgentStatus(w http.ResponseWriter, r *http.Request) {
 	out := map[string]any{"enabled": s.ai != nil}
 	if s.ai != nil {
@@ -127,7 +122,7 @@ func (s *Server) handleAgentNewChat(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) chatFromPath(w http.ResponseWriter, r *http.Request) (store.AgentChat, bool) {
-	id, ok := pathID(r, "id")
+	id, ok := pathID(r)
 	if !ok {
 		writeError(w, http.StatusNotFound, "not_found")
 		return store.AgentChat{}, false
@@ -356,7 +351,7 @@ func (s *Server) handleAgentActions(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAgentDecide(w http.ResponseWriter, r *http.Request) {
-	id, ok := pathID(r, "id")
+	id, ok := pathID(r)
 	if !ok {
 		writeError(w, http.StatusNotFound, "not_found")
 		return
@@ -514,7 +509,7 @@ func (s *Server) handleAgentNewTask(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) taskFromPath(w http.ResponseWriter, r *http.Request) (store.AgentTask, bool) {
-	id, ok := pathID(r, "id")
+	id, ok := pathID(r)
 	if !ok {
 		writeError(w, http.StatusNotFound, "not_found")
 		return store.AgentTask{}, false
