@@ -152,6 +152,26 @@ func serve() error {
 		defer cancel()
 		_ = hs.Shutdown(shutdown)
 	}()
+	go srv.RunAgentScheduler(ctx)
+	if cfg.AIEnabled() {
+		// Tool API for the srvmon-ai container: compose network only, never
+		// published or proxied.
+		tools := &http.Server{
+			Addr:              cfg.AIToolsListen,
+			Handler:           srv.AgentToolsHandler(),
+			ReadHeaderTimeout: 10 * time.Second,
+		}
+		go func() {
+			<-ctx.Done()
+			_ = tools.Close()
+		}()
+		go func() {
+			if err := tools.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				log.Error("agent tool api", "err", err)
+			}
+		}()
+		log.Info("ai agent enabled", "ai", cfg.AIURL, "tools", cfg.AIToolsListen)
+	}
 	srv.Start(ctx, cfg.Fail2banEvents, cfg.SelfName)
 	log.Info("srvmon-server started", "listen", cfg.Listen, "version", version)
 	if err := hs.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {

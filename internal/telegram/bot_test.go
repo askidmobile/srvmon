@@ -288,3 +288,62 @@ func TestLongMessageIsSentAsPlainText(t *testing.T) {
 		t.Fatalf("parse_mode=%v len=%d text tail=%q", m["parse_mode"], len(got), got[len(got)-20:])
 	}
 }
+
+func TestAgentActionButtonsAndAsk(t *testing.T) {
+	e := newBotEnv(t)
+	ctx := context.Background()
+	tok := testToken
+	if err := e.bot.Configure(ctx, &tok, 777); err != nil {
+		t.Fatal(err)
+	}
+	decided := make(chan string, 1)
+	e.bot.SetActionDecider(func(_ context.Context, id int64, approve bool) string {
+		decided <- jsonNum(id) + map[bool]string{true: ":ok", false: ":no"}[approve]
+		return "готово"
+	})
+	release := make(chan struct{})
+	e.bot.SetAsk(func(context.Context, string) (string, error) {
+		<-release // a slow agent must not block the polling loop
+		return "диск в норме <ok>", nil
+	})
+	e.run(t)
+
+	if !e.bot.SendAction(42, "🤖 restart nginx") {
+		t.Fatal("SendAction refused")
+	}
+	sent := e.api.waitSent(t, 1)
+	kb, _ := json.Marshal(sent[0]["reply_markup"])
+	if !strings.Contains(string(kb), "act:42:ok") || !strings.Contains(string(kb), "act:42:no") {
+		t.Fatalf("buttons = %s", kb)
+	}
+
+	e.api.queue(msg(777, "/ask что с диском?"))
+	sent = e.api.waitSent(t, 2)
+	if !strings.Contains(sent[1]["text"].(string), "думает") {
+		t.Fatalf("ask ack = %v", sent[1])
+	}
+	// While the answer is pending, a button press is still handled.
+	e.api.queue(map[string]any{"callback_query": map[string]any{
+		"id": "cb1", "data": "act:42:ok",
+		"message": map[string]any{"message_id": 5, "date": time.Now().Unix(), "chat": map[string]any{"id": 777}},
+	}})
+	select {
+	case got := <-decided:
+		if got != "42:ok" {
+			t.Fatalf("decided %s", got)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("button not handled while /ask runs")
+	}
+	close(release)
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		for _, m := range e.api.messages() {
+			if strings.Contains(m["text"].(string), "диск в норме &lt;ok&gt;") {
+				return
+			}
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("no answer: %+v", e.api.messages())
+}

@@ -333,6 +333,26 @@ func TestSudoPasswordLineNeverExecuted(t *testing.T) {
 	}
 }
 
+func TestCappedBuffer(t *testing.T) {
+	b := &CappedBuffer{Head: 4, Tail: 4}
+	for _, s := range []string{"ab", "cdef", "ghij", "klmnop"} {
+		b.Write([]byte(s))
+	}
+	if got := b.String(); got != "abcd\n[… пропущено 8 байт …]\nmnop" || b.Len() != 16 {
+		t.Fatalf("%q %d", got, b.Len())
+	}
+	small := &CappedBuffer{Head: 4, Tail: 4}
+	small.Write([]byte("abcdef"))
+	if got := small.String(); got != "abcdef" {
+		t.Fatalf("%q", got)
+	}
+	big := &CappedBuffer{Head: 2, Tail: 3}
+	big.Write([]byte("0123456789"))
+	if got := big.String(); got != "01\n[… пропущено 5 байт …]\n789" {
+		t.Fatalf("%q", got)
+	}
+}
+
 // Password logins are off: the owner's key (or the panel key added by hand)
 // logs in instead. With DropLoginKey the panel key leaves root's
 // authorized_keys once srvmon has it.

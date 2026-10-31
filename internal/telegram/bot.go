@@ -69,6 +69,13 @@ type Status struct {
 // AskFunc answers a free-form question (/ask); stage 5 plugs the AI agent in.
 type AskFunc func(ctx context.Context, question string) (string, error)
 
+// ActionFunc approves (or rejects) a command the AI agent asked to run; it
+// returns the answer shown to the owner.
+type ActionFunc func(ctx context.Context, id int64, approve bool) string
+
+// askTimeout bounds one /ask: the agent may wait for a confirmation.
+const askTimeout = 20 * time.Minute
+
 // Options for New.
 type Options struct {
 	Store   *store.Store
@@ -96,6 +103,7 @@ type Bot struct {
 	chatID  int64
 	status  Status
 	ask     AskFunc
+	decide  ActionFunc
 	reload  chan struct{}
 	out     chan outMsg
 	started time.Time
@@ -171,6 +179,30 @@ func (b *Bot) SetAsk(f AskFunc) {
 	b.mu.Lock()
 	b.ask = f
 	b.mu.Unlock()
+}
+
+// SetActionDecider sets the handler of the agent's approve / reject buttons.
+func (b *Bot) SetActionDecider(f ActionFunc) {
+	b.mu.Lock()
+	b.decide = f
+	b.mu.Unlock()
+}
+
+// SendAction queues a confirmation request (HTML text) with approve and
+// reject buttons for agent action id.
+func (b *Bot) SendAction(id int64, text string) bool {
+	token, chat := b.creds()
+	if token == "" || chat == 0 {
+		return false
+	}
+	ids := strconv.FormatInt(id, 10)
+	kb := [][]button{{{Text: "✓ выполнить", Data: "act:" + ids + ":ok"}, {Text: "✗ отклонить", Data: "act:" + ids + ":no"}}}
+	select {
+	case b.out <- outMsg{text: text, keyboard: kb}:
+		return true
+	default:
+		return false
+	}
 }
 
 // Status returns the current bot status.

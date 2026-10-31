@@ -88,3 +88,20 @@ SRVMON_URL=https://mon.example.com SRVMON_TOKEN=a_... docker compose up -d
 ### Веб-терминал
 
 `[3] терминал` (`#/term`, `#/term/<id>`): xterm.js ↔ WebSocket `/api/servers/<id>/terminal` ↔ SSH-клиент в `srvmon-server` ↔ sshd сервера. Вкладки, resize, shell в запущенный контейнер (`docker exec`), переподключение. Приватный ключ не покидает сервер мониторинга; WebSocket проверяет сессию и Origin, открытие и закрытие сессий пишутся в аудит, при истечении сессии панели терминал закрывается.
+
+### AI-агент
+
+Контейнер `srvmon-ai` (pi SDK, `ai/`) с инструментами srvmon: список серверов и контейнеров, команды на серверах через SSH-шлюз, задачи по расписанию. Панель агента — справа в `[3] терминал` (F9 показывает и прячет её) и отдельный раздел `[4] агент` (`#/agent`, `#/agent/<id>`) с журналом подтверждений.
+
+- Команды только для чтения (`docker ps/logs/inspect`, `df`, `journalctl`, `systemctl status`, `cat | grep` …) выполняются сразу. Всё, что меняет сервер, появляется карточкой «⚠ подтвердите» и выполняется только после «✓ выполнить» (ждёт до 15 минут). Решает srvmon-server (`internal/aiagent/policy.go`), а не модель; у контейнера агента нет SSH-ключей.
+- Задачи: «каждые 15 минут проверяй рестарты контейнеров, если > 2 за час — в телеграм» → задача с cron `*/15 * * * *` (UTC). Ответ, начинающийся с `ALERT`, или ошибка уходят в Telegram, когда подключён бот. Там же бот присылает команды агента на подтверждение с кнопками «выполнить» / «отклонить», а `/ask <вопрос>` спрашивает агента прямо из Telegram.
+
+Включение:
+
+1. GitHub → Settings → Environments → `production` → secret `AI_API_KEY` — ключ провайдера (по умолчанию DeepSeek, `platform.deepseek.com`).
+2. Для другого провайдера — variables `SRVMON_AI_PROVIDER` и `SRVMON_AI_MODEL` (например `anthropic` и `claude-sonnet-5-5`, `openrouter` и id модели).
+3. Следующий деплой кладёт ключ в `/opt/srvmon/.env` (режим 600) и поднимает `ai`. Пока ключа нет, панель пишет «агент не готов».
+
+Токен между `server` и `ai` (`SRVMON_AI_TOKEN`) генерируется при деплое. Tool API агента слушает `:8081` только внутри compose-сети и не проксируется наружу.
+
+Локально: `cd ai && npm ci && npm test` (тест с фейковой моделью pi), запуск — `SRVMON_AI_TOKEN=... SRVMON_TOOLS_URL=http://127.0.0.1:8081 SRVMON_AI_API_KEY=... SRVMON_AI_DATA=./data npm start` и `srvmon-server` с `SRVMON_AI_URL=http://127.0.0.1:8090 SRVMON_AI_TOKEN=...`.

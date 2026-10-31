@@ -3,6 +3,7 @@ import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 import { api, type Me } from "@/lib/api";
 import { href, navigate, typingIn, useRoute } from "@/lib/router";
 import { AddServer } from "@/pages/AddServer";
+import { AgentPage } from "@/pages/Agent";
 import { AlertsPage } from "@/pages/Alerts";
 import { Login } from "@/pages/Login";
 import { Overview } from "@/pages/Overview";
@@ -29,12 +30,13 @@ export function App() {
   useEffect(refresh, [refresh]);
   const logout = useCallback(() => setMe((m) => (m ? { ...m, authenticated: false } : m)), []);
 
-  // Global hotkeys from the mockup: [1] overview, [3] terminal, [5] alerts.
+  // Global hotkeys from the mockup: [1] overview, [3] terminal, [4] agent, [5] alerts.
   useEffect(() => {
     const on = (e: KeyboardEvent) => {
       if (typingIn(e) || e.ctrlKey || e.metaKey || e.altKey) return;
       if (e.key === "1") navigate(href.overview());
       else if (e.key === "3") navigate(href.terminal(route.name === "server" ? route.id : undefined));
+      else if (e.key === "4") navigate(href.agent(route.name === "server" ? route.id : undefined));
       else if (e.key === "5") navigate(href.alerts());
     };
     window.addEventListener("keydown", on);
@@ -55,6 +57,8 @@ export function App() {
       return <ServerScreen key={route.id} id={route.id} route={route} version={me.version} onLogout={logout} />;
     case "add":
       return <AddServer key={route.id ?? 0} attachId={route.id} route={route} version={me.version} onLogout={logout} />;
+    case "agent":
+      return <AgentPage key={route.id ?? 0} serverId={route.id} route={route} version={me.version} onLogout={logout} />;
     case "alerts":
       return <AlertsPage route={route} version={me.version} onLogout={logout} />;
     case "terminal":

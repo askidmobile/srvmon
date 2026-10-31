@@ -45,6 +45,11 @@ services:
       SRVMON_AGENT_IMAGE: ghcr.io/askidmobile/srvmon-agent:${SRVMON_TAG:-latest}
       SRVMON_AGENT_REGISTRY_USER: ${SRVMON_AGENT_REGISTRY_USER:-}
       SRVMON_AGENT_REGISTRY_TOKEN: ${SRVMON_AGENT_REGISTRY_TOKEN:-}
+      # AI agent: srvmon-ai answers on the compose network, and its tools
+      # call back the tool API on :8081 (not published, not proxied).
+      SRVMON_AI_URL: http://ai:8090
+      SRVMON_AI_TOKEN: ${SRVMON_AI_TOKEN:-}
+      SRVMON_AI_TOOLS_LISTEN: ":8081"
       # Bans of the host fail2ban (action srvmon-notify, see install-host.sh).
       SRVMON_FAIL2BAN_EVENTS: /var/log/srvmon/fail2ban-events.log
       # Bot API base URL, e.g. a proxy if api.telegram.org is unreachable.
@@ -85,6 +90,30 @@ services:
       server:
         condition: service_healthy
 
+  # AI agent (pi SDK). Only srvmon tools: no SSH keys, no shell of its own;
+  # commands that change a server wait for the owner's confirmation in
+  # srvmon-server. remote-deploy.sh generates SRVMON_AI_TOKEN; the provider
+  # key comes from the GitHub secret AI_API_KEY.
+  ai:
+    image: ghcr.io/askidmobile/srvmon-ai:${SRVMON_TAG:-latest}
+    restart: unless-stopped
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp
+    environment:
+      SRVMON_AI_TOKEN: ${SRVMON_AI_TOKEN:-}
+      SRVMON_TOOLS_URL: http://server:8081
+      SRVMON_AI_PROVIDER: ${SRVMON_AI_PROVIDER:-deepseek}
+      SRVMON_AI_MODEL: ${SRVMON_AI_MODEL:-deepseek-v4-pro}
+      SRVMON_AI_API_KEY: ${SRVMON_AI_API_KEY:-}
+      SRVMON_AI_THINKING: ${SRVMON_AI_THINKING:-low}
+    volumes:
+      - ai-data:/data
+    expose:
+      - "8090"
+
   victoriametrics:
     image: victoriametrics/victoria-metrics:v1.155.0
     restart: unless-stopped
@@ -102,3 +131,4 @@ volumes:
   caddy-config:
   srvmon-data:
   vm-data:
+  ai-data:

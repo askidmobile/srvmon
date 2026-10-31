@@ -70,6 +70,9 @@ func (b *Bot) alertText(n alerts.Notification) (string, [][]button) {
 }
 
 func (b *Bot) callback(ctx context.Context, data string) string {
+	if rest, ok := strings.CutPrefix(data, "act:"); ok {
+		return b.agentAction(ctx, rest)
+	}
 	action, idStr, _ := strings.Cut(data, ":")
 	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil {
@@ -86,6 +89,22 @@ func (b *Bot) callback(ctx context.Context, data string) string {
 		return fmt.Sprintf("🔕 #%d %s: тишина до %s", a.ID, a.ServerName, until.In(b.loc(ctx)).Format("15:04"))
 	}
 	return "неизвестная кнопка"
+}
+
+// agentAction handles "<id>:ok|no" from the agent's confirmation buttons.
+func (b *Bot) agentAction(ctx context.Context, data string) string {
+	idStr, verdict, _ := strings.Cut(data, ":")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil || (verdict != "ok" && verdict != "no") {
+		return "неизвестная кнопка"
+	}
+	b.mu.Lock()
+	decide := b.decide
+	b.mu.Unlock()
+	if decide == nil {
+		return "AI-агент не подключён"
+	}
+	return decide(ctx, id, verdict == "ok")
 }
 
 func (b *Bot) ack(ctx context.Context, id int64) string {
@@ -138,13 +157,21 @@ func (b *Bot) command(ctx context.Context, text string) (string, [][]button) {
 		ask := b.ask
 		b.mu.Unlock()
 		if ask == nil {
-			return "AI-агент ещё не подключён: он появится на следующем этапе.", nil
+			return "AI-агент не настроен: нужен ключ SRVMON_AI_API_KEY (см. README).", nil
 		}
-		ans, err := ask(ctx, arg)
-		if err != nil {
-			return "Агент не ответил: " + esc(err.Error()), nil
-		}
-		return esc(ans), nil
+		// The agent may take minutes and may wait for a confirmation that
+		// comes as a button press of this same loop: answer from the side.
+		go func() {
+			actx, cancel := context.WithTimeout(context.WithoutCancel(ctx), askTimeout)
+			defer cancel()
+			ans, err := ask(actx, arg)
+			if err != nil {
+				b.Send("Агент не ответил: " + esc(err.Error()))
+				return
+			}
+			b.Send("🤖 " + esc(ans))
+		}()
+		return "🤖 агент думает…", nil
 	}
 	return "Неизвестная команда. " + helpText, nil
 }

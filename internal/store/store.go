@@ -89,6 +89,8 @@ var migrations = []string{
 	ALTER TABLE servers ADD COLUMN ssh_key_enc BLOB;`,
 	// Stage 4: alert rules, alerts and silences (see alerts.go).
 	migrationAlerts,
+	// Stage 5: AI agent chats, confirmations and scheduled tasks (agent.go).
+	agentSchema,
 }
 
 func (s *Store) migrate(ctx context.Context) error {
