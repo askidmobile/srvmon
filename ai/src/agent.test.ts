@@ -152,6 +152,12 @@ test("settings: custom provider, live model list, chat model override", async ()
     const test = await (await post("/v1/test", {})).json();
     assert.equal(test.ok, true, JSON.stringify(test));
 
+    // Overlapping saves apply in order: the last one wins.
+    const custom = (model: string) => ({ provider: "custom", base_url: `${providerUrl}/v1`, api: "openai-completions", api_key: "sk-test", model, models: ["small", "big"] });
+    await Promise.all([setup.apply(custom("big")), setup.apply(custom("small"))]);
+    assert.equal(setup.modelId, "small");
+    assert.equal(setup.resolve()?.id, "small");
+
     // A rejected setup leaves the working one in place.
     const bad = await post("/v1/config", { provider: "no-such-provider", model: "x" });
     assert.equal(bad.status, 400);

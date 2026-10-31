@@ -74,7 +74,16 @@ export class Setup {
   /** Built-in providers as pi ships them, saved before we override them. */
   private originals = new Map<string, { baseUrl: string; catalog: readonly AnyModel[] }>();
 
-  async apply(cfg: AIConfig): Promise<void> {
+  private queue: Promise<unknown> = Promise.resolve();
+
+  /** Applies a setup; overlapping calls run one after another. */
+  apply(cfg: AIConfig): Promise<void> {
+    const run = this.queue.then(() => this.applyOne(cfg));
+    this.queue = run.catch(() => undefined);
+    return run;
+  }
+
+  private async applyOne(cfg: AIConfig): Promise<void> {
     const provider = (cfg.provider || "").trim();
     const modelId = (cfg.model || "").trim();
     // Check what can be checked before touching the runtime, so a bad setup
