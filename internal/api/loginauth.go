@@ -20,8 +20,11 @@ import (
 
 const (
 	maxPrivateKey = 16 << 10
-	setupKeyTTL   = time.Hour
-	maxSetupKeys  = 32
+	// The onboarding body carries a private key (JSON-escaped, so up to
+	// ~1.2x) plus the card: room for the largest key and every card field.
+	onboardBodyLimit = 64 << 10
+	setupKeyTTL      = time.Hour
+	maxSetupKeys     = 32
 )
 
 type loginAuth struct {

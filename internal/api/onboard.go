@@ -288,7 +288,7 @@ type onboardReq struct {
 
 func (s *Server) handleOnboard(w http.ResponseWriter, r *http.Request) {
 	var req onboardReq
-	if err := readJSON(r, &req); err != nil {
+	if err := readJSONLimit(r, &req, onboardBodyLimit); err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request")
 		return
 	}

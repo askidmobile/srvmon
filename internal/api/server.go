@@ -204,8 +204,11 @@ func writeError(w http.ResponseWriter, status int, code string) {
 	writeJSON(w, status, map[string]string{"error": code})
 }
 
-func readJSON(r *http.Request, v any) error {
-	dec := json.NewDecoder(io.LimitReader(r.Body, 8<<10))
+func readJSON(r *http.Request, v any) error { return readJSONLimit(r, v, 8<<10) }
+
+// readJSONLimit is readJSON with a body limit for larger requests.
+func readJSONLimit(r *http.Request, v any, limit int64) error {
+	dec := json.NewDecoder(io.LimitReader(r.Body, limit))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(v); err != nil {
 		return fmt.Errorf("bad json: %w", err)

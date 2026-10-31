@@ -310,3 +310,21 @@ func TestSetupKeyEndpoint(t *testing.T) {
 		t.Fatal("private key leaked")
 	}
 }
+
+// A large private key plus a full card must fit into the onboarding body.
+func TestOnboardBodyFitsLargeKey(t *testing.T) {
+	e := newEnv(t)
+	e.loginSSH(t)
+	hostKey, _ := sshgw.GenerateKey("")
+	req := onboardReq{
+		Card: cardInput{Name: "big", Host: "127.0.0.1", Port: 1, Description: strings.Repeat("d", 500)},
+		User: "root", Method: "key", HostKey: hostKey.Public,
+		PrivateKey: "-----BEGIN OPENSSH PRIVATE KEY-----\n" + strings.Repeat("A", 12<<10) + "\n-----END OPENSSH PRIVATE KEY-----\n",
+	}
+	var out map[string]string
+	code := e.postJSON(t, "/api/servers/onboard", req, &out)
+	// The fake key is rejected by the key parser, not cut off by the body limit.
+	if code != http.StatusBadRequest || out["error"] != "bad_private_key" {
+		t.Fatalf("got %d %v", code, out)
+	}
+}

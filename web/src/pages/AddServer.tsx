@@ -339,6 +339,8 @@ export function AddServer({
       setPhase("running");
     } catch (err) {
       setError(errText(err));
+      // The panel key is gone (expired or the server restarted): offer a new one.
+      if (err instanceof ApiError && err.code === "setup_key_expired") setSetupKey(null);
     }
   }
 
@@ -732,6 +734,9 @@ export function AddServer({
                           }
                         >
                           {copied ? "скопировано ✓" : "копировать"}
+                        </Button>
+                        <Button type="button" size="sm" variant="ghost" onClick={getSetupKey}>
+                          новый ключ
                         </Button>
                         <span className="min-w-0 text-xs break-all text-muted-foreground">{setupKey.fingerprint}</span>
                       </div>
