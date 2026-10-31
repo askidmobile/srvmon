@@ -95,7 +95,8 @@ jobs:
         run: |
           # shellcheck disable=SC2029 # expand locally on purpose
           ssh deploy "mkdir -p '$DEPLOY_PATH'"
-          scp deploy/docker-compose.yml deploy/Caddyfile deploy/.env.example deploy/remote-deploy.sh "deploy:$DEPLOY_PATH/"
+          scp -r deploy/docker-compose.yml deploy/Caddyfile deploy/.env.example deploy/remote-deploy.sh \
+            deploy/install-host.sh deploy/fail2ban "deploy:$DEPLOY_PATH/"
 
       - name: deploy
         if: steps.cfg.outputs.enabled == 'true'
