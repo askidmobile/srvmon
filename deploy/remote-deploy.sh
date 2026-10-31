@@ -66,20 +66,35 @@ esac
 PROXY="${PROXY:-caddy}"
 echo "proxy: $PROXY"
 
-# The fail2ban ban chain depends on the proxy mode and is set by
-# install-host.sh (root). This script has no root, so flag a mismatch.
-if [[ -f /etc/fail2ban/jail.d/srvmon.conf ]]; then
-  want=DOCKER-USER
-  [[ "$PROXY" == external ]] && want=INPUT
-  have="$(sed -n 's/^chain *= *//p' /etc/fail2ban/jail.d/srvmon.local 2>/dev/null || true)"
-  have="${have:-DOCKER-USER}"
-  if [[ "$have" != "$want" ]]; then
-    echo "::warning::fail2ban jail srvmon-auth bans in $have, proxy mode $PROXY needs $want: run sudo bash $(pwd)/install-host.sh"
-  fi
+# fail2ban runs in the compose stack (service fail2ban). Its ban chain follows
+# the proxy mode; sshd is watched only when the host writes /var/log/auth.log.
+chain=DOCKER-USER
+[[ "$PROXY" == external ]] && chain=INPUT
+sshd=false
+[[ -f /var/log/auth.log ]] && sshd=true
+mkdir -p fail2ban/container
+printf '# Written by remote-deploy.sh on every deploy.\n[srvmon-auth]\nchain = %s\n\n[sshd]\nenabled = %s\n' \
+  "$chain" "$sshd" > fail2ban/container/zz-srvmon.local
+echo "fail2ban: srvmon-auth chain $chain, sshd $sshd"
+if systemctl is-active -q fail2ban 2>/dev/null && [[ -f /etc/fail2ban/jail.d/srvmon.conf ]]; then
+  echo "::warning::host fail2ban also has the srvmon jails (old install-host.sh); bans are doubled. Run sudo bash $(pwd)/install-host.sh, it removes them."
 fi
-if [[ -f /etc/fail2ban/jail.d/srvmon.conf && ! -f /etc/fail2ban/action.d/srvmon-notify.conf ]]; then
-  echo "::warning::fail2ban bans are not reported to the panel yet: run sudo bash $(pwd)/install-host.sh"
-fi
+
+# `up` does not restart fail2ban when only its jail files changed: reload it,
+# then print the jails. A fail2ban problem is a warning, not a failed deploy.
+fail2ban_check() {
+  local out
+  for _ in $(seq 1 10); do
+    if docker compose exec -T fail2ban fail2ban-client reload >/dev/null 2>&1 &&
+       out="$(docker compose exec -T fail2ban fail2ban-client status 2>&1)"; then
+      echo "fail2ban: $(echo "$out" | sed -n 's/.*Jail list:[[:space:]]*//p')"
+      return 0
+    fi
+    sleep 3
+  done
+  echo "::warning::fail2ban container is not answering:"
+  docker compose logs --tail=30 fail2ban || true
+}
 
 wait_healthy() {
   local id status
@@ -102,15 +117,6 @@ wait_healthy() {
 PREV="$(grep '^SRVMON_TAG=' .env | cut -d= -f2 || true)"
 echo "deploy: ${PREV:-none} -> $TAG"
 
-# Log directory for fail2ban, owned by the distroless nonroot user.
-# install-host.sh prepares it; only fix it here when needed and possible.
-if [[ "$(stat -c %u:%g /var/log/srvmon 2>/dev/null)" != "65532:65532" ]]; then
-  if ! { mkdir -p /var/log/srvmon && chown 65532:65532 /var/log/srvmon; } 2>/dev/null &&
-     ! sudo -n sh -c 'mkdir -p /var/log/srvmon && chown 65532:65532 /var/log/srvmon' 2>/dev/null; then
-    echo "warning: /var/log/srvmon is not owned by 65532; run install-host.sh as root (fail2ban log will not be written)"
-  fi
-fi
-
 set_tag "$TAG"
 if [[ "$PROXY" == "external" ]]; then
   # Profile-disabled services are not orphans: stop a Caddy left from caddy mode.
@@ -120,6 +126,7 @@ fi
 # health wait) goes to the rollback below instead of exiting via set -e.
 if docker compose pull --quiet && docker compose up -d --remove-orphans && wait_healthy; then
   echo "deploy ok: $TAG"
+  fail2ban_check
   docker image prune -f >/dev/null || true
   exit 0
 fi

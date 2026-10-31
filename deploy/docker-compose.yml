@@ -50,14 +50,15 @@ services:
       SRVMON_AI_URL: http://ai:8090
       SRVMON_AI_TOKEN: ${SRVMON_AI_TOKEN:-}
       SRVMON_AI_TOOLS_LISTEN: ":8081"
-      # Bans of the host fail2ban (action srvmon-notify, see install-host.sh).
+      # Bans of the fail2ban service below (action srvmon-notify).
       SRVMON_FAIL2BAN_EVENTS: /var/log/srvmon/fail2ban-events.log
       # Bot API base URL, e.g. a proxy if api.telegram.org is unreachable.
       SRVMON_TELEGRAM_API: ${SRVMON_TELEGRAM_API:-}
     volumes:
       - srvmon-data:/data
-      # fail2ban on the host reads this file (jail srvmon-auth).
-      - /var/log/srvmon:/var/log/srvmon
+      # auth.log for the fail2ban service (jail srvmon-auth); a named volume,
+      # so the host needs no /var/log/srvmon owned by uid 65532.
+      - srvmon-logs:/var/log/srvmon
     expose:
       - "8080"
     ports:
@@ -114,6 +115,28 @@ services:
     expose:
       - "8090"
 
+  # fail2ban in a container: bans in the host firewall (network host,
+  # NET_ADMIN), so the host needs neither apt nor a fail2ban package.
+  # Jails: deploy/fail2ban/container (+ zz-srvmon.local from remote-deploy.sh).
+  fail2ban:
+    image: crazymax/fail2ban:1.1.0
+    restart: unless-stopped
+    network_mode: host
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    environment:
+      TZ: UTC
+      F2B_LOG_TARGET: /data/fail2ban.log
+      F2B_DB_PURGE_AGE: 7d
+    volumes:
+      - fail2ban-data:/data
+      - ./fail2ban/container:/data/jail.d:ro
+      - ./fail2ban/filter.d:/data/filter.d:ro
+      - ./fail2ban/action.d:/data/action.d:ro
+      - srvmon-logs:/var/log/srvmon
+      - /var/log:/var/log/host:ro # host sshd log, jail sshd
+
   victoriametrics:
     image: victoriametrics/victoria-metrics:v1.155.0
     restart: unless-stopped
@@ -130,5 +153,7 @@ volumes:
   caddy-data:
   caddy-config:
   srvmon-data:
+  srvmon-logs:
   vm-data:
   ai-data:
+  fail2ban-data:
