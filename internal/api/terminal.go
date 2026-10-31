@@ -28,6 +28,7 @@ const (
 	termReadLimit    = 64 << 10
 	termWriteTimeout = 10 * time.Second
 	termSessionCheck = time.Minute
+	termSetupTimeout = 20 * time.Second
 )
 
 var containerRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$`)
@@ -124,6 +125,13 @@ func (s *Server) handleTerminal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer client.Close()
+	// Session, PTY and shell setup has no deadline of its own: a host that
+	// stops answering channel requests must not pin this handler. The timer
+	// closes the connection, which unblocks every pending request.
+	setup := time.AfterFunc(termSetupTimeout, func() { client.Close() })
+	defer setup.Stop()
+	stopOnCancel := context.AfterFunc(ctx, func() { client.Close() })
+	defer stopOnCancel()
 
 	sess, err := client.NewSession()
 	if err != nil {
@@ -152,6 +160,11 @@ func (s *Server) handleTerminal(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		out.msg("shell: " + err.Error())
 		conn.Close(websocket.StatusNormalClosure, "shell failed")
+		return
+	}
+	if !setup.Stop() {
+		out.msg("сервер не ответил вовремя")
+		conn.Close(websocket.StatusNormalClosure, "setup timeout")
 		return
 	}
 	_ = s.store.Audit(context.Background(), ip, "terminal_open", target)
