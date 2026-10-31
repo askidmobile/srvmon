@@ -101,3 +101,22 @@ func TestServerIDsAreNotReused(t *testing.T) {
 		t.Fatalf("id reused: a=%d b=%d c=%d", a, b, c)
 	}
 }
+
+func TestAlertIDsAreNotReused(t *testing.T) {
+	s := openTest(t)
+	ctx := context.Background()
+	now := time.Now()
+	a, err := s.CreateAlert(ctx, Alert{Kind: KindLogin, Severity: SevInfo, Channel: ChanWeb, State: AlertEvent,
+		Message: "x", StartedAt: now.Add(-100 * 24 * time.Hour)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.PurgeAlerts(ctx, now.Add(-90*24*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := s.CreateAlert(ctx, Alert{Kind: KindLogin, Severity: SevInfo, Channel: ChanWeb, State: AlertEvent,
+		Message: "y", StartedAt: now})
+	if b.ID <= a.ID {
+		t.Fatalf("id %d reused after purge (old %d)", b.ID, a.ID)
+	}
+}

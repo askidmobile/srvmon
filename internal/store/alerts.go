@@ -65,7 +65,9 @@ const migrationAlerts = `CREATE TABLE alert_rules (
 		channel      TEXT NOT NULL
 	);
 	CREATE TABLE alerts (
-		id          INTEGER PRIMARY KEY,
+		-- AUTOINCREMENT: ids are never reused after a purge, so ack buttons
+		-- of old Telegram messages cannot hit a newer alert.
+		id          INTEGER PRIMARY KEY AUTOINCREMENT,
 		rule_id     INTEGER NOT NULL,
 		kind        TEXT NOT NULL,
 		server_id   INTEGER NOT NULL DEFAULT 0, -- 0: the panel itself

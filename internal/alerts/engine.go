@@ -194,6 +194,12 @@ func (e *Engine) Evaluate(ctx context.Context) error {
 				if a, isOpen := openBy[k]; isOpen {
 					if a.Message != c.message && a.Kind != store.KindAgentSilent {
 						_ = e.st.SetAlertMessage(ctx, a.ID, c.message)
+						a.Message = c.message
+					}
+					// Held back by quiet hours or not accepted by the bot
+					// (not configured, queue full): try again.
+					if a.State == store.AlertFiring && !a.Notified {
+						e.notify(ctx, a, false)
 					}
 					continue
 				}
@@ -210,17 +216,19 @@ func (e *Engine) Evaluate(ctx context.Context) error {
 			}
 		}
 	}
+	// Timers of conditions whose rule is disabled or deleted, or whose
+	// server is gone, start over when they come back.
+	for k := range e.pending {
+		if !ruleOK[k.rule] || !serverOK[k.server] {
+			delete(e.pending, k)
+		}
+	}
 	for k, a := range openBy {
 		firing, seen := evaluated[k]
 		switch {
 		case !ruleOK[k.rule] || !serverOK[k.server]:
 			// Rule disabled/deleted or server deleted: close quietly.
 			_, _ = e.st.ResolveAlert(ctx, a.ID, now)
-			for pk := range e.pending {
-				if pk.rule == k.rule && pk.server == k.server {
-					delete(e.pending, pk)
-				}
-			}
 		case seen && !firing:
 			ok, err := e.st.ResolveAlert(ctx, a.ID, now)
 			if err != nil {

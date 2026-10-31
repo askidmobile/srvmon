@@ -398,3 +398,60 @@ func TestFormatDuration(t *testing.T) {
 		}
 	}
 }
+
+func TestRestartCounterDoesNotDoubleCount(t *testing.T) {
+	te := newTestEnv(t)
+	base := time.Now().Add(-time.Minute)
+	n0, n1 := 4, 5
+	// Detail mode: uptime drops at once, the cached counter catches up later.
+	reps := []protocol.Container{
+		{Name: "mailer", State: "running", Status: "Up 2 hours", Restarts: &n0},
+		{Name: "mailer", State: "running", Status: "Up 1 second", Restarts: &n0},
+		{Name: "mailer", State: "running", Status: "Up 3 seconds", Restarts: &n0},
+		{Name: "mailer", State: "running", Status: "Up 5 seconds", Restarts: &n1},
+	}
+	for i, c := range reps {
+		te.push(protocol.Report{Timestamp: base.Add(time.Duration(i) * 2 * time.Second), Host: host(1), DockerOK: true,
+			Containers: []protocol.Container{c}})
+	}
+	if n := te.e.restarts.counts(te.srvID, base.Add(-time.Hour))["mailer"]; n != 1 {
+		t.Fatalf("restarts = %d, want 1", n)
+	}
+}
+
+func TestDisabledRuleForgetsPendingTimer(t *testing.T) {
+	te := newTestEnv(t)
+	ctx := context.Background()
+	te.push(protocol.Report{Host: host(97)})
+	te.eval(t)
+	r := te.rule(t, store.KindCPU)
+	r.Enabled = false
+	_ = te.st.UpdateRule(ctx, r)
+	te.eval(t)
+	for k := range te.e.pending {
+		if k.rule == r.ID {
+			t.Fatal("pending timer of a disabled rule kept")
+		}
+	}
+}
+
+func TestQuietHoursDelayNotRecordedLoss(t *testing.T) {
+	te := newTestEnv(t)
+	ctx := context.Background()
+	now := te.now.UTC()
+	_ = SaveQuiet(ctx, te.st, Quiet{From: now.Add(-time.Hour).Format("15:04"), To: now.Add(time.Hour).Format("15:04"), TZ: "UTC"})
+	h := host(1)
+	h.Disks[0].Used = 99
+	te.push(protocol.Report{Host: h})
+	te.eval(t)
+	if len(te.n.list()) != 0 {
+		t.Fatal("sent during quiet hours")
+	}
+	_ = SaveQuiet(ctx, te.st, Quiet{})
+	te.push(protocol.Report{Host: h})
+	te.eval(t)
+	te.eval(t)
+	if got := te.n.list(); len(got) != 1 || got[0].Resolved {
+		t.Fatalf("after quiet hours: %+v", got)
+	}
+}

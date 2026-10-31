@@ -13,7 +13,9 @@ import (
 // docker list API has no restart counter, so a restart is seen as:
 //   - the container entering the "restarting" state;
 //   - its uptime ("Up 3 seconds") going down between two reports;
-//   - the RestartCount from inspect growing (sent only in detail mode).
+//   - the RestartCount from inspect growing (sent only in detail mode). The
+//     agent refreshes it every 30 s, so restarts already seen by the
+//     heuristics above are not counted again when the counter catches up.
 type restartTracker struct {
 	mu   sync.Mutex
 	data map[int64]map[string]*containerTrack
@@ -25,11 +27,17 @@ type containerTrack struct {
 	restarts *int
 	seen     time.Time
 	events   []time.Time
+	// heuristic: restarts seen from state/uptime that the counter may not
+	// reflect yet.
+	heuristic []time.Time
 }
 
 const (
-	keepRestarts = 24 * time.Hour
-	forgetAfter  = 2 * time.Hour
+	// keepRestarts covers the longest rule window the API accepts.
+	keepRestarts = 7 * 24 * time.Hour
+	// counterLag: the agent refreshes RestartCount every 30 s.
+	counterLag  = 90 * time.Second
+	forgetAfter = 2 * time.Hour
 )
 
 func newRestartTracker() *restartTracker {
@@ -69,11 +77,20 @@ func (t *restartTracker) observe(serverID int64, now time.Time, reports ...proto
 			case cur.uptime >= 0 && prev.uptime >= 0 && cur.uptime < prev.uptime:
 				n = 1
 			}
-			if prev.restarts != nil && cur.restarts != nil && *cur.restarts > *prev.restarts {
-				n = max(n, *cur.restarts-*prev.restarts)
+			for _, h := range prev.heuristic {
+				if at.Sub(h) <= counterLag {
+					cur.heuristic = append(cur.heuristic, h)
+				}
 			}
-			if cur.restarts == nil {
-				cur.restarts = prev.restarts
+			if n > 0 {
+				cur.heuristic = append(cur.heuristic, at)
+			}
+			// Only consecutive reports with a counter are compared: a gap
+			// (detail mode off) would add restarts the heuristics counted.
+			if prev.restarts != nil && cur.restarts != nil && *cur.restarts > *prev.restarts {
+				d := *cur.restarts - *prev.restarts
+				n += max(0, d-len(cur.heuristic))
+				cur.heuristic = nil
 			}
 			cur.events = prev.events
 			for i := 0; i < n; i++ {
