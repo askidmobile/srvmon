@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -29,16 +30,39 @@ var (
 	warnRe = regexp.MustCompile(`(?i)\b(warn|warning|timeout|timed out|denied|refused|invalid user|retry|deprecated)\b`)
 )
 
-// levelRe finds an explicit level in structured lines: logfmt
-// (level=warning, lvl=info) and JSON ("level":"error").
-var levelRe = regexp.MustCompile(`(?i)(?:^|[\s{,])"?(?:level|lvl|severity)"?\s*[=:]\s*"?([a-z]+)`)
+// logfmtRe walks a logfmt line: quoted strings are matched (and skipped) as
+// whole tokens, so a level=... inside a quoted msg is not taken for the
+// line's own level field.
+var logfmtRe = regexp.MustCompile(`"(?:[^"\\]|\\.)*"|(?:^|\s)(?:level|lvl|severity)="?([A-Za-z]+)`)
+
+// explicitLevel returns the level field of a structured line: a JSON object
+// ("level", "lvl" or "severity") or logfmt. ok is false for free text.
+func explicitLevel(msg string) (string, bool) {
+	if i := strings.IndexByte(msg, '{'); i >= 0 && strings.HasSuffix(strings.TrimSpace(msg), "}") {
+		var obj map[string]any
+		if json.Unmarshal([]byte(msg[i:]), &obj) == nil {
+			for _, k := range []string{"level", "lvl", "severity"} {
+				if v, ok := obj[k].(string); ok {
+					return strings.ToLower(v), true
+				}
+			}
+			return "", false
+		}
+	}
+	for _, m := range logfmtRe.FindAllStringSubmatch(msg, -1) {
+		if m[1] != "" {
+			return strings.ToLower(m[1]), true
+		}
+	}
+	return "", false
+}
 
 // logLevel classifies a log line; "" means info and is dropped. An explicit
 // level wins over words in the message, so dockerd's
 // level=warning msg="... failed ..." stays a warning.
 func logLevel(msg string) string {
-	if m := levelRe.FindStringSubmatch(msg); m != nil {
-		switch strings.ToLower(m[1]) {
+	if lvl, ok := explicitLevel(msg); ok {
+		switch lvl {
 		case "emerg", "alert", "panic", "fatal", "crit", "critical", "err", "error":
 			return "ERR"
 		case "warn", "warning":
