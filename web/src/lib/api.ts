@@ -144,6 +144,7 @@ export interface OnboardStatus {
   next: number;
   done: boolean;
   ok: boolean;
+  committed: boolean;
   server_id: number;
 }
 

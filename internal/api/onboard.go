@@ -176,13 +176,16 @@ type jobLine struct {
 }
 
 type job struct {
-	mu       sync.Mutex
-	lines    []jobLine
-	done     bool
-	ok       bool
-	serverID int64
-	cancel   context.CancelFunc
-	finished time.Time
+	mu    sync.Mutex
+	lines []jobLine
+	done  bool
+	// committed: the server is set up and its key is being saved; from here
+	// on the job cannot be cancelled (a rollback would undo a working setup).
+	committed bool
+	ok        bool
+	serverID  int64
+	cancel    context.CancelFunc
+	finished  time.Time
 }
 
 func (j *job) log(state, text string) {
@@ -436,6 +439,16 @@ func (s *Server) runOnboard(ctx context.Context, j *job, req onboardReq, hostKey
 	}
 	j.log(sshgw.StepOK, "пароль удалён из памяти, в бд и логи не записан")
 
+	j.mu.Lock()
+	cancelled := ctx.Err() != nil
+	if !cancelled {
+		j.committed = true
+	}
+	j.mu.Unlock()
+	if cancelled {
+		fail("отменено; на сервере мог остаться пользователь " + sshUser)
+		return
+	}
 	sealed, err := s.secrets.Seal(key.Private, keyAAD(id))
 	if err != nil {
 		fail("шифрование ключа: " + err.Error())
@@ -445,7 +458,7 @@ func (s *Server) runOnboard(ctx context.Context, j *job, req onboardReq, hostKey
 		fail("сохранение ключа: " + err.Error())
 		return
 	}
-	j.log(sshgw.StepOK, "приватный ключ сохранён зашифрованным (XChaCha20-Poly1305)")
+	j.log(sshgw.StepOK, "приватный ключ сохранён зашифрованным (XChaCha20-Poly1305); установка зафиксирована, отмена больше не откатывает")
 
 	if tokenHash != "" {
 		if !res.AgentInstalled {
@@ -456,7 +469,7 @@ func (s *Server) runOnboard(ctx context.Context, j *job, req onboardReq, hostKey
 				_ = s.store.RevokeOtherAgentTokens(bg, id, tokenHash)
 			}
 			j.log(sshgw.StepRun, "ждём первый heartbeat агента")
-			if s.waitHeartbeat(ctx, tokenHash) {
+			if s.waitHeartbeat(context.Background(), tokenHash) {
 				j.log(sshgw.StepOK, "агент на связи")
 			} else {
 				j.log(sshgw.StepWarn, "агент пока не прислал метрики: проверьте `docker logs srvmon-agent` на сервере")
@@ -507,6 +520,7 @@ func (s *Server) handleOnboardStatus(w http.ResponseWriter, r *http.Request) {
 		"next":      len(j.lines),
 		"done":      j.done,
 		"ok":        j.ok,
+		"committed": j.committed,
 		"server_id": j.serverID,
 	})
 }
@@ -517,7 +531,16 @@ func (s *Server) handleOnboardCancel(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "not_found")
 		return
 	}
-	j.cancel()
+	j.mu.Lock()
+	committed := j.committed
+	if !committed {
+		j.cancel()
+	}
+	j.mu.Unlock()
+	if committed {
+		writeError(w, http.StatusConflict, "already_committed")
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]bool{"cancelled": true})
 }
 

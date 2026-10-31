@@ -192,6 +192,7 @@ export function AddServer({ attachId, onLogout }: { attachId?: number; onLogout:
   const [job, setJob] = useState("");
   const [lines, setLines] = useState<OnboardLine[]>([]);
   const [serverId, setServerId] = useState(0);
+  const [committed, setCommitted] = useState(false);
   const logEnd = useRef<HTMLDivElement>(null);
   const attached = useRef(false);
 
@@ -291,6 +292,7 @@ export function AddServer({ attachId, onLogout }: { attachId?: number; onLogout:
       setJob(r.job);
       setServerId(r.server_id);
       setLines([]);
+      setCommitted(false);
       setPhase("running");
     } catch (err) {
       setError(errText(err));
@@ -308,6 +310,7 @@ export function AddServer({ attachId, onLogout }: { attachId?: number; onLogout:
         if (!alive) return;
         next = st.next;
         if (st.lines.length) setLines((l) => [...l, ...st.lines]);
+        setCommitted(st.committed);
         if (st.done) {
           setPhase(st.ok ? "done" : "failed");
           return;
@@ -638,7 +641,7 @@ export function AddServer({ attachId, onLogout }: { attachId?: number; onLogout:
                 </Button>
               </>
             )}
-            {phase === "running" && (
+            {phase === "running" && !committed && (
               <Button type="button" variant="destructive" onClick={() => api.cancelOnboard(job).catch(() => undefined)}>
                 отмена (откат)
               </Button>
