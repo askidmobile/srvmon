@@ -116,9 +116,7 @@ func (s *Server) maybeAutoUpdate(id int64, agentVersion string) {
 // when the server has no stored SSH key (e.g. the panel's own host, whose
 // agent is updated by the deploy).
 func (s *Server) updateAgent(id int64, ip string, auto bool) {
-	ctx, cancel := context.WithTimeout(context.Background(), agentUpdateTimeout)
-	defer cancel()
-	access, err := s.store.ServerSSH(ctx, id)
+	access, err := s.store.ServerSSH(context.Background(), id)
 	if err != nil {
 		if !errors.Is(err, store.ErrNotFound) {
 			s.log.Error("agent update: ssh access", "server", id, "err", err)
@@ -134,13 +132,12 @@ func (s *Server) updateAgent(id int64, ip string, auto bool) {
 		s.log.Warn("agent update failed", "server", access.Name, "image", image, "auto", auto, "err", err)
 		s.updates.set(id, agentUpdateView{State: "failed", Image: image, Error: err.Error(), At: s.now()})
 	}
-	select {
-	case s.updates.sem <- struct{}{}:
-		defer func() { <-s.updates.sem }()
-	case <-ctx.Done():
-		fail(ctx.Err())
-		return
-	}
+	// Queue for a worker slot first: the timeout covers the update itself,
+	// not the wait behind other servers.
+	s.updates.sem <- struct{}{}
+	defer func() { <-s.updates.sem }()
+	ctx, cancel := context.WithTimeout(context.Background(), agentUpdateTimeout)
+	defer cancel()
 	client, err := s.dialServer(ctx, access)
 	if err != nil {
 		fail(i18n.Errorf("ssh: %w", err))
