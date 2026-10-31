@@ -467,3 +467,22 @@ func TestBufferedReportsAreNotEvaluated(t *testing.T) {
 		t.Fatal("alert fired from a buffered report")
 	}
 }
+
+func TestDelayedNotificationUsesCurrentRuleChannel(t *testing.T) {
+	te := newTestEnv(t)
+	ctx := context.Background()
+	now := te.now.UTC()
+	_ = SaveQuiet(ctx, te.st, Quiet{From: now.Add(-time.Hour).Format("15:04"), To: now.Add(time.Hour).Format("15:04"), TZ: "UTC"})
+	h := host(1)
+	h.Disks[0].Used = 99
+	te.push(protocol.Report{Host: h})
+	te.eval(t)
+	r := te.rule(t, store.KindDisk)
+	r.Channel = store.ChanWeb
+	_ = te.st.UpdateRule(ctx, r)
+	_ = SaveQuiet(ctx, te.st, Quiet{})
+	te.eval(t)
+	if n := len(te.n.list()); n != 0 {
+		t.Fatalf("web-only rule notified: %d", n)
+	}
+}
