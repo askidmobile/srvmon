@@ -130,13 +130,14 @@ export class Agents {
     const session = await this.create(SessionManager.continueRecent(this.cfg.dataDir, dir), systemPrompt(server), id);
     const e: Entry = { session, server, busy: false, used: Date.now() };
     this.chats.set(id, e);
-    this.evict();
+    this.evict(id);
     return e;
   }
 
-  private evict() {
+  /** Closes the least recently used idle sessions, never `keep` (about to run). */
+  private evict(keep: number) {
     if (this.chats.size <= MAX_OPEN) return;
-    const idle = [...this.chats.entries()].filter(([, e]) => !e.busy).sort((a, b) => a[1].used - b[1].used);
+    const idle = [...this.chats.entries()].filter(([k, e]) => !e.busy && k !== keep).sort((a, b) => a[1].used - b[1].used);
     for (const [id, e] of idle.slice(0, this.chats.size - MAX_OPEN)) {
       e.session.dispose();
       this.chats.delete(id);

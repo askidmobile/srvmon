@@ -120,10 +120,14 @@ func set(xs ...string) map[string]bool {
 	return m
 }
 
+// hasArg returns the first word that is one of the options in bad. A long
+// option also matches by unambiguous prefix (getopt_long takes --dia for
+// --diag), so any prefix of a bad long option counts.
 func hasArg(words []string, bad ...string) string {
 	for _, w := range words[1:] {
+		name, _, _ := strings.Cut(w, "=")
 		for _, b := range bad {
-			if w == b || (strings.HasPrefix(b, "--") && strings.HasPrefix(w, b+"=")) {
+			if w == b || (strings.HasPrefix(b, "--") && len(name) > 2 && strings.HasPrefix(b, name)) {
 				return w
 			}
 			// Short flags may be combined (-cn): look for the letter.
@@ -451,18 +455,39 @@ func checkSort(words []string) string {
 	return ""
 }
 
+var dateLong = set("--utc", "--universal", "--rfc-email", "--debug", "--iso-8601", "--rfc-3339", "--date", "--file",
+	"--reference", "--help", "--version")
+
 // checkDate allows printing dates; date -s and date MMDDhhmm set the clock.
+// Long options must be spelled out: getopt_long would take --se for --set.
 func checkDate(words []string) string {
 	for i := 1; i < len(words); i++ {
 		w := words[i]
 		switch {
-		case w == "-s" || w == "--set" || strings.HasPrefix(w, "--set="):
-			return "date " + w + " ставит время"
-		case w == "-d" || w == "--date" || w == "-r" || w == "--reference" || w == "-f" || w == "--file":
-			i++
-		case strings.HasPrefix(w, "+") || strings.HasPrefix(w, "-"):
-			if len(w) > 1 && w[0] == '-' && w[1] != '-' && strings.ContainsRune(w[1:], 's') {
-				return "date " + w + " ставит время"
+		case strings.HasPrefix(w, "+"):
+		case strings.HasPrefix(w, "--"):
+			name, _, hasVal := strings.Cut(w, "=")
+			if !dateLong[name] {
+				return "date " + name + " нет в списке безопасных опций"
+			}
+			if !hasVal && (name == "--date" || name == "--file" || name == "--reference") {
+				i++
+			}
+		case strings.HasPrefix(w, "-") && len(w) > 1:
+		short:
+			for j := 1; j < len(w); j++ {
+				switch w[j] {
+				case 'u', 'R':
+				case 'I':
+					break short // -I[FMT]: the rest is its value
+				case 'd', 'f', 'r':
+					if j == len(w)-1 {
+						i++
+					}
+					break short
+				default:
+					return "date -" + string(w[j]) + " нет в списке безопасных опций"
+				}
 			}
 		default:
 			return "date " + w + " ставит время"

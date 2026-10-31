@@ -368,8 +368,32 @@ wait:
 		finish(execResult{Status: "expired", ActionID: action.ID, Note: "команду не подтвердили вовремя"})
 		return
 	}
-	// Approved: run even if the agent stopped waiting, the owner asked for it.
-	code, out, runErr := s.runOnServer(context.Background(), access, req.Command, toolWriteTimeout)
+	// Approved: run even if the agent stopped waiting, the owner asked for
+	// it. Keep the response alive while it runs (up to 10 minutes).
+	type runResult struct {
+		code int
+		out  string
+		err  error
+	}
+	done := make(chan runResult, 1)
+	go func() {
+		code, out, err := s.runOnServer(context.Background(), access, req.Command, toolWriteTimeout)
+		done <- runResult{code, out, err}
+	}()
+	var rr runResult
+run:
+	for {
+		select {
+		case rr = <-done:
+			break run
+		case <-keepalive.C:
+			_, _ = w.Write([]byte(" "))
+			if flusher != nil {
+				flusher.Flush()
+			}
+		}
+	}
+	code, out, runErr := rr.code, rr.out, rr.err
 	ok := runErr == nil && code == 0
 	stored := out
 	if runErr != nil {
