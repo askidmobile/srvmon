@@ -192,3 +192,33 @@ func TestCardNormalize(t *testing.T) {
 		t.Fatalf("normalized: %+v", c)
 	}
 }
+
+func TestExistingServerKeepsAddressOnFailure(t *testing.T) {
+	e := newEnv(t)
+	e.login(t)
+	ctx := context.Background()
+	id, _ := e.st.CreateServer(ctx, store.Server{Name: "old", Host: "10.0.0.1", Port: 22})
+	key, _ := sshgw.GenerateKey("")
+	req := onboardReq{ServerID: id, Card: cardInput{Name: "old", Host: "127.0.0.1", Port: 1},
+		User: "root", Password: "x", HostKey: key.Public}
+	var started struct{ Job string }
+	if code := e.postJSON(t, "/api/servers/onboard", req, &started); code != http.StatusAccepted {
+		t.Fatalf("onboard: %d", code)
+	}
+	// Deleting a card with a running job is refused.
+	dreq, _ := http.NewRequest("DELETE", e.ts.URL+"/api/servers/"+strconv.FormatInt(id, 10), nil)
+	if resp, err := e.client.Do(dreq); err == nil {
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusConflict && e.srv.jobs.active(id) {
+			t.Fatalf("delete during onboarding: %d", resp.StatusCode)
+		}
+	}
+	deadline := time.Now().Add(20 * time.Second)
+	for e.srv.jobs.active(id) && time.Now().Before(deadline) {
+		time.Sleep(50 * time.Millisecond)
+	}
+	list, _ := e.st.ListServers(ctx)
+	if len(list) != 1 || list[0].Host != "10.0.0.1" || list[0].Port != 22 {
+		t.Fatalf("existing card must keep its address and stay: %+v", list)
+	}
+}

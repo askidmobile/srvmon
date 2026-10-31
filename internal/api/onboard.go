@@ -231,6 +231,21 @@ func (js *jobs) add(j *job) (string, error) {
 
 var errTooManyJobs = errors.New("too many onboarding jobs")
 
+// active reports whether an unfinished onboarding job targets the server.
+func (js *jobs) active(serverID int64) bool {
+	js.mu.Lock()
+	defer js.mu.Unlock()
+	for _, j := range js.m {
+		j.mu.Lock()
+		busy := !j.done && j.serverID == serverID
+		j.mu.Unlock()
+		if busy {
+			return true
+		}
+	}
+	return false
+}
+
 func (js *jobs) get(id string) *job {
 	js.mu.Lock()
 	defer js.mu.Unlock()
@@ -292,11 +307,14 @@ func (s *Server) handleOnboard(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		created = true
-	} else if err := s.store.SetServerAddr(ctx, id, req.Card.Host, req.Card.Port); errors.Is(err, store.ErrNotFound) {
+	} else if ok, err := s.store.ServerExists(ctx, id); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal")
+		return
+	} else if !ok {
 		writeError(w, http.StatusNotFound, "not_found")
 		return
-	} else if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal")
+	} else if s.jobs.active(id) {
+		writeError(w, http.StatusConflict, "onboarding")
 		return
 	}
 
@@ -413,7 +431,7 @@ func (s *Server) runOnboard(ctx context.Context, j *job, req onboardReq, hostKey
 		fail("шифрование ключа: " + err.Error())
 		return
 	}
-	if err := s.store.SetServerSSH(bg, id, sshUser, sshgw.FormatHostKey(hostKey), sealed); err != nil {
+	if err := s.store.SetServerSSH(bg, id, req.Card.Host, req.Card.Port, sshUser, sshgw.FormatHostKey(hostKey), sealed); err != nil {
 		fail("сохранение ключа: " + err.Error())
 		return
 	}
@@ -495,6 +513,12 @@ func (s *Server) handleDeleteServer(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "bad_id")
+		return
+	}
+	// A running job keeps the id and would later write to or delete a card
+	// that reused it; cancel the job instead (it rolls back itself).
+	if s.jobs.active(id) {
+		writeError(w, http.StatusConflict, "onboarding")
 		return
 	}
 	if err := s.store.DeleteServer(r.Context(), id); errors.Is(err, store.ErrNotFound) {

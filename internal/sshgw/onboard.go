@@ -239,14 +239,16 @@ func agentScript(a AgentInstall) string {
 	b.WriteString(`command -v docker >/dev/null 2>&1 || { echo no-docker >&2; exit 3; }
 mkdir -p /etc/srvmon
 chmod 700 /etc/srvmon
-(umask 077; printf '%s\n' "$TOKEN" > /etc/srvmon/agent.token)
+# Stage the new token: a running agent keeps its file until the pull works.
+(umask 077; printf '%s\n' "$TOKEN" > /etc/srvmon/agent.token.new)
 REG=${IMG%%/*}
 if [ -n "$RU" ]; then printf '%s' "$RT" | docker login "$REG" -u "$RU" --password-stdin >/dev/null; fi
 pulled=0
 docker pull -q "$IMG" >/dev/null 2>&1 && pulled=1
 if [ -n "$RU" ]; then docker logout "$REG" >/dev/null 2>&1 || true; fi
-[ "$pulled" = 1 ] || { echo "docker pull $IMG не удался (приватный образ? нужен доступ к реестру)" >&2; exit 4; }
+[ "$pulled" = 1 ] || { rm -f /etc/srvmon/agent.token.new; echo "docker pull $IMG не удался (приватный образ? нужен доступ к реестру)" >&2; exit 4; }
 docker rm -f srvmon-agent >/dev/null 2>&1 || true
+mv -f /etc/srvmon/agent.token.new /etc/srvmon/agent.token
 docker run -d --name srvmon-agent --restart unless-stopped \
   --network host --pid host --read-only --security-opt no-new-privileges:true \
   -e SRVMON_URL="$URL" -e SRVMON_TOKEN_FILE=/etc/srvmon/agent.token \

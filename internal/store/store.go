@@ -387,10 +387,13 @@ type SSHAccess struct {
 	KeyEnc   []byte
 }
 
-// SetServerSSH stores the SSH user, pinned host key and sealed private key.
-func (s *Store) SetServerSSH(ctx context.Context, id int64, user, hostKey string, keyEnc []byte) error {
+// SetServerSSH stores the SSH address, user, pinned host key and sealed
+// private key together, so a failed onboarding never leaves a new address
+// paired with the old key.
+func (s *Store) SetServerSSH(ctx context.Context, id int64, host string, port int, user, hostKey string, keyEnc []byte) error {
 	res, err := s.db.ExecContext(ctx,
-		`UPDATE servers SET ssh_user = ?, ssh_host_key = ?, ssh_key_enc = ? WHERE id = ?`, user, hostKey, keyEnc, id)
+		`UPDATE servers SET host = ?, port = ?, ssh_user = ?, ssh_host_key = ?, ssh_key_enc = ? WHERE id = ?`,
+		host, port, user, hostKey, keyEnc, id)
 	if err != nil {
 		return err
 	}
@@ -451,14 +454,9 @@ func (s *Store) RevokeOtherAgentTokens(ctx context.Context, id int64, keepHash s
 	return err
 }
 
-// SetServerAddr updates the SSH address of an existing server.
-func (s *Store) SetServerAddr(ctx context.Context, id int64, host string, port int) error {
-	res, err := s.db.ExecContext(ctx, `UPDATE servers SET host = ?, port = ? WHERE id = ?`, host, port, id)
-	if err != nil {
-		return err
-	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		return ErrNotFound
-	}
-	return nil
+// ServerExists reports whether a server with this id exists.
+func (s *Store) ServerExists(ctx context.Context, id int64) (bool, error) {
+	var n int
+	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM servers WHERE id = ?`, id).Scan(&n)
+	return n > 0, err
 }
