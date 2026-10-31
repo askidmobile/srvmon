@@ -406,6 +406,8 @@ export const ru: Dict = {
   "tls · sign-in attempts are logged · owner access only": "tls · попытки входа логируются · вход только для владельца",
   "to": "до",
   "to Telegram on ALERT or error": "в Telegram при ALERT или ошибке",
+  "The screen failed to render.": "Экран не отрисовался.",
+  "retry": "повторить",
   "to the overview": "к обзору",
   "to the session": "к сессии",
   "too many attempts, try again in {m} min": "слишком много попыток, повторите через {m} мин",

@@ -1,8 +1,9 @@
 import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { api, type Me } from "@/lib/api";
 import { isLang, setLang, t, useLang } from "@/lib/i18n";
-import { href, navigate, typingIn, useRoute } from "@/lib/router";
+import { href, navigate, type Route, typingIn, useRoute } from "@/lib/router";
 import { AddServer } from "@/pages/AddServer";
 import { AgentPage } from "@/pages/Agent";
 import { AlertsPage } from "@/pages/Alerts";
@@ -57,23 +58,31 @@ export function App() {
   if (!me.authenticated) {
     return <Login key={lang} onSuccess={refresh} />;
   }
+  return (
+    <ErrorBoundary resetKey={JSON.stringify(route)}>
+      <Screen route={route} version={me.version} onLogout={logout} />
+    </ErrorBoundary>
+  );
+}
+
+function Screen({ route, version, onLogout }: { route: Route; version: string; onLogout: () => void }) {
   switch (route.name) {
     case "server":
-      return <ServerScreen key={route.id} id={route.id} route={route} version={me.version} onLogout={logout} />;
+      return <ServerScreen key={route.id} id={route.id} route={route} version={version} onLogout={onLogout} />;
     case "add":
-      return <AddServer key={route.id ?? 0} attachId={route.id} route={route} version={me.version} onLogout={logout} />;
+      return <AddServer key={route.id ?? 0} attachId={route.id} route={route} version={version} onLogout={onLogout} />;
     case "agent":
-      return <AgentPage key={route.id ?? 0} serverId={route.id} route={route} version={me.version} onLogout={logout} />;
+      return <AgentPage key={route.id ?? 0} serverId={route.id} route={route} version={version} onLogout={onLogout} />;
     case "alerts":
-      return <AlertsPage route={route} version={me.version} onLogout={logout} />;
+      return <AlertsPage route={route} version={version} onLogout={onLogout} />;
     case "settings":
-      return <SettingsPage route={route} version={me.version} onLogout={logout} />;
+      return <SettingsPage route={route} version={version} onLogout={onLogout} />;
     case "terminal":
       return (
         <Suspense fallback={<p className="p-6 text-muted-foreground">{t("loading the terminal…")}</p>}>
-          <TerminalPage serverId={route.id} route={route} version={me.version} onLogout={logout} />
+          <TerminalPage serverId={route.id} route={route} version={version} onLogout={onLogout} />
         </Suspense>
       );
   }
-  return <Overview route={route} version={me.version} onLogout={logout} />;
+  return <Overview route={route} version={version} onLogout={onLogout} />;
 }

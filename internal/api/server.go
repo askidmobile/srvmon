@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -279,11 +280,22 @@ func (s *Server) originAllowed(origin, host string) bool {
 	return err == nil && strings.EqualFold(u.Host, host)
 }
 
+// writeJSON encodes v before sending the status line: an encoding error
+// (a NaN in a report) becomes a 500 instead of a 200 with an empty body, and
+// Content-Length lets the client tell a complete body from a cut one.
 func writeJSON(w http.ResponseWriter, status int, v any) {
+	b, err := json.Marshal(v)
+	if err != nil {
+		slog.Error("encode response", "err", err)
+		status = http.StatusInternalServerError
+		b = []byte(`{"error":"internal"}`)
+	}
+	b = append(b, '\n')
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Content-Length", strconv.Itoa(len(b)))
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
+	_, _ = w.Write(b)
 }
 
 func writeError(w http.ResponseWriter, status int, code string) {
