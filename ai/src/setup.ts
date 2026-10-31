@@ -199,7 +199,11 @@ export class Setup {
       base ||= orig?.baseUrl ?? p.baseUrl ?? catalog[0]?.baseUrl ?? "";
       api ||= catalog[0]?.api ?? "";
     }
-    const key = req.api_key || this.currentKey(provider);
+    let key = req.api_key || this.currentKey(provider);
+    if (!key && provider !== CUSTOM) {
+      // A key pi finds itself (DEEPSEEK_API_KEY and the like, auth.json).
+      key = (await this.rt.getAuth(provider).catch(() => undefined))?.auth.apiKey ?? "";
+    }
     let error: string | undefined;
     let live = false;
     if (!base) error = "у провайдера нет адреса API";

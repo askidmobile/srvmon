@@ -174,6 +174,9 @@ export function createApp(cfg: AgentConfig) {
 /** Asks srvmon for the setup saved in the panel, retrying until it answers. */
 async function pullConfig(toolsUrl: string, token: string, setup: Setup, onApplied: () => void) {
   for (let wait = 2_000; ; wait = Math.min(wait * 2, 60_000)) {
+    // srvmon may push newer settings while this fetch is under way; then
+    // what the fetch returns is older and must not win.
+    const gen = setup.generation;
     try {
       const res = await fetch(`${toolsUrl}/tools/ai-config`, {
         headers: { Authorization: `Bearer ${token}` },
@@ -184,8 +187,13 @@ async function pullConfig(toolsUrl: string, token: string, setup: Setup, onAppli
         return;
       }
       if (res.ok) {
+        const cfg = (await res.json()) as AIConfig;
+        if (setup.generation !== gen || !setup.loading) {
+          setup.loading = false;
+          return;
+        }
         try {
-          await setup.apply((await res.json()) as AIConfig);
+          await setup.apply(cfg);
           onApplied();
         } catch (err) {
           setup.error = `сохранённые настройки не применились: ${err instanceof Error ? err.message : err}`;

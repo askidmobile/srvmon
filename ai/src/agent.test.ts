@@ -164,6 +164,16 @@ test("settings: custom provider, live model list, chat model override", async ()
     assert.equal(seen.length, before, "listing must not hit the old proxy");
     assert.ok(setup.resolve()?.baseUrl.startsWith(providerUrl));
 
+    // Without a key from srvmon, listing uses the key pi finds itself.
+    process.env.DEEPSEEK_API_KEY = "sk-env";
+    try {
+      await post("/v1/config", { provider: "deepseek", model: "deepseek-v9" });
+      await (await post("/v1/models", { provider: "deepseek", base_url: `${providerUrl}/v1` })).json();
+      assert.equal(seen.at(-1)?.auth, "Bearer sk-env");
+    } finally {
+      delete process.env.DEEPSEEK_API_KEY;
+    }
+
     // A known provider with an unknown (newer) model id keeps working.
     const st2 = await (await post("/v1/config", { provider: "deepseek", model: "deepseek-v9", api_key: "sk-x" })).json();
     assert.equal(st2.ready, true, JSON.stringify(st2));
