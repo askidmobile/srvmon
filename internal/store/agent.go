@@ -61,11 +61,16 @@ const agentSchema = `CREATE TABLE agent_chats (
 		last_result TEXT NOT NULL DEFAULT ''
 	);`
 
+// migrationAgentModel lets a chat use another model than the default one.
+const migrationAgentModel = `ALTER TABLE agent_chats ADD COLUMN model TEXT NOT NULL DEFAULT '';`
+
 // AgentChat is one conversation with the agent, optionally bound to a server.
+// Model is empty for the default model from the AI settings.
 type AgentChat struct {
 	ID        int64     `json:"id"`
 	ServerID  *int64    `json:"server_id,omitempty"`
 	Title     string    `json:"title"`
+	Model     string    `json:"model"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
@@ -105,7 +110,7 @@ func scanChat(row scanner) (AgentChat, error) {
 	var c AgentChat
 	var sid sql.NullInt64
 	var created, updated int64
-	if err := row.Scan(&c.ID, &sid, &c.Title, &created, &updated); err != nil {
+	if err := row.Scan(&c.ID, &sid, &c.Title, &c.Model, &created, &updated); err != nil {
 		return c, err
 	}
 	if sid.Valid {
@@ -118,17 +123,29 @@ func scanChat(row scanner) (AgentChat, error) {
 // GetAgentChat returns a chat or ErrNotFound.
 func (s *Store) GetAgentChat(ctx context.Context, id int64) (AgentChat, error) {
 	c, err := scanChat(s.db.QueryRowContext(ctx,
-		`SELECT id, server_id, title, created_at, updated_at FROM agent_chats WHERE id = ?`, id))
+		`SELECT id, server_id, title, model, created_at, updated_at FROM agent_chats WHERE id = ?`, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return c, ErrNotFound
 	}
 	return c, err
 }
 
+// SetAgentChatModel sets the chat's model ("" = the default one).
+func (s *Store) SetAgentChatModel(ctx context.Context, id int64, model string) error {
+	res, err := s.db.ExecContext(ctx, `UPDATE agent_chats SET model = ? WHERE id = ?`, model, id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // ListAgentChats returns the latest chats first.
 func (s *Store) ListAgentChats(ctx context.Context, limit int) ([]AgentChat, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, server_id, title, created_at, updated_at FROM agent_chats ORDER BY updated_at DESC, id DESC LIMIT ?`, limit)
+		`SELECT id, server_id, title, model, created_at, updated_at FROM agent_chats ORDER BY updated_at DESC, id DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
 	}

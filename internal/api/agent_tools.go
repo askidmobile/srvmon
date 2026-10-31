@@ -37,6 +37,7 @@ const (
 func (s *Server) AgentToolsHandler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /tools/servers", s.toolServers)
+	mux.HandleFunc("GET /tools/ai-config", s.toolAIConfig)
 	mux.HandleFunc("GET /tools/servers/{name}", s.toolServer)
 	mux.HandleFunc("POST /tools/exec", s.toolExec)
 	mux.HandleFunc("GET /tools/tasks", s.toolTasks)

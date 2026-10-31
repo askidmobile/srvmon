@@ -15,6 +15,7 @@ import {
   toolLine,
 } from "@/lib/agent";
 import { ApiError } from "@/lib/api";
+import { href } from "@/lib/router";
 import { cn } from "@/lib/utils";
 
 // Agent panel from the terminal mockup: chat / tasks / history. The agent
@@ -406,6 +407,8 @@ export function AgentPanel({
   const [live, setLive] = useState<Live | null>(null);
   const [pending, setPending] = useState<AgentAction[]>([]);
   const [text, setText] = useState("");
+  // Model for a chat that does not exist yet ("" = default).
+  const [pickModel, setPickModel] = useState("");
   const [taskCount, setTaskCount] = useState<number | null>(null);
   const [err, setErr] = useState("");
   const scroller = useRef<HTMLDivElement>(null);
@@ -510,6 +513,10 @@ export function AgentPanel({
         setChat(c);
         saveChatId(ctxId, id);
         setChatId(id);
+        if (pickModel) {
+          const withModel = await agentApi.setChatModel(id, pickModel).catch(() => null);
+          if (withModel && active.current === id) setChat(withModel);
+        }
       }
     } catch {
       setErr("не удалось создать чат");
@@ -562,7 +569,18 @@ export function AgentPanel({
   const chatPending = pending.filter((a) => a.chat_id && a.chat_id === chatId);
   const otherPending = pending.filter((a) => !a.chat_id || a.chat_id !== chatId);
   const disabled = status !== null && (!status.enabled || status.ready === false);
-  const model = status?.model ? `pi · ${status.model}` : "pi";
+  const chatModel = chatId ? (chat?.model ?? "") : pickModel;
+  const shownModel = chatModel || status?.model;
+  const model = shownModel ? `pi · ${shownModel}` : "pi";
+  const models = status?.models ?? [];
+  const changeModel = (m: string) => {
+    if (m === (status?.model ?? "")) m = "";
+    if (!chatId) return setPickModel(m);
+    agentApi
+      .setChatModel(chatId, m)
+      .then((c) => active.current === c.id && setChat(c))
+      .catch(() => setErr("модель недоступна: обновите список в настройках"));
+  };
   const ctxName = chat?.server ?? context?.name ?? "все";
 
   return (
@@ -582,6 +600,23 @@ export function AgentPanel({
         </Button>
         <span className="flex-1" />
         {pending.length > 0 && <span className="text-xs text-warn">⚠ {pending.length}</span>}
+        {models.length > 1 && (
+          <select
+            className="h-7 max-w-40 min-w-0 border border-input bg-field px-1 text-xs text-hi"
+            value={shownModel ?? ""}
+            onChange={(e) => changeModel(e.target.value)}
+            disabled={!!live}
+            title="модель этого чата"
+            aria-label="модель чата"
+          >
+            {models.map((m) => (
+              <option key={m} value={m}>
+                {m === status?.model ? "★ " : ""}
+                {m}
+              </option>
+            ))}
+          </select>
+        )}
         <Button size="sm" variant="ghost" onClick={newChat} title="новый чат">
           + чат
         </Button>
@@ -593,7 +628,12 @@ export function AgentPanel({
         </div>
       )}
       {status?.enabled && status.ready === false && (
-        <div className="mt-3 text-xs text-warn">агент не готов: {status.error ?? "srvmon-ai недоступен"}</div>
+        <div className="mt-3 text-xs text-warn">
+          агент не готов: {status.error ?? "srvmon-ai недоступен"} ·{" "}
+          <a className="text-primary underline-offset-2 hover:underline" href={href.settings()}>
+            настройки → AI
+          </a>
+        </div>
       )}
 
       <div ref={scroller} className="mt-3 min-h-0 flex-1 overflow-y-auto pr-1 [scrollbar-width:thin]">

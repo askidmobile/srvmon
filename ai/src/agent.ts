@@ -15,6 +15,7 @@ import {
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 
+import type { Setup } from "./setup.js";
 import { srvmonTools, toolNames } from "./tools.js";
 
 export type Event =
@@ -29,9 +30,7 @@ export interface AgentConfig {
   toolsUrl: string;
   token: string;
   modelRuntime: ModelRuntime;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  model: any;
-  thinking: "off" | "minimal" | "low" | "medium" | "high";
+  setup: Setup;
 }
 
 export function systemPrompt(server?: string, task = false): string {
@@ -83,6 +82,8 @@ function loader(prompt: string): ResourceLoader {
 interface Entry {
   session: AgentSession;
   server?: string;
+  model: string; // requested model id ("" = default)
+  gen: number; // setup generation the session was opened with
   busy: boolean;
   used: number;
 }
@@ -97,13 +98,15 @@ export class Agents {
     return join(this.cfg.dataDir, "sessions", `chat-${id}`);
   }
 
-  private async create(sessionManager: SessionManager, prompt: string, chatId?: number, taskId?: number) {
+  private async create(sessionManager: SessionManager, prompt: string, modelId: string, chatId?: number, taskId?: number) {
     const cwd = this.cfg.dataDir;
+    const model = this.cfg.setup.resolve(modelId);
+    if (!model) throw new Error("модель не настроена: откройте настройки → AI");
     const { session } = await createAgentSession({
       cwd,
       agentDir: join(this.cfg.dataDir, "pi"),
-      model: this.cfg.model,
-      thinkingLevel: this.cfg.thinking,
+      model,
+      thinkingLevel: model.reasoning ? this.cfg.setup.thinking : "off",
       modelRuntime: this.cfg.modelRuntime,
       resourceLoader: loader(prompt),
       tools: toolNames,
@@ -117,18 +120,19 @@ export class Agents {
     return session;
   }
 
-  private async chat(id: number, server?: string): Promise<Entry> {
+  private async chat(id: number, server: string | undefined, model: string): Promise<Entry> {
     const cur = this.chats.get(id);
-    if (cur && cur.server === server) return cur;
+    const gen = this.cfg.setup.generation;
+    if (cur && cur.server === server && cur.model === model && cur.gen === gen) return cur;
     if (cur) {
-      // The chat's server changed: reopen with the new system prompt.
+      // Server, model or settings changed: reopen (the history stays on disk).
       cur.session.dispose();
       this.chats.delete(id);
     }
     const dir = this.chatDir(id);
     mkdirSync(dir, { recursive: true });
-    const session = await this.create(SessionManager.continueRecent(this.cfg.dataDir, dir), systemPrompt(server), id);
-    const e: Entry = { session, server, busy: false, used: Date.now() };
+    const session = await this.create(SessionManager.continueRecent(this.cfg.dataDir, dir), systemPrompt(server), model, id);
+    const e: Entry = { session, server, model, gen, busy: false, used: Date.now() };
     this.chats.set(id, e);
     this.evict(id);
     return e;
@@ -149,9 +153,9 @@ export class Agents {
   }
 
   /** Runs one chat turn. Returns false when the chat is busy. */
-  async runChat(id: number, text: string, server: string | undefined, emit: (e: Event) => void, signal: AbortSignal) {
+  async runChat(id: number, text: string, server: string | undefined, model: string, emit: (e: Event) => void, signal: AbortSignal) {
     if (this.isBusy(id)) return false;
-    const e = await this.chat(id, server);
+    const e = await this.chat(id, server, model);
     if (e.busy) return false;
     e.busy = true;
     e.used = Date.now();
@@ -166,11 +170,21 @@ export class Agents {
 
   /** Runs a scheduled task in a throwaway session. */
   async runTask(taskId: number, text: string, emit: (e: Event) => void, signal: AbortSignal) {
-    const session = await this.create(SessionManager.inMemory(this.cfg.dataDir), systemPrompt(undefined, true), undefined, taskId);
+    const session = await this.create(SessionManager.inMemory(this.cfg.dataDir), systemPrompt(undefined, true), "", undefined, taskId);
     try {
       await drive(session, text, emit, signal);
     } finally {
       session.dispose();
+    }
+  }
+
+  /** Closes idle sessions opened with older settings. */
+  reconfigured() {
+    for (const [id, e] of this.chats) {
+      if (!e.busy && e.gen !== this.cfg.setup.generation) {
+        e.session.dispose();
+        this.chats.delete(id);
+      }
     }
   }
 

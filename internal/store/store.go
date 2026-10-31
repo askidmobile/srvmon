@@ -91,6 +91,8 @@ var migrations = []string{
 	migrationAlerts,
 	// Stage 5: AI agent chats, confirmations and scheduled tasks (agent.go).
 	agentSchema,
+	// AI settings in the panel: a chat may pick its own model.
+	migrationAgentModel,
 }
 
 func (s *Store) migrate(ctx context.Context) error {
@@ -143,6 +145,24 @@ func (s *Store) GetSetting(ctx context.Context, key string) (string, error) {
 		return "", ErrNotFound
 	}
 	return v, err
+}
+
+// SettingsWithPrefix returns all settings whose key starts with prefix.
+func (s *Store) SettingsWithPrefix(ctx context.Context, prefix string) (map[string]string, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT key, value FROM settings WHERE substr(key, 1, length(?)) = ?`, prefix, prefix)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]string{}
+	for rows.Next() {
+		var k, v string
+		if err := rows.Scan(&k, &v); err != nil {
+			return nil, err
+		}
+		out[k] = v
+	}
+	return out, rows.Err()
 }
 
 // SetSetting upserts a setting.
