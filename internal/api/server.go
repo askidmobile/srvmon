@@ -23,18 +23,20 @@ import (
 
 // Server wires dependencies for the HTTP handlers.
 type Server struct {
-	cfg     config.Config
-	store   *store.Store
-	log     *slog.Logger
-	authLog io.Writer
-	limiter *auth.Limiter
-	vm      *metrics.Writer
-	latest  *metrics.Latest
-	web     fs.FS
-	version string
+	cfg       config.Config
+	store     *store.Store
+	log       *slog.Logger
+	authLog   io.Writer
+	authLogMu sync.Mutex
+	limiter   *auth.Limiter
+	vm        *metrics.Writer
+	latest    *metrics.Latest
+	web       fs.FS
+	version   string
 
-	totpMu sync.Mutex // serializes TOTP replay check-and-set
-	now    func() time.Time
+	totpMu  sync.Mutex    // serializes TOTP replay check-and-set
+	hashSem chan struct{} // caps concurrent argon2id verifications
+	now     func() time.Time
 }
 
 // Options for New.
@@ -67,6 +69,7 @@ func New(o Options) *Server {
 		web:     o.Web,
 		version: o.Version,
 		now:     time.Now,
+		hashSem: make(chan struct{}, 2),
 	}
 }
 

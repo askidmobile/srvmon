@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -181,5 +182,34 @@ func TestSPAFallback(t *testing.T) {
 	}
 	if r := e.get(t, "/api/unknown"); r.StatusCode != http.StatusNotFound {
 		t.Fatalf("unknown api must 404: %d", r.StatusCode)
+	}
+}
+
+func TestConcurrentGuessesCannotBypassLimit(t *testing.T) {
+	e := newEnv(t)
+	const n = 20
+	codes := make(chan int, n)
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			resp, err := http.Post(e.ts.URL+"/api/auth/password", "application/json", strings.NewReader(`{"password":"nope"}`))
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			resp.Body.Close()
+			codes <- resp.StatusCode
+		}()
+	}
+	wg.Wait()
+	close(codes)
+	count := map[int]int{}
+	for c := range codes {
+		count[c]++
+	}
+	if count[http.StatusUnauthorized] != 5 || count[http.StatusTooManyRequests] != n-5 {
+		t.Fatalf("status counts = %v, want 5×401 and %d×429", count, n-5)
 	}
 }

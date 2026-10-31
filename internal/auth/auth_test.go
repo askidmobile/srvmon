@@ -82,3 +82,19 @@ func TestTokenHashNormalizes(t *testing.T) {
 		t.Fatal("hash should ignore case and spaces")
 	}
 }
+
+func TestLimiterReserveRelease(t *testing.T) {
+	l := NewLimiter(2, time.Minute)
+	if ok, _ := l.Reserve("ip"); !ok {
+		t.Fatal("first reserve")
+	}
+	l.Release("ip") // success gives the slot back
+	for i := 0; i < 2; i++ {
+		if ok, _ := l.Reserve("ip"); !ok {
+			t.Fatalf("reserve %d", i)
+		}
+	}
+	if ok, _ := l.Reserve("ip"); ok {
+		t.Fatal("third reserve must be refused")
+	}
+}

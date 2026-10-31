@@ -40,31 +40,68 @@ func (s *Server) clearCookie(w http.ResponseWriter, name, path string) {
 		Secure: s.cfg.SecureCookie, SameSite: http.SameSiteStrictMode})
 }
 
-// authFailure records a failed attempt for the limiter, the audit table and
-// the fail2ban log (filter: deploy/fail2ban/filter.d/srvmon-auth.conf).
+// authFailure records a failed attempt in the audit table and the fail2ban
+// log (filter: deploy/fail2ban/filter.d/srvmon-auth.conf). The limiter slot
+// was already taken by reserveAttempt.
 func (s *Server) authFailure(ctx context.Context, ip, stage string) {
-	s.limiter.Fail(ip)
+	s.authLogMu.Lock()
 	fmt.Fprintf(s.authLog, "%s srvmon auth failure ip=%s stage=%s\n", s.now().UTC().Format(time.RFC3339), ip, stage)
+	s.authLogMu.Unlock()
 	if err := s.store.Audit(ctx, ip, "auth_failure", stage); err != nil {
 		s.log.Error("audit", "err", err)
 	}
 }
 
-func (s *Server) rejectIfBlocked(w http.ResponseWriter, ip string) bool {
-	blocked, wait := s.limiter.Blocked(ip)
-	if !blocked {
-		return false
+// reserveAttempt takes a limiter slot for ip before any check runs. The
+// returned attempt must be finished: failed() keeps the slot, a deferred
+// done() gives it back otherwise (success, bad request, internal error).
+func (s *Server) reserveAttempt(w http.ResponseWriter, ip string) (*attempt, bool) {
+	ok, wait := s.limiter.Reserve(ip)
+	if !ok {
+		w.Header().Set("Retry-After", strconv.Itoa(int(wait.Seconds())+1))
+		writeError(w, http.StatusTooManyRequests, "too_many_attempts")
+		return nil, false
 	}
-	w.Header().Set("Retry-After", strconv.Itoa(int(wait.Seconds())+1))
-	writeError(w, http.StatusTooManyRequests, "too_many_attempts")
-	return true
+	return &attempt{l: s.limiter, ip: ip}, true
 }
+
+type attempt struct {
+	l      *auth.Limiter
+	ip     string
+	failed bool
+}
+
+func (a *attempt) fail() { a.failed = true }
+
+func (a *attempt) done() {
+	if !a.failed {
+		a.l.Release(a.ip)
+	}
+}
+
+// verifyPassword runs argon2id under a global concurrency cap: each
+// verification takes 64 MiB, so bursts must not exhaust memory.
+func (s *Server) verifyPassword(ctx context.Context, password, hash string) (bool, error) {
+	select {
+	case s.hashSem <- struct{}{}:
+		defer func() { <-s.hashSem }()
+	case <-ctx.Done():
+		return false, ctx.Err()
+	case <-time.After(10 * time.Second):
+		return false, errBusy
+	}
+	return auth.VerifyPassword(password, hash)
+}
+
+var errBusy = errors.New("password verification busy")
 
 func (s *Server) handlePassword(w http.ResponseWriter, r *http.Request) {
 	ip := s.clientIP(r)
-	if s.rejectIfBlocked(w, ip) {
+	att, ok := s.reserveAttempt(w, ip)
+	if !ok {
 		return
 	}
+	defer att.done()
 	var req struct {
 		Password string `json:"password"`
 	}
@@ -81,13 +118,17 @@ func (s *Server) handlePassword(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal")
 		return
 	}
-	ok, err := auth.VerifyPassword(req.Password, hash)
-	if err != nil {
+	ok, err = s.verifyPassword(r.Context(), req.Password, hash)
+	if errors.Is(err, errBusy) {
+		writeError(w, http.StatusServiceUnavailable, "busy")
+		return
+	} else if err != nil {
 		s.log.Error("verify password", "err", err)
 		writeError(w, http.StatusInternalServerError, "internal")
 		return
 	}
 	if !ok {
+		att.fail()
 		s.authFailure(r.Context(), ip, "password")
 		writeError(w, http.StatusUnauthorized, "invalid_password")
 		return
@@ -108,9 +149,11 @@ func (s *Server) handlePassword(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleTOTP(w http.ResponseWriter, r *http.Request) {
 	ip := s.clientIP(r)
-	if s.rejectIfBlocked(w, ip) {
+	att, ok := s.reserveAttempt(w, ip)
+	if !ok {
 		return
 	}
+	defer att.done()
 	c, err := r.Cookie(cookiePending)
 	if err != nil {
 		writeError(w, http.StatusUnauthorized, "password_required")
@@ -129,13 +172,15 @@ func (s *Server) handleTOTP(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "bad_request")
 		return
 	}
-	ok, method, err := s.checkSecondFactor(r.Context(), strings.TrimSpace(req.Code))
+	var method string
+	ok, method, err = s.checkSecondFactor(r.Context(), strings.TrimSpace(req.Code))
 	if err != nil {
 		s.log.Error("second factor", "err", err)
 		writeError(w, http.StatusInternalServerError, "internal")
 		return
 	}
 	if !ok {
+		att.fail()
 		s.authFailure(r.Context(), ip, "totp")
 		writeError(w, http.StatusUnauthorized, "invalid_code")
 		return

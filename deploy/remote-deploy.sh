@@ -48,10 +48,9 @@ mkdir -p /var/log/srvmon 2>/dev/null || sudo mkdir -p /var/log/srvmon
 chown 65532:65532 /var/log/srvmon 2>/dev/null || sudo chown 65532:65532 /var/log/srvmon
 
 set_tag "$TAG"
-docker compose pull --quiet
-docker compose up -d --remove-orphans
-
-if wait_healthy; then
+# Any failure here (pull, `up` erroring on an unhealthy dependency, or the
+# health wait) goes to the rollback below instead of exiting via set -e.
+if docker compose pull --quiet && docker compose up -d --remove-orphans && wait_healthy; then
   echo "deploy ok: $TAG"
   docker image prune -f >/dev/null || true
   exit 0
@@ -62,7 +61,10 @@ docker compose logs --tail=50 server || true
 if [[ -n "$PREV" && "$PREV" != "$TAG" ]]; then
   echo "rolling back to $PREV"
   set_tag "$PREV"
-  docker compose up -d --remove-orphans
-  wait_healthy && echo "rollback ok: $PREV" || echo "rollback is unhealthy too"
+  if docker compose up -d --remove-orphans && wait_healthy; then
+    echo "rollback ok: $PREV"
+  else
+    echo "rollback is unhealthy too"
+  fi
 fi
 exit 1

@@ -32,6 +32,33 @@ func (l *Limiter) Blocked(key string) (bool, time.Duration) {
 	return true, f[0].Add(l.window).Sub(l.now())
 }
 
+// Reserve atomically counts an attempt before it is checked, so concurrent
+// requests cannot all slip past the limit while slow hashing runs. It returns
+// false (and the remaining block time) when the key is already blocked. Call
+// Release when the attempt turns out to be successful.
+func (l *Limiter) Reserve(key string) (bool, time.Duration) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	f := l.prune(key)
+	if len(f) >= l.max {
+		return false, f[0].Add(l.window).Sub(l.now())
+	}
+	l.fails[key] = append(f, l.now())
+	return true, 0
+}
+
+// Release takes back the most recent reserved attempt.
+func (l *Limiter) Release(key string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	f := l.fails[key]
+	if len(f) <= 1 {
+		delete(l.fails, key)
+		return
+	}
+	l.fails[key] = f[:len(f)-1]
+}
+
 // Fail records a failed attempt.
 func (l *Limiter) Fail(key string) {
 	l.mu.Lock()

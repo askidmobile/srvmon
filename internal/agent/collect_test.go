@@ -1,9 +1,12 @@
 package agent
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/askidmobile/srvmon/internal/protocol"
 )
 
 func TestParseStat(t *testing.T) {
@@ -64,5 +67,28 @@ func TestHealthFromStatus(t *testing.T) {
 		if got := healthFromStatus(in); got != want {
 			t.Errorf("%q: got %q want %q", in, got, want)
 		}
+	}
+}
+
+func TestNextBatchRespectsSize(t *testing.T) {
+	var buf []protocol.Report
+	for i := 0; i < 50; i++ {
+		r := protocol.Report{Hostname: "h"}
+		for j := 0; j < 100; j++ {
+			r.Containers = append(r.Containers, protocol.Container{Name: "container-with-a-long-name", Image: "registry.example.com/some/image:tag", Status: "Up 3 hours (healthy)"})
+		}
+		buf = append(buf, r)
+	}
+	one, _ := json.Marshal(buf[0])
+	limit := len(one)*10 + 100
+	b := nextBatch(buf, 100, limit)
+	if len(b) == 0 || len(b) > 10 {
+		t.Fatalf("batch of %d reports for limit of ~10", len(b))
+	}
+	if got := nextBatch(buf, 5, 1<<30); len(got) != 5 {
+		t.Fatalf("count cap: %d", len(got))
+	}
+	if got := nextBatch(buf, 100, 1); len(got) != 1 {
+		t.Fatalf("oversized single report must still be sent: %d", len(got))
 	}
 }
