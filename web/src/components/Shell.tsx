@@ -10,7 +10,7 @@ const nav: { key: string; label: string; to?: string; match: Route["name"][] }[]
   { key: "1", label: "обзор", to: href.overview(), match: ["overview"] },
   { key: "2", label: "серверы", match: ["server", "add"] },
   { key: "3", label: "терминал", to: href.terminal(), match: ["terminal"] },
-  { key: "4", label: "агент", match: [] },
+  { key: "4", label: "агент", to: href.agent(), match: ["agent"] },
   { key: "5", label: "алерты", match: [] },
   { key: "6", label: "настройки", match: [] },
 ];

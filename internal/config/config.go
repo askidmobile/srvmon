@@ -34,7 +34,19 @@ type Config struct {
 	AgentImage         string
 	AgentRegistryUser  string
 	AgentRegistryToken string
+
+	// AI agent (srvmon-ai container). Both empty disables the agent.
+	// SRVMON_AI_URL is the srvmon-ai base URL, SRVMON_AI_TOKEN the bearer
+	// token both sides share. The agent's tool API listens on
+	// SRVMON_AI_TOOLS_LISTEN (default :8081), which must stay inside the
+	// compose network.
+	AIURL         string
+	AIToken       string
+	AIToolsListen string
 }
+
+// AIEnabled reports whether the AI agent is configured.
+func (c Config) AIEnabled() bool { return c.AIURL != "" && c.AIToken != "" }
 
 // DBPath is the SQLite database file.
 func (c Config) DBPath() string { return filepath.Join(c.DataDir, "srvmon.db") }
@@ -53,6 +65,13 @@ func FromEnv() (Config, error) {
 		AgentImage:         env("SRVMON_AGENT_IMAGE", "ghcr.io/askidmobile/srvmon-agent:latest"),
 		AgentRegistryUser:  env("SRVMON_AGENT_REGISTRY_USER", ""),
 		AgentRegistryToken: env("SRVMON_AGENT_REGISTRY_TOKEN", ""),
+
+		AIURL:         env("SRVMON_AI_URL", ""),
+		AIToken:       env("SRVMON_AI_TOKEN", ""),
+		AIToolsListen: env("SRVMON_AI_TOOLS_LISTEN", ":8081"),
+	}
+	if c.AIToken != "" && len(c.AIToken) < 32 {
+		return c, fmt.Errorf("SRVMON_AI_TOKEN: at least 32 characters")
 	}
 	c.MasterKeyFile = env("SRVMON_MASTER_KEY_FILE", filepath.Join(c.DataDir, "master.key"))
 	var err error

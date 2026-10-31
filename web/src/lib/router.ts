@@ -1,12 +1,14 @@
 import { useEffect, useState } from "react";
 
 // Minimal hash router: #/ overview, #/s/<id> server screen, #/add[/<id>]
-// wizard (with an id: give an existing card SSH access), #/term[/<id>] terminal.
+// wizard (with an id: give an existing card SSH access), #/term[/<id>] terminal,
+// #/agent[/<id>] AI agent (with an id: chat about that server).
 export type Route =
   | { name: "overview" }
   | { name: "server"; id: number }
   | { name: "terminal"; id?: number }
-  | { name: "add"; id?: number };
+  | { name: "add"; id?: number }
+  | { name: "agent"; id?: number };
 
 export function parseRoute(hash: string): Route {
   const parts = hash.replace(/^#\/?/, "").split("/").filter(Boolean);
@@ -19,6 +21,8 @@ export function parseRoute(hash: string): Route {
       return Number.isInteger(id) && id > 0 ? { name: "terminal", id } : { name: "terminal" };
     case "add":
       return Number.isInteger(id) && id > 0 ? { name: "add", id } : { name: "add" };
+    case "agent":
+      return Number.isInteger(id) && id > 0 ? { name: "agent", id } : { name: "agent" };
   }
   return { name: "overview" };
 }
@@ -41,6 +45,7 @@ export const href = {
   server: (id: number) => `#/s/${id}`,
   terminal: (id?: number) => (id ? `#/term/${id}` : "#/term"),
   add: (id?: number) => (id ? `#/add/${id}` : "#/add"),
+  agent: (id?: number) => (id ? `#/agent/${id}` : "#/agent"),
 };
 
 export function navigate(to: string) {

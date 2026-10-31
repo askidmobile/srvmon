@@ -5,10 +5,12 @@
 # healthy and rolls back to the previous tag if it does not.
 set -euo pipefail
 
-TAG="${1:?usage: remote-deploy.sh <image-tag>}"
+TAG="${1:?usage: remote-deploy.sh <image-tag> | --ai-key (key on stdin)}"
 cd "$(dirname "$0")"
 
 [[ -f .env ]] || cp .env.example .env
+# .env holds tokens and the AI provider key.
+chmod 600 .env
 
 # set_env KEY VALUE: upsert a line in .env
 set_env() {
@@ -20,10 +22,23 @@ set_env() {
 }
 set_tag() { set_env SRVMON_TAG "$1"; }
 
+# remote-deploy.sh --ai-key: store the AI provider key read from stdin
+# (deploy.yml pipes the AI_API_KEY secret, so it never shows in argv).
+if [[ "$TAG" == "--ai-key" ]]; then
+  IFS= read -r key || true
+  if [[ ! "$key" =~ ^[A-Za-z0-9._:-]+$ ]]; then
+    echo "AI_API_KEY: unexpected characters, not stored"
+    exit 1
+  fi
+  set_env SRVMON_AI_API_KEY "$key"
+  echo "ai key stored"
+  exit 0
+fi
+
 # Optional value passed from GitHub (vars.SRVMON_DOMAIN). Store it in .env
 # and drop it from the environment: an exported (even empty) variable would
 # override .env for every compose call.
-for key in SRVMON_DOMAIN SRVMON_PROXY SRVMON_HTTP_BIND; do
+for key in SRVMON_DOMAIN SRVMON_PROXY SRVMON_HTTP_BIND SRVMON_AI_PROVIDER SRVMON_AI_MODEL; do
   if [[ -n "${!key:-}" ]]; then
     set_env "$key" "${!key}"
   fi
@@ -32,6 +47,11 @@ done
 if grep -q '^SRVMON_DOMAIN=mon.example.com' .env; then
   echo "set SRVMON_DOMAIN in $(pwd)/.env or in the GitHub variable SRVMON_DOMAIN"
   exit 1
+fi
+
+# Shared token between srvmon-server and srvmon-ai, generated once.
+if ! grep -q '^SRVMON_AI_TOKEN=.\{32,\}' .env; then
+  set_env SRVMON_AI_TOKEN "$(od -An -tx1 -N32 /dev/urandom | tr -d ' \n')"
 fi
 
 # The monitoring host shows up in the panel under its hostname.

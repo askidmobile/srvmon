@@ -6,3 +6,4 @@ data
 docs
 *.md
 .github
+ai/dist

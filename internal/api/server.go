@@ -3,6 +3,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -15,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/askidmobile/srvmon/internal/aiagent"
 	"github.com/askidmobile/srvmon/internal/auth"
 	"github.com/askidmobile/srvmon/internal/config"
 	"github.com/askidmobile/srvmon/internal/metrics"
@@ -39,6 +41,11 @@ type Server struct {
 	jobs      *jobs
 	csp       string
 
+	ai              *aiagent.Client // nil: agent disabled
+	agent           *agentState
+	notify          func(ctx context.Context, text string) error
+	onActionPending func(store.AgentAction)
+
 	totpMu  sync.Mutex    // serializes TOTP replay check-and-set
 	hashSem chan struct{} // caps concurrent argon2id verifications
 	now     func() time.Time
@@ -55,6 +62,12 @@ type Options struct {
 	Web     fs.FS           // built frontend (contents of web/dist)
 	Version string
 	Secrets *secret.Box // seals SSH private keys; nil disables the add wizard
+	// Notify sends a critical message (Telegram) for agent tasks; optional.
+	Notify func(ctx context.Context, text string) error
+	// OnActionPending is called when the agent asks to run a command that
+	// needs confirmation (e.g. to offer approve buttons in Telegram, which
+	// then call Server.DecideAgentAction); optional.
+	OnActionPending func(store.AgentAction)
 }
 
 // New builds the server.
@@ -80,6 +93,11 @@ func New(o Options) *Server {
 		jobs:    &jobs{m: map[string]*job{}},
 		now:     time.Now,
 		hashSem: make(chan struct{}, 2),
+
+		ai:              aiagent.NewClient(o.Config.AIURL, o.Config.AIToken),
+		agent:           newAgentState(),
+		notify:          o.Notify,
+		onActionPending: o.OnActionPending,
 	}
 	// 'self' covers same-origin WebSocket in current browsers; older Safari
 	// needs the wss:// origin spelled out.
@@ -119,6 +137,23 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/servers/{id}", s.requireSession(http.HandlerFunc(s.handleServer)))
 	mux.Handle("PATCH /api/servers/{id}", s.requireSession(http.HandlerFunc(s.handleServerCard)))
 	mux.Handle("GET /api/servers/{id}/history", s.requireSession(http.HandlerFunc(s.handleHistory)))
+
+	agent := func(pattern string, h http.HandlerFunc) { mux.Handle(pattern, s.requireSession(h)) }
+	agent("GET /api/agent/status", s.handleAgentStatus)
+	agent("GET /api/agent/chats", s.handleAgentChats)
+	agent("POST /api/agent/chats", s.handleAgentNewChat)
+	agent("GET /api/agent/chats/{id}", s.handleAgentChat)
+	agent("DELETE /api/agent/chats/{id}", s.handleAgentDeleteChat)
+	agent("POST /api/agent/chats/{id}/run", s.handleAgentRun)
+	agent("POST /api/agent/chats/{id}/abort", s.handleAgentAbort)
+	agent("GET /api/agent/actions", s.handleAgentActions)
+	agent("POST /api/agent/actions/{id}/{decision}", s.handleAgentDecide)
+	agent("GET /api/agent/tasks", s.handleAgentTasks)
+	agent("POST /api/agent/tasks", s.handleAgentNewTask)
+	agent("PATCH /api/agent/tasks/{id}", s.handleAgentUpdateTask)
+	agent("DELETE /api/agent/tasks/{id}", s.handleAgentDeleteTask)
+	agent("POST /api/agent/tasks/{id}/run", s.handleAgentRunTask)
+
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "not_found")
 	})

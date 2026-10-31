@@ -186,3 +186,19 @@ func randHex(n int) string {
 func shq(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
+
+// Quote quotes s as one POSIX shell word.
+func Quote(s string) string { return shq(s) }
+
+// ExitCode returns the remote exit status of a Run error: 0 for nil, -1 when
+// the command did not report one (connection lost, timeout).
+func ExitCode(err error) int {
+	if err == nil {
+		return 0
+	}
+	var ee *ssh.ExitError
+	if errors.As(err, &ee) {
+		return ee.ExitStatus()
+	}
+	return -1
+}
