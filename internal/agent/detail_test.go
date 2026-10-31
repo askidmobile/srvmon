@@ -68,7 +68,9 @@ func TestDetailCollector(t *testing.T) {
 	d := &DetailCollector{HostProc: dir, HostRoot: dir}
 	ids := map[string]string{id: "web"}
 	d.Collect(ids)
-	d.prevAt = d.prevAt.Add(-time.Second) // pretend a second passed
+	// Pretend 100 s passed: the real time between the two calls (tens of
+	// milliseconds under -race on CI) then barely moves the result.
+	d.prevAt = d.prevAt.Add(-100 * time.Second)
 	write("stat", "cpu 100 0 100 200 0 0 0 0\ncpu0 100 0 0 0 0 0 0 0\ncpu1 0 0 100 200 0 0 0 0\n")
 	write("10/stat", "10 (nginx) S 1 0 0 0 0 0 0 0 0 0 150 0 0 0 0 0 1 0 0 0 10 0")
 	det, usage := d.Collect(ids)
@@ -85,7 +87,7 @@ func TestDetailCollector(t *testing.T) {
 	if p.Name != "nginx" || p.Container != "web" || p.User != "www-data" || p.Cmd != "nginx: worker process" {
 		t.Errorf("top proc = %+v", p)
 	}
-	if p.CPUPercent < 49 || p.CPUPercent > 51 { // 50 ticks over ~1 s
+	if p.CPUPercent < 0.49 || p.CPUPercent > 0.51 { // 50 ticks over ~100 s
 		t.Errorf("proc cpu = %v", p.CPUPercent)
 	}
 	if u := usage["web"]; u.MemBytes != 10*uint64(os.Getpagesize()) {
