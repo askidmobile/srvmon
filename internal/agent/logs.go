@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -103,6 +104,10 @@ type LogTailer struct {
 	syslogIno   uint64
 	syslogOff   int64
 	dockerSince map[string]time.Time // container id -> last line time
+	// noLogs holds containers whose logging driver (none, syslog, journald,
+	// gelf, ...) cannot be read back: asking again every pass only makes
+	// dockerd log an error each time.
+	noLogs map[string]bool
 }
 
 // Collect returns lines that appeared since the previous call. The first
@@ -244,11 +249,21 @@ func (t *LogTailer) docker(ctx context.Context, containers []protocol.Container)
 			continue
 		}
 		seen[c.ID] = true
+		if t.noLogs[c.ID] {
+			continue
+		}
 		since, ok := t.dockerSince[c.ID]
 		if !ok {
 			since = time.Now().Add(-time.Hour)
 		}
 		lines, last, err := t.Docker.Logs(ctx, c.ID, since)
+		if errors.Is(err, errLogsUnsupported) {
+			if t.noLogs == nil {
+				t.noLogs = map[string]bool{}
+			}
+			t.noLogs[c.ID] = true
+			continue
+		}
 		if err != nil {
 			continue
 		}
@@ -267,8 +282,17 @@ func (t *LogTailer) docker(ctx context.Context, containers []protocol.Container)
 			delete(t.dockerSince, id)
 		}
 	}
+	for id := range t.noLogs {
+		if !seen[id] {
+			delete(t.noLogs, id)
+		}
+	}
 	return out
 }
+
+// errLogsUnsupported: the container's logging driver keeps no logs dockerd
+// can read back.
+var errLogsUnsupported = errors.New("logging driver does not support reading")
 
 // Logs returns warn+ lines of a container written after since, and the
 // timestamp of the newest line read.
@@ -287,6 +311,10 @@ func (d *Docker) Logs(ctx context.Context, id string, since time.Time) ([]protoc
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
+		if strings.Contains(string(b), "does not support reading") {
+			return nil, since, errLogsUnsupported
+		}
 		return nil, since, fmt.Errorf("docker logs: %s", resp.Status)
 	}
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, dockerLogBytes))
