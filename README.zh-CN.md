@@ -6,6 +6,8 @@
 
 界面为深色 TUI 风格（类似 btop），绿色强调色。界面支持英语（默认）、俄语和中文，可在设置中切换；该语言同样用于 Telegram 机器人消息和 AI 智能体的回复。
 
+![总览：所有服务器、容器、主机续费和活动告警](docs/screenshots/overview.png)
+
 - 架构：[docs/architecture.md](docs/architecture.md)（俄语）
 - 设计稿：[docs/design](docs/design)
 - 监控服务器配置要求：[docs/server-requirements.md](docs/server-requirements.md)（俄语）
@@ -13,13 +15,39 @@
 
 ## 功能
 
+- **总览。** 一张表展示所有服务器：CPU、内存和磁盘条形图，运行/总容器数（失败的会标出），运行时间，内存大小，下次主机续费金额及日期，以及最新告警。可按分组筛选，一键打开终端。快捷键：`1` 总览、`3` 终端、`4` 代理、`5` 告警、`6` 设置。
 - **指标与容器。** 每台服务器上运行一个小型 Go 代理（`srvmon-agent`），从 `/proc` 读取 CPU、内存、swap、负载、磁盘、网络和运行时间，通过 docker socket（只读）读取容器信息并推送到面板。面板不可达时最多缓存一小时。指标存储在 VictoriaMetrics 中。
 - **服务器详情页。** 按核心的 CPU、内存、磁盘、网络、进程、容器状态/健康检查/重启次数、syslog 与 docker 日志，页面打开期间实时刷新。
+- **服务器档案与续费。** 每台服务器有一份档案：描述、项目、分组、标签、提供商、套餐、费用（含币种）和下次付款日期。续费信息显示在总览中、Telegram（`/bills`）里，并会在到期前几天发出告警。
 - **添加向导。** 校验 SSH 主机密钥，用密码或你自己的私钥登录一次。srvmon 创建 `srvmon` 用户及其 ed25519 密钥，安装代理，并可关闭密码登录。一次性密码或密钥不会被保存。
-- **Web 终端。** xterm.js ↔ WebSocket ↔ `srvmon-server` 内的 SSH 客户端 ↔ sshd。支持多标签、窗口缩放、`docker exec` 进入容器。私钥从不离开监控服务器，并以 XChaCha20-Poly1305 加密存储。
-- **AI 代理。** 基于 [pi](https://pi.dev) SDK，支持任意提供商（DeepSeek、Anthropic、OpenAI、OpenRouter、Google、Ollama，以及任何 OpenAI / Anthropic 兼容接口）。只读命令直接执行；任何会修改服务器的命令都必须经你明确批准，策略由 `srvmon-server` 而非模型执行。定时任务（cron）结果可发送到 Telegram。
-- **告警与 Telegram。** 代理离线、容器停止或不健康、频繁重启、CPU、磁盘、主机续费提醒、fail2ban 封禁、登录尝试。支持静默时段、确认与临时静音。机器人命令：`/status`、`/server`、`/alerts`、`/ack`、`/bills`、`/ask`。
+- **Web 终端。** xterm.js ↔ WebSocket ↔ `srvmon-server` 内的 SSH 客户端 ↔ sshd。支持多标签、窗口缩放、`docker exec` 进入容器。终端旁边是 AI 代理面板（`F9` 显示或隐藏），在该服务器的上下文中工作。私钥从不离开监控服务器，并以 XChaCha20-Poly1305 加密存储。
+- **AI 代理。** 基于 [pi](https://pi.dev) SDK，支持任意提供商（DeepSeek、Anthropic、OpenAI、OpenRouter、Google、Ollama，以及任何 OpenAI / Anthropic 兼容接口）。只读命令直接执行；任何会修改服务器的命令都必须经你明确批准，策略由 `srvmon-server` 而非模型执行。每台服务器有独立的对话上下文，对话保留历史，每个对话可单独选择模型。定时任务（cron）结果可发送到 Telegram，也可以在 Telegram 中用 `/ask` 向代理提问。
+- **告警与 Telegram。** 代理离线、容器停止或不健康、频繁重启、CPU、磁盘、主机续费提醒、fail2ban 封禁、登录尝试。规则可编辑（阈值、持续时间、级别、渠道：Telegram 或仅面板）。按你的时区设置静默时段（严重告警仍会发送），支持确认与临时静音，保留 90 天历史。机器人命令：`/status`、`/server`、`/alerts`、`/ack`、`/bills`、`/ask`。
 - **安全。** 密码（argon2id）+ TOTP 或备用码，无需用户名。限流、审计日志，以及面板和 sshd 的 fail2ban 规则。
+
+## 截图
+
+**服务器详情页**：按核心的 CPU、内存、网络、进程、带健康状态和日志的 docker 容器、服务器档案。
+
+![服务器详情页](docs/screenshots/server.png)
+
+**Web 终端**，右侧为 AI 代理面板（`F9`）。
+
+![带代理面板的 Web 终端](docs/screenshots/terminal.png)
+
+**AI 代理**：对话、任务和历史，服务器上下文与模型选择，以及已确认命令的日志。
+
+![AI 代理](docs/screenshots/agent.png)
+
+**告警**：活动告警、可编辑的规则、静默时段、Telegram 机器人和历史记录。
+
+![告警与 Telegram 机器人](docs/screenshots/alerts.png)
+
+**设置**：语言、AI 提供商、协议、API 密钥、思考级别以及对话中可用的模型。
+
+![设置：语言与 AI 代理](docs/screenshots/settings.png)
+
+截图中的敏感数据（地址、付款信息、聊天 ID、密钥）已做模糊处理。
 
 ## 组件
 
@@ -77,7 +105,15 @@ docker compose exec server /srvmon-server add-server -name shop-db -group prod -
 SRVMON_URL=https://mon.example.com SRVMON_TOKEN=a_... docker compose up -d
 ```
 
-## Telegram 告警
+## 告警与 Telegram
+
+`[5] 告警` 页面（`#/alerts`）显示活动告警（可“确认”或“静音 1 小时”）、规则、Telegram 机器人、静默时段和 90 天历史。
+
+- 默认规则：代理静默超过 2 分钟（crit），容器停止或不健康 1 分钟（crit），每小时重启超过 2 次，CPU > 90% 持续 5 分钟，内存 > 95% 持续 5 分钟（默认关闭，仅面板），磁盘 > 85%，3 天内需续费；以及事件：监控服务器上的 fail2ban 封禁、面板密码爆破、面板登录。
+- 每条规则都可以关闭、修改（阈值、持续时间、级别 crit/warn/info）或指定渠道：`tg`（Telegram 和面板）或 `web`（仅面板）。`+ 规则` 可添加新规则。以退出码 0 停止的容器不算告警。
+- 静默时段（例如 `Europe/Moscow` 时区 01:00–07:00）内 Telegram 通知会延后到时段结束；严重告警始终发送。
+
+机器人设置：
 
 1. 通过 [@BotFather](https://t.me/BotFather)（`/newbot`）创建机器人并复制令牌。
 2. 在面板的告警页面粘贴令牌并保存。
@@ -87,6 +123,14 @@ SRVMON_URL=https://mon.example.com SRVMON_TOKEN=a_... docker compose up -d
 如果监控服务器无法访问 `api.telegram.org`，可以用 Cloudflare Worker 搭一个代理并设置 `SRVMON_TELEGRAM_API`，见 [docs/telegram-proxy.md](docs/telegram-proxy.md)。
 
 ## AI 代理
+
+`srvmon-ai` 容器（pi SDK，`ai/`）只带有 srvmon 工具：列出服务器和容器、读取指标和日志、通过 SSH 网关在服务器上执行命令、管理定时任务。它没有自己的 SSH 密钥。代理有两个入口：`[3] 终端` 右侧的面板（`F9` 显示或隐藏）和带确认日志的 `[4] 代理` 页面。
+
+- **上下文。** 选择“所有服务器”或某一台服务器。每台服务器有自己的对话，因此从服务器页面或终端打开代理时，它已经知道你指的是哪台主机。对话保存在“历史”中，可以随时继续。
+- **模型。** pi 目录中的任意提供商（DeepSeek、Anthropic、OpenAI、OpenRouter、Google、Ollama …）或自定义的 OpenAI / Anthropic 兼容地址。在设置中勾选多个模型，即可在每个对话中切换；推理模型可设置思考级别。
+- **命令确认。** 只读命令（`docker ps/logs/inspect`、`df`、`journalctl`、`systemctl status` …）立即执行。任何会修改服务器的命令都会显示为“⚠ 确认”卡片，只有点击“✓ 执行”后才会运行。由 `srvmon-server`（`internal/aiagent/policy.go`）而不是模型来决定。所有命令及其结果都会记入确认日志。
+- **任务。** 例如“每 15 分钟检查容器重启，如果一小时内超过 2 次就发到 Telegram”会变成 cron 为 `*/15 * * * *`（UTC）的任务。任务显示在“任务”标签页中，带告警的结果发送到 Telegram。
+- **Telegram。** 机器人会把代理的命令连同批准/拒绝按钮发给你确认，`/ask <问题>` 可直接在 Telegram 中向代理提问。
 
 在面板设置中启用：选择提供商（pi 目录中的任意一个或自定义兼容地址），填入 API 密钥（加密存储，不会返回给浏览器），加载并勾选模型，然后保存并应用。在面板保存设置之前，`srvmon-ai` 使用 `.env` 中的 `SRVMON_AI_PROVIDER`、`SRVMON_AI_MODEL`、`SRVMON_AI_API_KEY`。
 

@@ -6,6 +6,8 @@ Self-hosted monitoring panel for your own servers: host metrics and docker conta
 
 The interface is a dark TUI-style dashboard (btop-like) with a green accent. The interface is available in English (default), Russian and Chinese; switch it in settings. The language also applies to Telegram messages and AI agent replies.
 
+![Overview: all servers, containers, hosting payments and active alerts](docs/screenshots/overview.png)
+
 - Architecture: [docs/architecture.md](docs/architecture.md)
 - Mockups: [docs/design](docs/design)
 - Monitoring server requirements: [docs/server-requirements.md](docs/server-requirements.md)
@@ -13,13 +15,39 @@ The interface is a dark TUI-style dashboard (btop-like) with a green accent. The
 
 ## Features
 
+- **Overview.** One table for all servers: CPU, RAM and disk bars, running/total containers (with a mark for failed ones), uptime, RAM size, the next hosting payment and its due date, plus the latest alerts. Filter by group, open a terminal in one click. Hotkeys: `1` overview, `3` terminal, `4` agent, `5` alerts, `6` settings.
 - **Metrics and containers.** A small Go agent (`srvmon-agent`) on each server reads CPU, RAM, swap, load, disks, network and uptime from `/proc`, containers through the docker socket (read-only), and pushes them to the panel. It buffers for an hour if the panel is unreachable. Metrics are stored in VictoriaMetrics.
 - **Server screen.** Per-core CPU, memory, disks, network, processes, containers with status/health/restarts, and syslog + docker logs, all live while the screen is open.
+- **Server passport and payments.** Each server keeps a passport: description, project, group, tags, provider, plan, cost with currency and the next payment date. Payments show up in the overview, in Telegram (`/bills`) and as an alert a few days before the due date.
 - **Onboarding wizard.** Add a server, verify its SSH host key, log in once with a password or your own key. srvmon creates a `srvmon` user with its own ed25519 key, installs the agent and can disable password auth. The one-time password or key is never stored.
-- **Web terminal.** xterm.js ↔ WebSocket ↔ SSH client inside `srvmon-server` ↔ sshd. Tabs, resize, `docker exec` into a container. Private keys never leave the monitoring server; they are encrypted at rest (XChaCha20-Poly1305).
-- **AI agent.** Built on the [pi](https://pi.dev) SDK, any provider (DeepSeek, Anthropic, OpenAI, OpenRouter, Google, Ollama, any OpenAI- or Anthropic-compatible endpoint). Read-only commands run immediately; anything that changes a server waits for your explicit approval. The policy is enforced by `srvmon-server`, not by the model. Scheduled tasks (cron) report to Telegram.
-- **Alerts and Telegram.** Agent offline, container down/unhealthy, restart loops, CPU, disk, upcoming hosting payments, fail2ban bans, login attempts. Quiet hours, ack and silence. The bot answers `/status`, `/server`, `/alerts`, `/ack`, `/bills`, `/ask`.
+- **Web terminal.** xterm.js ↔ WebSocket ↔ SSH client inside `srvmon-server` ↔ sshd. Tabs, resize, `docker exec` into a container. The AI agent panel sits next to the terminal (`F9` shows or hides it) and works in the context of that server. Private keys never leave the monitoring server; they are encrypted at rest (XChaCha20-Poly1305).
+- **AI agent.** Built on the [pi](https://pi.dev) SDK, any provider (DeepSeek, Anthropic, OpenAI, OpenRouter, Google, Ollama, any OpenAI- or Anthropic-compatible endpoint). Read-only commands run immediately; anything that changes a server waits for your explicit approval. The policy is enforced by `srvmon-server`, not by the model. Each server has its own chat context, chats keep their history, and the model can be picked per chat. Scheduled tasks (cron) report to Telegram, and you can ask the agent from Telegram with `/ask`.
+- **Alerts and Telegram.** Agent offline, container down/unhealthy, restart loops, CPU, disk, upcoming hosting payments, fail2ban bans, login attempts. Rules are editable (threshold, duration, level, channel: Telegram or panel only). Quiet hours in your time zone (critical alerts still go through), ack and mute, 90-day history. The bot answers `/status`, `/server`, `/alerts`, `/ack`, `/bills`, `/ask`.
 - **Security.** Password (argon2id) + TOTP or backup code, no username. Rate limiting, an audit log and fail2ban jails for the panel and sshd.
+
+## Screenshots
+
+**Server screen**: CPU per core, memory, network, processes, docker containers with health and logs, passport.
+
+![Server screen](docs/screenshots/server.png)
+
+**Web terminal** with the AI agent panel on the right (`F9`).
+
+![Web terminal with the agent panel](docs/screenshots/terminal.png)
+
+**AI agent**: chat, tasks and history, server context and model picker, and the log of confirmed commands.
+
+![AI agent](docs/screenshots/agent.png)
+
+**Alerts**: active alerts, editable rules, quiet hours, Telegram bot and history.
+
+![Alerts and Telegram bot](docs/screenshots/alerts.png)
+
+**Settings**: language, AI provider, protocol, API key, thinking level and the models available in chat.
+
+![Settings: language and AI agent](docs/screenshots/settings.png)
+
+Sensitive data (addresses, payments, chat ids, keys) is blurred in the screenshots.
 
 ## Components
 
@@ -82,7 +110,15 @@ docker compose exec server /srvmon-server add-server -name shop-db -group prod -
 SRVMON_URL=https://mon.example.com SRVMON_TOKEN=a_... docker compose up -d
 ```
 
-## Telegram alerts
+## Alerts and Telegram
+
+The `[5] alerts` screen (`#/alerts`) shows active alerts with "ack" and "mute 1h", the rules, the Telegram bot, quiet hours and a 90-day history.
+
+- Default rules: agent silent for more than 2 min (crit), container down or unhealthy for 1 min (crit), more than 2 container restarts per hour, CPU > 90% for 5 min, memory > 95% for 5 min (off by default, panel only), disk > 85%, hosting payment due in 3 days or less, plus events: a fail2ban ban on the monitoring server, password guessing on the panel, a panel sign-in.
+- Every rule can be switched off, edited (threshold, duration, level crit/warn/info) or sent to a channel: `tg` (Telegram and panel) or `web` (panel only). `+ rule` adds a new one. Containers that stopped with exit code 0 do not count as alerts.
+- Quiet hours (for example 01:00–07:00 in `Europe/Moscow`) hold back Telegram notifications until they end; critical alerts are always sent.
+
+Bot setup:
 
 1. Create a bot with [@BotFather](https://t.me/BotFather) (`/newbot`) and copy its token.
 2. In the panel: alerts → telegram bot → paste the token → save.
@@ -92,6 +128,14 @@ SRVMON_URL=https://mon.example.com SRVMON_TOKEN=a_... docker compose up -d
 If the monitoring server cannot reach `api.telegram.org` (Russian hosting, corporate networks), run a tiny Cloudflare Worker proxy and set `SRVMON_TELEGRAM_API`: see [docs/telegram-proxy.md](docs/telegram-proxy.md).
 
 ## AI agent
+
+The `srvmon-ai` container (pi SDK, `ai/`) has only srvmon tools: list servers and containers, read metrics and logs, run commands on servers through the SSH gateway, and manage scheduled tasks. It has no SSH keys of its own. The agent lives in two places: the panel next to the terminal in `[3] terminal` (`F9` shows or hides it) and the `[4] agent` screen with the confirmation log.
+
+- **Context.** Pick "all servers" or one server. Each server has its own chat, so the agent opened from a server screen or terminal already knows which host you mean. Chats are kept in "history" and can be continued later.
+- **Models.** Any provider from the pi catalog (DeepSeek, Anthropic, OpenAI, OpenRouter, Google, Ollama …) or a custom OpenAI- or Anthropic-compatible URL. Mark several models in settings and switch between them per chat; for reasoning models you can set the thinking level.
+- **Command confirmation.** Read-only commands (`docker ps/logs/inspect`, `df`, `journalctl`, `systemctl status` …) run immediately. Anything that changes a server appears as a "⚠ confirm" card and runs only after you press "✓ run". The decision is made by `srvmon-server` (`internal/aiagent/policy.go`), not by the model. Every command and its result goes into the confirmation log.
+- **Tasks.** A request like "every 15 minutes check container restarts, if more than 2 per hour send to Telegram" becomes a task with cron `*/15 * * * *` (UTC). Tasks are listed in the "tasks" tab; a result with an alarm goes to Telegram.
+- **Telegram.** The bot sends the agent's commands for confirmation with approve and reject buttons, and `/ask <question>` asks the agent straight from Telegram.
 
 Enable it in the panel: settings → AI agent. Pick a provider (any from the pi catalog or a custom OpenAI/Anthropic-compatible URL), paste an API key (stored encrypted, never returned to the browser), load and select models, then "save and apply". Until something is saved in the panel, `srvmon-ai` uses `SRVMON_AI_PROVIDER`, `SRVMON_AI_MODEL` and `SRVMON_AI_API_KEY` from `.env`.
 
