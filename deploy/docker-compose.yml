@@ -77,7 +77,7 @@ services:
     pid: host
     read_only: true
     security_opt:
-      - no-new-privileges:true
+      - no-new-privileges=true
     environment:
       # Published loopback port of srvmon-server (see SRVMON_HTTP_BIND).
       SRVMON_URL: http://${SRVMON_HTTP_BIND:-127.0.0.1:8088}
@@ -101,7 +101,7 @@ services:
     restart: unless-stopped
     read_only: true
     security_opt:
-      - no-new-privileges:true
+      - no-new-privileges=true
     tmpfs:
       - /tmp
     environment:

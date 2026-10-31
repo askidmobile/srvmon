@@ -5,6 +5,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -29,8 +31,60 @@ var (
 	warnRe = regexp.MustCompile(`(?i)\b(warn|warning|timeout|timed out|denied|refused|invalid user|retry|deprecated)\b`)
 )
 
-// logLevel classifies a free-form log line; "" means info and is dropped.
+// logfmtRe walks a logfmt line: quoted strings are matched (and skipped) as
+// whole tokens, so a level=... inside a quoted msg is not taken for the
+// line's own level field.
+var logfmtRe = regexp.MustCompile(`"(?:[^"\\]|\\.)*"|(?:^|\s)(?:level|lvl|severity)="?([A-Za-z]+)`)
+
+var (
+	jsonPrefixRe = regexp.MustCompile(`^\s*(?:[\w.\-/]+(?:\[\d+\])?:\s*)?$`)
+	logfmtMsgRe  = regexp.MustCompile(`(?:^|\s)msg=`)
+)
+
+// explicitLevel returns the level field of a structured line: a JSON object
+// ("level", "lvl" or "severity") or logfmt. ok is false for free text.
+func explicitLevel(msg string) (string, bool) {
+	// JSON counts only when the whole line is the object, optionally after a
+	// syslog tag ("app[12]: {...}"); a JSON payload at the end of free text
+	// is message content.
+	if i := strings.IndexByte(msg, '{'); i >= 0 && jsonPrefixRe.MatchString(msg[:i]) && strings.HasSuffix(strings.TrimSpace(msg), "}") {
+		var obj map[string]any
+		if json.Unmarshal([]byte(msg[i:]), &obj) == nil {
+			for _, k := range []string{"level", "lvl", "severity"} {
+				if v, ok := obj[k].(string); ok {
+					return strings.ToLower(v), true
+				}
+			}
+			return "", false
+		}
+	}
+	// logfmt: only lines that carry a msg= field, so "ERROR x: level=info"
+	// in free text is not taken for structured.
+	if !logfmtMsgRe.MatchString(msg) {
+		return "", false
+	}
+	for _, m := range logfmtRe.FindAllStringSubmatch(msg, -1) {
+		if m[1] != "" {
+			return strings.ToLower(m[1]), true
+		}
+	}
+	return "", false
+}
+
+// logLevel classifies a log line; "" means info and is dropped. An explicit
+// level wins over words in the message, so dockerd's
+// level=warning msg="... failed ..." stays a warning.
 func logLevel(msg string) string {
+	if lvl, ok := explicitLevel(msg); ok {
+		switch lvl {
+		case "emerg", "alert", "panic", "fatal", "crit", "critical", "err", "error":
+			return "ERR"
+		case "warn", "warning":
+			return "WARN"
+		case "info", "notice", "debug", "trace":
+			return ""
+		}
+	}
 	switch {
 	case errRe.MatchString(msg):
 		return "ERR"
@@ -50,6 +104,10 @@ type LogTailer struct {
 	syslogIno   uint64
 	syslogOff   int64
 	dockerSince map[string]time.Time // container id -> last line time
+	// noLogs holds containers whose logging driver (none, syslog, journald,
+	// gelf, ...) cannot be read back: asking again every pass only makes
+	// dockerd log an error each time.
+	noLogs map[string]bool
 }
 
 // Collect returns lines that appeared since the previous call. The first
@@ -191,11 +249,21 @@ func (t *LogTailer) docker(ctx context.Context, containers []protocol.Container)
 			continue
 		}
 		seen[c.ID] = true
+		if t.noLogs[c.ID] {
+			continue
+		}
 		since, ok := t.dockerSince[c.ID]
 		if !ok {
 			since = time.Now().Add(-time.Hour)
 		}
 		lines, last, err := t.Docker.Logs(ctx, c.ID, since)
+		if errors.Is(err, errLogsUnsupported) {
+			if t.noLogs == nil {
+				t.noLogs = map[string]bool{}
+			}
+			t.noLogs[c.ID] = true
+			continue
+		}
 		if err != nil {
 			continue
 		}
@@ -214,8 +282,17 @@ func (t *LogTailer) docker(ctx context.Context, containers []protocol.Container)
 			delete(t.dockerSince, id)
 		}
 	}
+	for id := range t.noLogs {
+		if !seen[id] {
+			delete(t.noLogs, id)
+		}
+	}
 	return out
 }
+
+// errLogsUnsupported: the container's logging driver keeps no logs dockerd
+// can read back.
+var errLogsUnsupported = errors.New("logging driver does not support reading")
 
 // Logs returns warn+ lines of a container written after since, and the
 // timestamp of the newest line read.
@@ -234,6 +311,10 @@ func (d *Docker) Logs(ctx context.Context, id string, since time.Time) ([]protoc
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
+		if strings.Contains(string(b), "does not support reading") {
+			return nil, since, errLogsUnsupported
+		}
 		return nil, since, fmt.Errorf("docker logs: %s", resp.Status)
 	}
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, dockerLogBytes))
