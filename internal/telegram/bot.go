@@ -18,6 +18,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/askidmobile/srvmon/internal/alerts"
 	"github.com/askidmobile/srvmon/internal/metrics"
@@ -491,12 +492,13 @@ func (b *Bot) Test(ctx context.Context) error {
 }
 
 func (b *Bot) send(ctx context.Context, token string, chat int64, text string, kb [][]button) error {
+	req := map[string]any{"chat_id": chat, "link_preview_options": map[string]bool{"is_disabled": true}}
 	if len(text) > 4000 {
-		text = text[:4000] + "…"
-		// Cutting may break an HTML tag; fall back to plain text.
-		text = stripTags(text)
+		// Cutting may break a tag or an entity: send it as plain text.
+		req["text"] = truncate(html.UnescapeString(stripTags(text)), 4000)
+	} else {
+		req["text"], req["parse_mode"] = text, "HTML"
 	}
-	req := map[string]any{"chat_id": chat, "text": text, "parse_mode": "HTML", "link_preview_options": map[string]bool{"is_disabled": true}}
 	if len(kb) > 0 {
 		req["reply_markup"] = map[string]any{"inline_keyboard": kb}
 	}
@@ -508,6 +510,18 @@ func (b *Bot) send(ctx context.Context, token string, chat int64, text string, k
 	b.status.LastSent = &now
 	b.mu.Unlock()
 	return nil
+}
+
+// truncate cuts s to at most n bytes on a rune boundary, adding "…".
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	cut := n - len("…")
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut] + "…"
 }
 
 func stripTags(s string) string {

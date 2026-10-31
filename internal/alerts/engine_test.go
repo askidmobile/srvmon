@@ -553,3 +553,32 @@ func TestResolutionDeferredByQuietHours(t *testing.T) {
 		t.Fatalf("after quiet hours: %+v", got)
 	}
 }
+
+func TestDeferredEventFollowsCurrentRule(t *testing.T) {
+	te := newTestEnv(t)
+	ctx := context.Background()
+	now := te.now.UTC()
+	_ = SaveQuiet(ctx, te.st, Quiet{From: now.Add(-time.Hour).Format("15:04"), To: now.Add(time.Hour).Format("15:04"), TZ: "UTC"})
+	te.e.Event(ctx, store.KindBruteforce, 0, "", "1.2.3.4", "подбор")
+	te.e.Event(ctx, store.KindLogin, 0, "", "1.2.3.4", "вход")
+	// While held back, one rule is switched off and the other to web only.
+	bf := te.rule(t, store.KindBruteforce)
+	bf.Enabled = false
+	login := te.rule(t, store.KindLogin)
+	login.Channel = store.ChanWeb
+	if err := te.st.UpdateRule(ctx, bf); err != nil {
+		t.Fatal(err)
+	}
+	if err := te.st.UpdateRule(ctx, login); err != nil {
+		t.Fatal(err)
+	}
+	_ = SaveQuiet(ctx, te.st, Quiet{})
+	te.eval(t)
+	te.eval(t)
+	if got := te.n.list(); len(got) != 0 {
+		t.Fatalf("sent despite the rule change: %+v", got)
+	}
+	if left, _ := te.st.UnnotifiedEvents(ctx, now.Add(-time.Hour)); len(left) != 0 {
+		t.Fatalf("still queued for retry: %+v", left)
+	}
+}

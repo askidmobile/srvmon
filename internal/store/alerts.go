@@ -403,6 +403,13 @@ func (s *Store) SilencedUntil(ctx context.Context, k SilenceKey, now time.Time) 
 	return time.Unix(until, 0).UTC(), nil
 }
 
+// SetAlertChannel changes where an alert is reported; an event moved to the
+// web channel is no longer retried for Telegram.
+func (s *Store) SetAlertChannel(ctx context.Context, id int64, ch string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE alerts SET channel = ? WHERE id = ?`, ch, id)
+	return err
+}
+
 // MarkNotified records that a notification was sent for the alert.
 func (s *Store) MarkNotified(ctx context.Context, id int64) error {
 	_, err := s.db.ExecContext(ctx, `UPDATE alerts SET notified = 1 WHERE id = ?`, id)

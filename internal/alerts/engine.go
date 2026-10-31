@@ -278,8 +278,22 @@ func (e *Engine) Evaluate(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	byID := map[int64]store.Rule{}
+	for _, r := range rules {
+		byID[r.ID] = r
+	}
 	for _, a := range events {
-		e.notify(ctx, a, false)
+		// The rule may have been disabled, deleted or changed meanwhile.
+		// Events that are no longer wanted (rule off, web only, silenced)
+		// are dropped rather than retried.
+		r, ok := byID[a.RuleID]
+		if ok && r.Enabled {
+			a.Channel, a.Severity = r.Channel, r.Severity
+			if e.notify(ctx, a, false) {
+				continue
+			}
+		}
+		_ = e.st.SetAlertChannel(ctx, a.ID, store.ChanWeb)
 	}
 	resolved, err := e.st.PendingResolutions(ctx, now.Add(-eventRetry))
 	if err != nil {
@@ -487,28 +501,37 @@ func (e *Engine) Event(ctx context.Context, kind string, serverID int64, serverN
 }
 
 // notify hands a notification to the notifier unless the rule's channel is
-// web only, the key is silenced or quiet hours hold it back. Called with e.mu.
-func (e *Engine) notify(ctx context.Context, a store.Alert, resolved bool) {
-	if e.notifier == nil || a.Channel != store.ChanTelegram {
-		return
+// web only, the key is silenced or quiet hours hold it back. It reports
+// whether the notification is merely deferred (quiet hours, notifier not
+// ready) and worth retrying. Called with e.mu.
+func (e *Engine) notify(ctx context.Context, a store.Alert, resolved bool) (deferred bool) {
+	if e.notifier == nil {
+		return true
+	}
+	if a.Channel != store.ChanTelegram {
+		return false
 	}
 	until, err := e.st.SilencedUntil(ctx, store.SilenceKey{RuleID: a.RuleID, ServerID: a.ServerID, Subject: a.Subject}, e.now())
-	if err != nil || !until.IsZero() {
-		return
+	if err != nil {
+		return true
+	}
+	if !until.IsZero() {
+		return false
 	}
 	if a.Severity != store.SevCrit {
 		if q, err := LoadQuiet(ctx, e.st); err == nil && q.Active(e.now()) {
-			return
+			return true
 		}
 	}
 	if !e.notifier.Notify(Notification{Alert: a, Resolved: resolved}) {
-		return
+		return true
 	}
 	if resolved {
 		_ = e.st.SetResolvePending(ctx, a.ID, false)
 	} else {
 		_ = e.st.MarkNotified(ctx, a.ID)
 	}
+	return false
 }
 
 // Ack acknowledges a firing alert.

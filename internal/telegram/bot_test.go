@@ -10,6 +10,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/askidmobile/srvmon/internal/alerts"
 	"github.com/askidmobile/srvmon/internal/metrics"
@@ -265,5 +266,25 @@ func TestBillsText(t *testing.T) {
 	text := e.bot.billsText(ctx)
 	if !strings.Contains(text, "🟡") || !strings.Contains(text, "В месяц: 10.00 EUR") {
 		t.Fatalf("bills = %s", text)
+	}
+}
+
+func TestLongMessageIsSentAsPlainText(t *testing.T) {
+	e := newBotEnv(t)
+	ctx := context.Background()
+	tok := testToken
+	if err := e.bot.Configure(ctx, &tok, 777); err != nil {
+		t.Fatal(err)
+	}
+	// Cyrillic plus an entity right at the cut: neither may be split.
+	text := "<b>счета</b>\n" + strings.Repeat("я", 1993) + "&amp;" + strings.Repeat("x", 100)
+	if err := e.bot.send(ctx, tok, 777, text, nil); err != nil {
+		t.Fatal(err)
+	}
+	m := e.api.messages()[0]
+	got := m["text"].(string)
+	if _, html := m["parse_mode"]; html || len(got) > 4000 || !utf8.ValidString(got) ||
+		strings.Contains(got, "<b>") || strings.Contains(got, "&amp") || !strings.HasSuffix(got, "…") {
+		t.Fatalf("parse_mode=%v len=%d text tail=%q", m["parse_mode"], len(got), got[len(got)-20:])
 	}
 }
