@@ -4,6 +4,7 @@
 
 - Архитектура: [docs/architecture.md](docs/architecture.md)
 - Макеты: [docs/design](docs/design)
+- Требования к серверу мониторинга: [docs/server-requirements.md](docs/server-requirements.md)
 
 ## Что уже есть (этап 1: каркас и CI/CD)
 
