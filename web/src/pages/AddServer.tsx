@@ -4,7 +4,15 @@ import { Hotkey, Shell } from "@/components/Shell";
 import { Button } from "@/components/ui/button";
 import { Panel } from "@/components/ui/panel";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { api, ApiError, type OnboardLine, type ProbeResult, type NewServerCard, type ServerView } from "@/lib/api";
+import {
+  api,
+  ApiError,
+  type OnboardLine,
+  type ProbeResult,
+  type SetupKey,
+  type NewServerCard,
+  type ServerView,
+} from "@/lib/api";
 import { href, navigate, type Route } from "@/lib/router";
 import { cn } from "@/lib/utils";
 
@@ -18,6 +26,14 @@ const PERIODS = [
   { v: "month", l: "месяц" },
   { v: "year", l: "год" },
   { v: "hour", l: "час (почасовой)" },
+];
+
+type LoginMethod = "password" | "key" | "panel_key";
+
+const LOGIN_METHODS: { v: LoginMethod; l: string }[] = [
+  { v: "password", l: "пароль" },
+  { v: "key", l: "мой ключ" },
+  { v: "panel_key", l: "ключ панели" },
 ];
 
 const ERRORS: Record<string, string> = {
@@ -34,6 +50,13 @@ const ERRORS: Record<string, string> = {
   too_many_tags: "не больше 20 тегов",
   bad_user: "укажите пользователя",
   password_required: "введите пароль",
+  private_key_required: "вставьте приватный ключ",
+  public_key_given: "это публичный ключ (.pub): нужен приватный, например ~/.ssh/id_ed25519",
+  bad_private_key: "не удалось прочитать приватный ключ (нужен формат OpenSSH или PEM)",
+  passphrase_required: "ключ зашифрован: введите его пароль (passphrase)",
+  bad_passphrase: "неверный пароль ключа (passphrase)",
+  setup_key_expired: "ключ панели устарел (сервер перезапускался или прошёл час): получите новый",
+  bad_method: "неизвестный способ входа",
   bad_host_key: "сначала проверьте host key",
   name_taken: "сервер с таким именем уже есть",
   unreachable: "сервер недоступен по ssh",
@@ -187,6 +210,11 @@ export function AddServer({
   const [costText, setCostText] = useState("");
   const [user, setUser] = useState("root");
   const [password, setPassword] = useState("");
+  const [method, setMethod] = useState<LoginMethod>("password");
+  const [privateKey, setPrivateKey] = useState("");
+  const [passphrase, setPassphrase] = useState("");
+  const [setupKey, setSetupKey] = useState<SetupKey | null>(null);
+  const [copied, setCopied] = useState(false);
   const [sudo, setSudo] = useState(true);
   const [disablePassword, setDisablePassword] = useState(true);
   const [installAgent, setInstallAgent] = useState(true);
@@ -282,14 +310,23 @@ export function AddServer({
       setError(ERRORS.bad_cost);
       return;
     }
+    // Secrets live only in this request.
     const pw = password;
-    setPassword(""); // the password lives only in this request
+    const pk = privateKey;
+    const pp = passphrase;
+    setPassword("");
+    setPrivateKey("");
+    setPassphrase("");
     try {
       const r = await api.onboard({
         server_id: attachId ?? 0,
         card: { ...card, host, port, cost },
         user,
-        password: pw,
+        method,
+        password: method === "password" || user !== "root" ? pw : "",
+        private_key: method === "key" ? pk : "",
+        passphrase: method === "key" ? pp : "",
+        setup_key: method === "panel_key" ? (setupKey?.id ?? "") : "",
         host_key: probe.host_key,
         sudo,
         disable_password: disablePassword,
@@ -302,6 +339,8 @@ export function AddServer({
       setPhase("running");
     } catch (err) {
       setError(errText(err));
+      // The panel key is gone (expired or the server restarted): offer a new one.
+      if (err instanceof ApiError && err.code === "setup_key_expired") setSetupKey(null);
     }
   }
 
@@ -338,10 +377,39 @@ export function AddServer({
     logEnd.current?.scrollIntoView({ block: "nearest" });
   }, [lines]);
 
+  const loginReady = method === "password" ? !!password : method === "key" ? !!privateKey.trim() : !!setupKey;
+
+  async function getSetupKey() {
+    setError("");
+    try {
+      setSetupKey(await api.setupKey());
+      setCopied(false);
+    } catch (e) {
+      setError(errText(e));
+    }
+  }
+
+  const sudoField = (
+    <Field
+      label={user === "root" ? "пароль sudo (не нужен для root)" : "пароль sudo, если sudo его спрашивает"}
+      htmlFor="f-sudo"
+    >
+      <input
+        id="f-sudo"
+        type="password"
+        className={fieldCls}
+        value={password}
+        autoComplete="new-password"
+        disabled={user === "root"}
+        onChange={(e) => setPassword(e.target.value)}
+      />
+    </Field>
+  );
+
   const stepOn = (n: number) => {
     if (phase !== "form") return n === 4;
     if (!card.name || !hostPort) return n === 1;
-    if (!password) return n === 3 || n === 2;
+    if (!loginReady) return n === 3 || n === 2;
     return n === 4;
   };
 
@@ -377,7 +445,7 @@ export function AddServer({
 
         <section className="grid gap-6 [grid-template-columns:repeat(auto-fit,minmax(300px,1fr))]">
           <Panel title="1 · описание" accent={stepOn(1)}>
-            <fieldset disabled={locked} className="flex flex-col gap-2.5">
+            <fieldset disabled={locked} className="flex min-w-0 flex-col gap-2.5">
               <div className="grid grid-cols-2 gap-2.5">
                 <Field label="имя" htmlFor="f-name">
                   <input
@@ -459,7 +527,7 @@ export function AddServer({
 
           {!existing && (
             <Panel title="2 · провайдер и оплата" accent={stepOn(2)}>
-              <fieldset disabled={locked} className="flex flex-col gap-2.5">
+              <fieldset disabled={locked} className="flex min-w-0 flex-col gap-2.5">
                 <div className="grid grid-cols-2 gap-2.5">
                   <Field label="провайдер" htmlFor="f-prov">
                     <input
@@ -556,7 +624,7 @@ export function AddServer({
           )}
 
           <Panel title="3 · разовый доступ" accent={stepOn(3)}>
-            <fieldset disabled={locked} className="flex flex-col gap-2.5">
+            <fieldset disabled={locked} className="flex min-w-0 flex-col gap-2.5">
               <Field label="пользователь" htmlFor="f-user">
                 <input
                   id="f-user"
@@ -566,20 +634,121 @@ export function AddServer({
                   onChange={(e) => setUser(e.target.value)}
                 />
               </Field>
-              <Field label="пароль (один раз)" htmlFor="f-pw">
-                <input
-                  id="f-pw"
-                  type="password"
-                  className={fieldCls}
-                  value={password}
-                  autoComplete="new-password"
-                  onChange={(e) => setPassword(e.target.value)}
-                />
-              </Field>
-              <div className="text-xs text-warn">
-                пароль нужен только для установки ключа: не пишется в бд и логи, после шага 4 стирается. Подойдёт root
-                или пользователь с sudo.
+              <div className="flex flex-col gap-1">
+                <span className="text-muted-foreground">вход</span>
+                <div className="flex flex-wrap gap-1" role="radiogroup" aria-label="способ входа">
+                  {LOGIN_METHODS.map((m) => (
+                    <Button
+                      key={m.v}
+                      type="button"
+                      size="sm"
+                      role="radio"
+                      aria-checked={method === m.v}
+                      variant={method === m.v ? "default" : "outline"}
+                      onClick={() => {
+                        setMethod(m.v);
+                        setError("");
+                      }}
+                    >
+                      {m.l}
+                    </Button>
+                  ))}
+                </div>
               </div>
+
+              {method === "password" && (
+                <>
+                  <Field label="пароль (один раз)" htmlFor="f-pw">
+                    <input
+                      id="f-pw"
+                      type="password"
+                      className={fieldCls}
+                      value={password}
+                      autoComplete="new-password"
+                      onChange={(e) => setPassword(e.target.value)}
+                    />
+                  </Field>
+                  <div className="text-xs text-warn">
+                    пароль нужен только для установки ключа: не пишется в бд и логи, после шага 4 стирается. Подойдёт
+                    root или пользователь с sudo. Вход по паролю на сервере выключен? Выберите «мой ключ» или «ключ
+                    панели».
+                  </div>
+                </>
+              )}
+
+              {method === "key" && (
+                <>
+                  <Field label="приватный ключ (один раз)" htmlFor="f-pk">
+                    <textarea
+                      id="f-pk"
+                      className={cn(fieldCls, "h-24 resize-y py-1.5 font-mono text-xs")}
+                      value={privateKey}
+                      spellCheck={false}
+                      autoComplete="off"
+                      placeholder={"-----BEGIN OPENSSH PRIVATE KEY-----\n…"}
+                      onChange={(e) => setPrivateKey(e.target.value)}
+                    />
+                  </Field>
+                  <Field label="пароль ключа, если есть" htmlFor="f-pp">
+                    <input
+                      id="f-pp"
+                      type="password"
+                      className={fieldCls}
+                      value={passphrase}
+                      autoComplete="new-password"
+                      onChange={(e) => setPassphrase(e.target.value)}
+                    />
+                  </Field>
+                  {sudoField}
+                  <div className="text-xs text-warn">
+                    нужен приватный ключ, которым вы сами заходите на сервер (например ~/.ssh/id_ed25519, не .pub). Он
+                    используется один раз для установки ключа srvmon: не пишется в бд и логи, после шага 4 стирается.
+                  </div>
+                </>
+              )}
+
+              {method === "panel_key" && (
+                <>
+                  {!setupKey ? (
+                    <Button type="button" variant="outline" onClick={getSetupKey}>
+                      показать ключ панели
+                    </Button>
+                  ) : (
+                    <div className="flex flex-col gap-1.5">
+                      <span className="text-muted-foreground">
+                        выполните на сервере под пользователем <span className="text-hi">{user || "root"}</span>:
+                      </span>
+                      <pre className="max-h-28 overflow-auto border border-border bg-field p-2 text-xs break-all whitespace-pre-wrap text-hi">
+                        {setupKey.command}
+                      </pre>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() =>
+                            navigator.clipboard
+                              ?.writeText(setupKey.command)
+                              .then(() => setCopied(true))
+                              .catch(() => undefined)
+                          }
+                        >
+                          {copied ? "скопировано ✓" : "копировать"}
+                        </Button>
+                        <Button type="button" size="sm" variant="ghost" onClick={getSetupKey}>
+                          новый ключ
+                        </Button>
+                        <span className="min-w-0 text-xs break-all text-muted-foreground">{setupKey.fingerprint}</span>
+                      </div>
+                    </div>
+                  )}
+                  {sudoField}
+                  <div className="text-xs text-warn">
+                    публичный ключ панели добавляется в authorized_keys, после установки он остаётся только у
+                    пользователя srvmon, а у {user || "root"} убирается. Приватная часть не покидает сервер мониторинга.
+                  </div>
+                </>
+              )}
             </fieldset>
           </Panel>
 
@@ -658,7 +827,7 @@ export function AddServer({
                   {probing ? "проверяем…" : probe ? "проверить заново" : "проверить host key"}
                 </Button>
                 <span className="flex-1" />
-                <Button type="submit" disabled={probing || (!!probe && (!confirmed || !password || !card.name))}>
+                <Button type="submit" disabled={probing || (!!probe && (!confirmed || !loginReady || !card.name))}>
                   {probe ? (existing ? "подключить ⏎" : "добавить сервер ⏎") : "далее ⏎"}
                 </Button>
               </>

@@ -103,6 +103,7 @@ export const api = {
   history: (id: number, range: HistoryRange) =>
     request<History>("GET", `/api/servers/${id}/history?range=${encodeURIComponent(range)}`),
   updateCard: (id: number, card: ServerCard) => request<ServerView>("PATCH", `/api/servers/${id}`, card),
+  setupKey: () => request<SetupKey>("POST", "/api/servers/setup-key", {}),
   probe: (host: string, port: number) => request<ProbeResult>("POST", "/api/servers/probe", { host, port }),
   onboard: (req: OnboardRequest) => request<{ job: string; server_id: number }>("POST", "/api/servers/onboard", req),
   onboardStatus: (job: string, from: number) => request<OnboardStatus>("GET", `/api/onboard/${job}?from=${from}`),
@@ -206,11 +207,22 @@ export interface ProbeResult {
   type: string;
 }
 
+export interface SetupKey {
+  id: string;
+  public_key: string;
+  fingerprint: string;
+  command: string;
+}
+
 export interface OnboardRequest {
   server_id: number;
   card: NewServerCard;
   user: string;
-  password: string;
+  method: "password" | "key" | "panel_key";
+  password: string; // with a key: the sudo password, may be empty
+  private_key: string;
+  passphrase: string;
+  setup_key: string;
   host_key: string;
   sudo: boolean;
   disable_password: boolean;
