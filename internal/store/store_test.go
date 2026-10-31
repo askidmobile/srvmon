@@ -120,3 +120,14 @@ func TestAlertIDsAreNotReused(t *testing.T) {
 		t.Fatalf("id %d reused after purge (old %d)", b.ID, a.ID)
 	}
 }
+
+func TestRuleIDsAreNotReused(t *testing.T) {
+	s := openTest(t)
+	ctx := context.Background()
+	id, _ := s.CreateRule(ctx, Rule{Kind: KindCPU, Threshold: 50, Severity: SevWarn, Channel: ChanWeb})
+	_ = s.DeleteRule(ctx, id)
+	id2, _ := s.CreateRule(ctx, Rule{Kind: KindMem, Threshold: 50, Severity: SevWarn, Channel: ChanWeb})
+	if id2 <= id {
+		t.Fatalf("rule id %d reused", id2)
+	}
+}

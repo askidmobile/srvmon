@@ -197,7 +197,9 @@ func (e *Engine) Evaluate(ctx context.Context) error {
 						a.Message = c.message
 					}
 					// Held back by quiet hours or not accepted by the bot
-					// (not configured, queue full): try again.
+					// (not configured, queue full): try again, with the
+					// rule's current channel and severity.
+					a.Channel, a.Severity = r.Channel, r.Severity
 					if a.State == store.AlertFiring && !a.Notified {
 						e.notify(ctx, a, false)
 					}

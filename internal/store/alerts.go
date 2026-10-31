@@ -56,7 +56,8 @@ const (
 )
 
 const migrationAlerts = `CREATE TABLE alert_rules (
-		id           INTEGER PRIMARY KEY,
+		-- AUTOINCREMENT: past alerts and silences keep their rule id.
+		id           INTEGER PRIMARY KEY AUTOINCREMENT,
 		kind         TEXT NOT NULL,
 		enabled      INTEGER NOT NULL DEFAULT 1,
 		threshold    REAL NOT NULL DEFAULT 0,
