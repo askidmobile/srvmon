@@ -6,6 +6,7 @@ package telegram
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -14,6 +15,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -119,13 +121,27 @@ type button struct {
 	Data string `json:"callback_data"`
 }
 
+// defaultClient talks to the Bot API (or its proxy) with classic key
+// exchange only. Go offers the post-quantum X25519MLKEM768 share by default,
+// which makes the TLS ClientHello span two packets; DPI on some networks
+// (Russian hosting to Cloudflare, e.g. a workers.dev proxy) drops such
+// handshakes, so the connection just times out.
+func defaultClient() *http.Client {
+	tr := http.DefaultTransport.(*http.Transport).Clone()
+	tr.TLSClientConfig = &tls.Config{
+		MinVersion:       tls.VersionTLS12,
+		CurvePreferences: []tls.CurveID{tls.X25519, tls.CurveP256, tls.CurveP384},
+	}
+	return &http.Client{Timeout: 70 * time.Second, Transport: tr}
+}
+
 // New creates the bot and loads its settings.
 func New(ctx context.Context, o Options) (*Bot, error) {
 	if o.API == "" {
 		o.API = DefaultAPI
 	}
 	if o.Client == nil {
-		o.Client = &http.Client{Timeout: 70 * time.Second}
+		o.Client = defaultClient()
 	}
 	if o.Log == nil {
 		o.Log = slog.New(slog.DiscardHandler)
@@ -608,7 +624,12 @@ func (b *Bot) call(ctx context.Context, token, method string, params any, out an
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		return fmt.Errorf("telegram %s: нет связи с Bot API", method)
+		// *url.Error carries the URL with the token: report only its cause.
+		var ue *url.Error
+		if errors.As(err, &ue) {
+			err = ue.Err
+		}
+		return fmt.Errorf("telegram %s: нет связи с Bot API (%v)", method, err)
 	}
 	defer resp.Body.Close()
 	var res struct {
