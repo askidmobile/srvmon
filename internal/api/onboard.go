@@ -268,14 +268,22 @@ func (js *jobs) get(id string) *job {
 }
 
 type onboardReq struct {
-	ServerID        int64     `json:"server_id"` // attach SSH to an existing card
-	Card            cardInput `json:"card"`
-	User            string    `json:"user"`
-	Password        string    `json:"password"`
-	HostKey         string    `json:"host_key"` // from probe, confirmed by the owner
-	Sudo            bool      `json:"sudo"`
-	DisablePassword bool      `json:"disable_password"`
-	InstallAgent    bool      `json:"install_agent"`
+	ServerID int64     `json:"server_id"` // attach SSH to an existing card
+	Card     cardInput `json:"card"`
+	User     string    `json:"user"`
+	// Method is how the one-time login works: "password" (default), "key"
+	// (the owner's private key, used once and never stored) or "panel_key"
+	// (the owner added the panel key from /setup-key to User's
+	// authorized_keys). With a key, Password is only the sudo password.
+	Method          string `json:"method"`
+	Password        string `json:"password"`
+	PrivateKey      string `json:"private_key"`
+	Passphrase      string `json:"passphrase"`
+	SetupKey        string `json:"setup_key"`
+	HostKey         string `json:"host_key"` // from probe, confirmed by the owner
+	Sudo            bool   `json:"sudo"`
+	DisablePassword bool   `json:"disable_password"`
+	InstallAgent    bool   `json:"install_agent"`
 }
 
 func (s *Server) handleOnboard(w http.ResponseWriter, r *http.Request) {
@@ -293,8 +301,9 @@ func (s *Server) handleOnboard(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "bad_user")
 		return
 	}
-	if req.Password == "" {
-		writeError(w, http.StatusBadRequest, "password_required")
+	login, code := s.loginFor(&req)
+	if code != "" {
+		writeError(w, http.StatusBadRequest, code)
 		return
 	}
 	hostKey, err := sshgw.ParseHostKey(req.HostKey)
@@ -352,7 +361,7 @@ func (s *Server) handleOnboard(w http.ResponseWriter, r *http.Request) {
 	ip := s.clientIP(r)
 	_ = s.store.Audit(ctx, ip, "server_onboard_start", req.Card.Name)
 	agentURL := s.publicURL(r)
-	go s.runOnboard(jctx, j, req, hostKey, created, ip, agentURL)
+	go s.runOnboard(jctx, j, req, login, hostKey, created, ip, agentURL)
 	writeJSON(w, http.StatusAccepted, map[string]any{"job": jobID, "server_id": id})
 }
 
@@ -368,7 +377,7 @@ func (s *Server) publicURL(r *http.Request) string {
 	return scheme + "://" + r.Host
 }
 
-func (s *Server) runOnboard(ctx context.Context, j *job, req onboardReq, hostKey sshPublicKey, created bool, ip, agentURL string) {
+func (s *Server) runOnboard(ctx context.Context, j *job, req onboardReq, login loginAuth, hostKey sshPublicKey, created bool, ip, agentURL string) {
 	defer j.cancel()
 	id := j.serverID
 	bg := context.Background()
@@ -389,17 +398,26 @@ func (s *Server) runOnboard(ctx context.Context, j *job, req onboardReq, hostKey
 		}
 	}()
 
-	key, err := sshgw.GenerateKey("srvmon@" + s.cfg.SelfName)
-	if err != nil {
-		fail("генерация ключа: " + err.Error())
-		return
+	var key sshgw.KeyPair
+	if login.panelKey != nil {
+		key = *login.panelKey
+		j.log(sshgw.StepOK, "ключ панели: "+key.Fingerprint)
+	} else {
+		var err error
+		key, err = sshgw.GenerateKey("srvmon@" + s.cfg.SelfName)
+		if err != nil {
+			fail("генерация ключа: " + err.Error())
+			return
+		}
+		j.log(sshgw.StepOK, "ключ ed25519 сгенерирован: "+key.Fingerprint)
 	}
-	j.log(sshgw.StepOK, "ключ ed25519 сгенерирован: "+key.Fingerprint)
 
 	params := sshgw.OnboardParams{
 		Addr:            sshgw.Addr(req.Card.Host, req.Card.Port),
 		User:            req.User,
 		Password:        req.Password,
+		LoginKey:        login.signer,
+		DropLoginKey:    login.panelKey != nil,
 		HostKey:         hostKey,
 		Key:             key,
 		SSHUser:         sshUser,
@@ -425,6 +443,9 @@ func (s *Server) runOnboard(ctx context.Context, j *job, req onboardReq, hostKey
 			return fmt.Errorf("сохранение ключа: %w", err)
 		}
 		j.log(sshgw.StepOK, "приватный ключ сохранён зашифрованным (XChaCha20-Poly1305); установка зафиксирована, отмена больше не откатывает")
+		if req.SetupKey != "" {
+			s.setupKeys.drop(req.SetupKey)
+		}
 		return nil
 	}
 	req.Password = ""
@@ -449,6 +470,7 @@ func (s *Server) runOnboard(ctx context.Context, j *job, req onboardReq, hostKey
 
 	res, err := sshgw.Onboard(ctx, params, j.log)
 	params.Password = ""
+	params.LoginKey = nil
 	if err != nil {
 		if tokenHash != "" && !created {
 			_ = s.store.RevokeAgentToken(bg, tokenHash)
@@ -460,7 +482,7 @@ func (s *Server) runOnboard(ctx context.Context, j *job, req onboardReq, hostKey
 		}
 		return
 	}
-	j.log(sshgw.StepOK, "пароль удалён из памяти, в бд и логи не записан")
+	j.log(sshgw.StepOK, login.forgotten())
 
 	if tokenHash != "" {
 		if !res.AgentInstalled {
