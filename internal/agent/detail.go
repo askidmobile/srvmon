@@ -3,6 +3,8 @@ package agent
 import (
 	"bufio"
 	"bytes"
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -35,10 +37,13 @@ type DetailCollector struct {
 	// after a ptrace access check (non-dumpable processes such as upowerd).
 	// Under the docker-default AppArmor profile every such read logs a
 	// denial, so these pids are read from files without that check.
-	opaque    map[int]bool
-	prevDisk  [2]uint64 // read, written sectors
-	users     map[int]string
-	usersRead time.Time
+	opaque map[int]*opaqueProc
+	// noSchedstat is set when the kernel has no schedstat files
+	// (CONFIG_SCHED_INFO off); opaque processes then keep using stat.
+	noSchedstat bool
+	prevDisk    [2]uint64 // read, written sectors
+	users       map[int]string
+	usersRead   time.Time
 }
 
 type cpuTimes struct {
@@ -246,8 +251,8 @@ func (d *DetailCollector) processes(det *protocol.Detail, dt float64, containerI
 		}
 		var name string
 		var cpuNs, rssPages uint64
-		if d.opaque[pid] {
-			if name, cpuNs, rssPages, err = d.readOpaque(e.Name()); err != nil {
+		if op := d.opaque[pid]; op != nil {
+			if name, cpuNs, rssPages, err = d.readOpaque(e.Name(), op); err != nil {
 				continue
 			}
 		} else {
@@ -262,18 +267,20 @@ func (d *DetailCollector) processes(det *protocol.Detail, dt float64, containerI
 				continue
 			}
 			cpuNs = ticks * (1e9 / clkTck)
-			if hidden {
+			if hidden && !d.noSchedstat {
 				// This read already logged one denial; switch to the
-				// check-free files now and for as long as the pid lives.
-				if d.opaque == nil {
-					d.opaque = map[int]bool{}
+				// check-free files for as long as the pid lives. The CPU
+				// counter continues from the stat value, so rates stay
+				// continuous across the switch.
+				op := &opaqueProc{cum: cpuNs}
+				if _, _, _, err := d.readOpaque(e.Name(), op); err == errNoSchedstat {
+					d.noSchedstat = true
+				} else if err == nil {
+					if d.opaque == nil {
+						d.opaque = map[int]*opaqueProc{}
+					}
+					d.opaque[pid] = op
 				}
-				d.opaque[pid] = true
-				if name, cpuNs, rssPages, err = d.readOpaque(e.Name()); err != nil {
-					continue
-				}
-				// The two clocks differ; do not compute a rate across them.
-				delete(d.prevProc, pid)
 			}
 		}
 		p := procSample{pid: pid, name: name, ticks: cpuNs, rss: rssPages * page, uid: -1}
@@ -356,9 +363,22 @@ func parsePidStat(b []byte) (name string, ticks, rss uint64, hidden, ok bool) {
 	return name, ut + st, rss, hidden, true
 }
 
+// opaqueProc keeps a cumulative CPU counter for a process read through
+// per-thread schedstat. Summing live threads is not monotonic (an exiting
+// thread takes its runtime with it), so the counter grows by per-thread
+// deltas instead.
+type opaqueProc struct {
+	cum     uint64            // ns
+	threads map[string]uint64 // tid -> last schedstat run time, ns
+}
+
+var errNoSchedstat = errors.New("schedstat not available")
+
 // readOpaque reads a process from files the kernel serves without a ptrace
 // access check: comm, statm and the per-thread schedstat (run time in ns).
-func (d *DetailCollector) readOpaque(pid string) (name string, cpuNs, rssPages uint64, err error) {
+// It advances op and returns its counter. The first call on a fresh op only
+// records the thread baselines.
+func (d *DetailCollector) readOpaque(pid string, op *opaqueProc) (name string, cpuNs, rssPages uint64, err error) {
 	b, err := os.ReadFile(d.proc(pid + "/comm"))
 	if err != nil {
 		return "", 0, 0, err
@@ -371,11 +391,11 @@ func (d *DetailCollector) readOpaque(pid string) (name string, cpuNs, rssPages u
 	if f := strings.Fields(string(b)); len(f) > 1 {
 		rssPages, _ = strconv.ParseUint(f[1], 10, 64)
 	}
-	// /proc/<pid>/schedstat covers only the main thread, so sum the threads.
 	tasks, err := os.ReadDir(d.proc(pid + "/task"))
 	if err != nil {
 		return "", 0, 0, err
 	}
+	seen := make(map[string]uint64, len(tasks))
 	for _, t := range tasks {
 		b, err := os.ReadFile(d.proc(pid + "/task/" + t.Name() + "/schedstat"))
 		if err != nil {
@@ -383,10 +403,29 @@ func (d *DetailCollector) readOpaque(pid string) (name string, cpuNs, rssPages u
 		}
 		if f := strings.Fields(string(b)); len(f) > 0 {
 			n, _ := strconv.ParseUint(f[0], 10, 64)
-			cpuNs += n
+			seen[t.Name()] = n
 		}
 	}
-	return name, cpuNs, rssPages, nil
+	if len(seen) == 0 && op.threads == nil {
+		// A dying process can lose all its threads between ReadDir and
+		// the reads; the kernel lacking schedstat shows on the agent's own
+		// process too.
+		if _, err := os.Stat(d.proc("self/schedstat")); errors.Is(err, fs.ErrNotExist) {
+			return "", 0, 0, errNoSchedstat
+		}
+		return "", 0, 0, fs.ErrNotExist
+	}
+	if op.threads != nil {
+		for tid, n := range seen {
+			if prev, ok := op.threads[tid]; !ok {
+				op.cum += n // thread started since the last sample
+			} else if n >= prev {
+				op.cum += n - prev
+			}
+		}
+	}
+	op.threads = seen
+	return name, op.cum, rssPages, nil
 }
 
 var containerIDRe = regexp.MustCompile(`[0-9a-f]{64}`)

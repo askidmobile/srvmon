@@ -41,13 +41,17 @@ func TestDetailCollectorOpaqueProcess(t *testing.T) {
 	write("77/task/78/schedstat", "500000000 0 10\n")
 	d := &DetailCollector{HostProc: dir, HostRoot: dir}
 	d.Collect(nil)
-	if !d.opaque[77] {
+	if d.opaque[77] == nil {
 		t.Fatal("pid 77 not marked opaque")
 	}
 	// From now on stat must not be read: make it unreadable garbage.
 	write("77/stat", "garbage")
 	d.prevAt = d.prevAt.Add(-100 * time.Second)
-	write("77/task/77/schedstat", "2000000000 0 10\n") // +1 s over ~100 s
+	// Thread 77 ran 0.6 s more, thread 78 exited after 0.2 s more (lost:
+	// it is gone before the sample), and new thread 79 ran 0.4 s.
+	write("77/task/77/schedstat", "1600000000 0 10\n")
+	_ = os.RemoveAll(filepath.Join(dir, "77/task/78"))
+	write("77/task/79/schedstat", "400000000 0 10\n") // +1 s over ~100 s
 	det, _ := d.Collect(nil)
 	if det.ProcsTotal != 1 {
 		t.Fatalf("procs = %d", det.ProcsTotal)
@@ -58,6 +62,9 @@ func TestDetailCollectorOpaqueProcess(t *testing.T) {
 	}
 	if p.CPUPercent < 0.99 || p.CPUPercent > 1.01 {
 		t.Errorf("proc cpu = %v", p.CPUPercent)
+	}
+	if d.noSchedstat {
+		t.Error("noSchedstat set")
 	}
 	// The pid exits: it leaves the opaque set.
 	_ = os.RemoveAll(filepath.Join(dir, "77"))
@@ -185,5 +192,37 @@ func TestFormatPorts(t *testing.T) {
 	})
 	if len(got) != 2 || got[0] != "6379/tcp" || got[1] != "8080→80/tcp" {
 		t.Fatalf("ports = %q", got)
+	}
+}
+
+// Without schedstat files the collector keeps reading stat rather than
+// losing the process's CPU accounting.
+func TestDetailCollectorOpaqueNoSchedstat(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name, data string) {
+		p := filepath.Join(dir, name)
+		_ = os.MkdirAll(filepath.Dir(p), 0o755)
+		if err := os.WriteFile(p, []byte(data), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("stat", "cpu 0 0 0 0 0 0 0 0\n")
+	stat := func(ticks string) string {
+		return "77 (upowerd) S 1 77 77 0 -1 4194560 100 0 0 0 " + ticks + " 0 0 0 20 0 1 0 100 1000000 300 18446744073709551615 1 1 0 0 0 0 0 0 0 0 0 0 17 0 0 0 0 0 0"
+	}
+	write("77/stat", stat("100"))
+	write("77/comm", "upowerd\n")
+	write("77/statm", "5000 300 200 10 0 400 0\n")
+	_ = os.MkdirAll(filepath.Join(dir, "77/task/77"), 0o755)
+	d := &DetailCollector{HostProc: dir, HostRoot: dir}
+	d.Collect(nil)
+	if !d.noSchedstat || d.opaque[77] != nil {
+		t.Fatalf("noSchedstat=%v opaque=%v", d.noSchedstat, d.opaque)
+	}
+	d.prevAt = d.prevAt.Add(-100 * time.Second)
+	write("77/stat", stat("200"))
+	det, _ := d.Collect(nil)
+	if p := det.Procs[0]; p.CPUPercent < 0.99 || p.CPUPercent > 1.01 {
+		t.Errorf("proc cpu = %v", p.CPUPercent)
 	}
 }
