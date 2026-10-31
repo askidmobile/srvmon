@@ -319,19 +319,38 @@ var systemctlOpts = spec(
 
 var ctlOpts = spec("-a --all -l --full --value --no-legend --no-pager --version --help", "-p --property")
 
-var ipWrite = set("add", "del", "delete", "change", "replace", "set", "flush", "exec", "append", "prepend",
-	"save", "restore", "update", "attach", "detach", "up", "down", "load", "unload")
+// ip prefix-matches its words (`ip link s` is `set`), so only full,
+// known read-only spellings pass.
+var ipFlags = set("-4", "-6", "-s", "-stats", "-statistics", "-d", "-details", "-j", "-json", "-p", "-pretty",
+	"-br", "-brief", "-c", "-color", "-o", "-oneline", "-h", "-human")
+
+var ipObjects = set("address", "addr", "a", "link", "l", "route", "r", "ro", "neighbour", "neighbor", "neigh", "n",
+	"rule", "ru", "maddress", "maddr", "m")
+
+var ipShow = set("show", "list", "lst", "ls")
 
 func checkIP(words []string) string {
-	for _, w := range words[1:] {
-		if ipWrite[w] {
-			return "ip " + w
-		}
-		if w == "-b" || w == "-batch" || w == "-force" || strings.HasPrefix(w, "-n") || w == "-netns" {
-			return "ip " + w
+	i := 1
+	for ; i < len(words) && strings.HasPrefix(words[i], "-"); i++ {
+		if !ipFlags[words[i]] {
+			return "ip " + words[i] + " нет в списке безопасных опций"
 		}
 	}
-	return ""
+	if i == len(words) {
+		return "ip без объекта"
+	}
+	obj := words[i]
+	if !ipObjects[obj] {
+		return "ip " + obj
+	}
+	if i+1 == len(words) {
+		return "" // `ip addr` shows
+	}
+	cmd := words[i+1]
+	if ipShow[cmd] || (cmd == "get" && (obj == "route" || obj == "r" || obj == "ro")) {
+		return ""
+	}
+	return "ip " + obj + " " + cmd
 }
 
 var dockerRead = set("ps", "images", "inspect", "logs", "top", "version", "info", "events", "port", "diff",
