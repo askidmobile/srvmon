@@ -26,6 +26,9 @@ const (
 	// agentVersionWait is how long a replaced agent has to report the
 	// panel's version.
 	agentVersionWait = 90 * time.Second
+	// autoUpdateRecheck spaces the auto-update checks of a server that could
+	// not be updated yet (no SSH key or an onboarding in progress).
+	autoUpdateRecheck = time.Minute
 )
 
 // agentUpdateView is the state of the last update of one server's agent.
@@ -40,11 +43,17 @@ type agentUpdates struct {
 	mu    sync.Mutex
 	m     map[int64]agentUpdateView
 	tried map[int64]string // server -> image the auto-update already tried
-	sem   chan struct{}
+	// checked limits how often an auto-update looks up a server that turned
+	// out not to be updatable (no SSH key, onboarding in progress).
+	checked map[int64]time.Time
+	sem     chan struct{}
 }
 
 func newAgentUpdates() *agentUpdates {
-	return &agentUpdates{m: map[int64]agentUpdateView{}, tried: map[int64]string{}, sem: make(chan struct{}, agentUpdateParallel)}
+	return &agentUpdates{
+		m: map[int64]agentUpdateView{}, tried: map[int64]string{}, checked: map[int64]time.Time{},
+		sem: make(chan struct{}, agentUpdateParallel),
+	}
 }
 
 func (u *agentUpdates) get(id int64) (agentUpdateView, bool) {
@@ -57,15 +66,25 @@ func (u *agentUpdates) get(id int64) (agentUpdateView, bool) {
 // begin marks the server's update as running; false if one already runs
 // or busy (an onboarding of the server) says so. u.mu also guards
 // addOnboardJob, so an update and an onboarding never replace the same
-// container at once.
-func (u *agentUpdates) begin(id int64, image string, now time.Time, busy func(int64) bool) bool {
+// container at once. An automatic update also refuses an image it already
+// tried and records the attempt only here, once it actually starts.
+func (u *agentUpdates) begin(id int64, image string, now time.Time, busy func(int64) bool, auto bool) bool {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	if v, ok := u.m[id]; ok && v.State == "running" {
 		return false
 	}
-	if busy != nil && busy(id) {
+	if auto && u.tried[id] == image {
 		return false
+	}
+	if busy != nil && busy(id) {
+		if auto {
+			u.checked[id] = now
+		}
+		return false
+	}
+	if auto {
+		u.tried[id] = image
 	}
 	u.m[id] = agentUpdateView{State: "running", Image: image, At: now}
 	return true
@@ -110,13 +129,14 @@ func (s *Server) maybeAutoUpdate(id int64, agentVersion string) {
 	}
 	u := s.updates
 	u.mu.Lock()
-	if u.tried[id] == s.cfg.AgentImage {
-		u.mu.Unlock()
-		return
+	skip := u.tried[id] == s.cfg.AgentImage || s.now().Sub(u.checked[id]) < autoUpdateRecheck
+	if !skip {
+		u.checked[id] = s.now()
 	}
-	u.tried[id] = s.cfg.AgentImage
 	u.mu.Unlock()
-	go s.updateAgent(id, "", true)
+	if !skip {
+		go s.updateAgent(id, "", true)
+	}
 }
 
 // updateAgent replaces the agent of one server. It returns without a trace
@@ -132,7 +152,7 @@ func (s *Server) updateAgent(id int64, ip string, auto bool) {
 	}
 	image := s.cfg.AgentImage
 	started := s.now()
-	if !s.updates.begin(id, image, started, s.jobs.active) {
+	if !s.updates.begin(id, image, started, s.jobs.active, auto) {
 		return
 	}
 	fail := func(err error) {
@@ -160,6 +180,13 @@ func (s *Server) updateAgent(id int64, ip string, auto bool) {
 		event = "agent_autoupdate"
 	}
 	_ = s.store.Audit(context.Background(), ip, event, access.Name+" "+image)
+	if errors.Is(err, sshgw.ErrSwapInterrupted) {
+		// The connection or the deadline broke the swap halfway: put the
+		// previous agent back if it was already stopped.
+		if rerr := s.agentFinish(access, sshgw.AgentRollback); rerr != nil && !errors.Is(rerr, sshgw.ErrNoPreviousAgent) {
+			s.log.Warn("agent update: restoring after an interrupted swap", "server", access.Name, "err", rerr)
+		}
+	}
 	if err != nil {
 		fail(err)
 		return
@@ -174,7 +201,7 @@ func (s *Server) updateAgent(id int64, ip string, auto bool) {
 			} else {
 				why = errors.New(i18n.T("the new agent reports version %s instead of %s", short(v), short(s.version)))
 			}
-			if rerr := s.agentFinish(access, sshgw.AgentRollback); rerr != nil {
+			if rerr := s.agentFinish(access, sshgw.AgentRollback); rerr != nil && !errors.Is(rerr, sshgw.ErrNoPreviousAgent) {
 				fail(i18n.Errorf("%s; restoring the previous agent failed: %s", why.Error(), rerr.Error()))
 			} else {
 				fail(i18n.Errorf("%s; the previous agent is restored", why.Error()))

@@ -34,8 +34,15 @@ func AgentUpdate(ctx context.Context, c *ssh.Client, a AgentInstall) error {
 	case strings.Contains(errOut, "srvmon:run-failed"):
 		return errors.New(i18n.T("the new agent %s did not start, the previous one is restored", a.Image))
 	}
-	return i18n.Errorf("agent update: %s", firstLine(errOut, err))
+	return fmt.Errorf("%w: %w", ErrSwapInterrupted, i18n.Errorf("agent update: %s", firstLine(errOut, err)))
 }
+
+// ErrSwapInterrupted wraps an update error that may have left the swap
+// halfway (lost connection, deadline): the caller should run AgentRollback.
+var ErrSwapInterrupted = errors.New("agent swap interrupted")
+
+// ErrNoPreviousAgent: AgentRollback found no srvmon-agent-old to restore.
+var ErrNoPreviousAgent = errors.New("no previous agent to restore")
 
 // AgentCommit removes the previous agent kept by AgentUpdate.
 func AgentCommit(ctx context.Context, c *ssh.Client) error {
@@ -49,6 +56,9 @@ func AgentCommit(ctx context.Context, c *ssh.Client) error {
 // AgentRollback puts back the previous agent kept by AgentUpdate.
 func AgentRollback(ctx context.Context, c *ssh.Client) error {
 	_, errOut, err := Run(ctx, c, "sh -s", strings.NewReader(dockerAccess+agentRestoreScript))
+	if strings.Contains(errOut, "srvmon:no-old") {
+		return ErrNoPreviousAgent
+	}
 	if err != nil {
 		return i18n.Errorf("agent update: %s", firstLine(errOut, err))
 	}
@@ -63,7 +73,7 @@ else echo srvmon:no-docker-access >&2; exit 3; fi
 `
 
 // agentRestoreScript replaces srvmon-agent with srvmon-agent-old.
-const agentRestoreScript = `$D inspect srvmon-agent-old >/dev/null 2>&1 || { echo "no previous agent to restore" >&2; exit 6; }
+const agentRestoreScript = `$D inspect srvmon-agent-old >/dev/null 2>&1 || { echo srvmon:no-old >&2; exit 6; }
 $D rm -f srvmon-agent >/dev/null 2>&1 || true
 $D rename srvmon-agent-old srvmon-agent
 $D start srvmon-agent >/dev/null

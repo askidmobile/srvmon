@@ -41,24 +41,31 @@ func TestAutoUpdateOncePerImage(t *testing.T) {
 	s.cfg.AgentAutoUpdate = true
 	s.cfg.AgentImage = "ghcr.io/x/srvmon-agent:sha-1"
 	id, _ := e.st.CreateServer(context.Background(), store.Server{Name: "self"})
-	s.maybeAutoUpdate(id, "old")
-	if s.updates.tried[id] != s.cfg.AgentImage {
-		t.Fatalf("tried = %v", s.updates.tried)
-	}
-	// Runs synchronously here: no SSH key, so it leaves no state.
+	// No SSH key: nothing starts and the image is not marked as tried, so
+	// the update still happens once SSH access is added.
 	s.updateAgent(id, "", true)
 	if _, ok := s.updates.get(id); ok {
 		t.Errorf("state set for a server without ssh")
 	}
-	s.maybeAutoUpdate(id, "old") // same image: no second try
-	s.updates.mu.Lock()
-	n := len(s.updates.m)
-	s.updates.mu.Unlock()
-	if n != 0 {
-		t.Errorf("states = %d", n)
+	if s.updates.tried[id] != "" {
+		t.Errorf("tried marked without an attempt: %v", s.updates.tried)
 	}
-	if !s.updates.begin(id, "img", time.Now(), nil) || s.updates.begin(id, "img", time.Now(), nil) {
+	img := s.cfg.AgentImage
+	if !s.updates.begin(id, img, time.Now(), nil, true) {
+		t.Fatal("auto begin refused")
+	}
+	if s.updates.tried[id] != img {
+		t.Errorf("tried = %v", s.updates.tried)
+	}
+	if s.updates.begin(id, img, time.Now(), nil, false) {
 		t.Errorf("begin must refuse a second running update")
+	}
+	s.updates.set(id, agentUpdateView{State: "failed"})
+	if s.updates.begin(id, img, time.Now(), nil, true) {
+		t.Errorf("auto update retried the same image")
+	}
+	if !s.updates.begin(id, img, time.Now(), nil, false) {
+		t.Errorf("manual retry refused")
 	}
 }
 
@@ -79,10 +86,10 @@ func TestAgentUpdateExcludesOnboarding(t *testing.T) {
 	if _, err := s.addOnboardJob(&job{serverID: 7, cancel: func() {}}); err != nil {
 		t.Fatal(err)
 	}
-	if s.updates.begin(7, "img", time.Now(), s.jobs.active) {
+	if s.updates.begin(7, "img", time.Now(), s.jobs.active, false) {
 		t.Error("update started during an onboarding")
 	}
-	if !s.updates.begin(8, "img", time.Now(), s.jobs.active) {
+	if !s.updates.begin(8, "img", time.Now(), s.jobs.active, false) {
 		t.Fatal("update of another server refused")
 	}
 	if _, err := s.addOnboardJob(&job{serverID: 8, cancel: func() {}}); err != errAgentUpdating {
