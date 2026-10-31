@@ -1,0 +1,35 @@
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+LDFLAGS := -s -w -X main.version=$(VERSION)
+
+.PHONY: all web build test lint dev-server dev-web images clean
+
+all: web build
+
+web:
+	cd web && npm ci && npm run build
+
+build:
+	CGO_ENABLED=0 go build -trimpath -ldflags "$(LDFLAGS)" -o bin/srvmon-server ./cmd/server
+	CGO_ENABLED=0 go build -trimpath -ldflags "$(LDFLAGS)" -o bin/srvmon-agent ./cmd/agent
+
+test:
+	go test -race ./...
+
+lint:
+	test -z "$$(gofmt -l .)"
+	go vet ./...
+	cd web && npm run typecheck
+
+# Local dev: API on :8080 with plain-HTTP cookies, Vite on :5173 proxies /api.
+dev-server:
+	SRVMON_DATA_DIR=./data SRVMON_SECURE_COOKIE=false go run ./cmd/server serve
+
+dev-web:
+	cd web && npm run dev
+
+images:
+	docker build -f deploy/server.Dockerfile --build-arg VERSION=$(VERSION) -t srvmon-server:dev .
+	docker build -f deploy/agent.Dockerfile --build-arg VERSION=$(VERSION) -t srvmon-agent:dev .
+
+clean:
+	rm -rf bin web/dist/assets web/dist/index.html web/dist/favicon.svg

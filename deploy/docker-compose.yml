@@ -1,0 +1,56 @@
+# Central monitoring server. Deployed by .github/workflows/deploy.yml into
+# DEPLOY_PATH (default /opt/srvmon) together with Caddyfile and .env.
+name: srvmon
+
+services:
+  caddy:
+    image: caddy:2.11-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      SRVMON_DOMAIN: ${SRVMON_DOMAIN:?set SRVMON_DOMAIN in .env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      server:
+        condition: service_healthy
+
+  server:
+    image: ghcr.io/askidmobile/srvmon-server:${SRVMON_TAG:-latest}
+    restart: unless-stopped
+    environment:
+      SRVMON_VM_URL: http://victoriametrics:8428
+      SRVMON_PUBLIC_ORIGIN: https://${SRVMON_DOMAIN}
+      SRVMON_TRUST_PROXY: "true"
+      SRVMON_SECURE_COOKIE: "true"
+    volumes:
+      - srvmon-data:/data
+      # fail2ban on the host reads this file (jail srvmon-auth).
+      - /var/log/srvmon:/var/log/srvmon
+    expose:
+      - "8080"
+    depends_on:
+      - victoriametrics
+
+  victoriametrics:
+    image: victoriametrics/victoria-metrics:v1.155.0
+    restart: unless-stopped
+    command:
+      - -storageDataPath=/storage
+      - -retentionPeriod=${SRVMON_RETENTION:-90d}
+      - -httpListenAddr=:8428
+    volumes:
+      - vm-data:/storage
+    expose:
+      - "8428"
+
+volumes:
+  caddy-data:
+  caddy-config:
+  srvmon-data:
+  vm-data:

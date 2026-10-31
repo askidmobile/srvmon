@@ -1,0 +1,18 @@
+# No ACME email: Let's Encrypt does not require one.
+{$SRVMON_DOMAIN} {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		-Server
+	}
+
+	# Caddy replaces X-Forwarded-For from untrusted clients with the real
+	# peer address, so srvmon-server can trust the rightmost entry.
+	reverse_proxy server:8080
+
+	log {
+		output stdout
+		format json
+	}
+}

@@ -1,0 +1,58 @@
+@import "tailwindcss";
+@import "@fontsource/jetbrains-mono/400.css";
+@import "@fontsource/jetbrains-mono/700.css";
+
+/* TUI palette from docs/design/README.md. Names follow shadcn/ui tokens so
+   components added with `npx shadcn add` pick up the theme. */
+@theme {
+  --font-mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+  --font-sans: var(--font-mono);
+
+  --color-background: #0a0e0b;
+  --color-foreground: #c9e4cf;
+  --color-card: #0a0e0b;
+  --color-card-foreground: #c9e4cf;
+  --color-popover: #0d130f;
+  --color-popover-foreground: #c9e4cf;
+  --color-primary: #3ddc6e;
+  --color-primary-foreground: #0a0e0b;
+  --color-secondary: #13201a;
+  --color-secondary-foreground: #c9e4cf;
+  --color-muted: #13201a;
+  --color-muted-foreground: #7f9c86;
+  --color-accent: #13201a;
+  --color-accent-foreground: #e8fff0;
+  --color-destructive: #ff6b5e;
+  --color-border: #2a4a33;
+  --color-input: #2a4a33;
+  --color-ring: #3ddc6e;
+
+  --color-hi: #e8fff0;
+  --color-warn: #f2c14e;
+  --color-crit: #ff6b5e;
+  --color-tx: #5ab0ff;
+  --color-field: #050806;
+  --color-primary-hover: #8cffb0;
+
+  --radius: 0px;
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    min-height: 100%;
+  }
+  body {
+    @apply bg-background text-foreground font-mono text-sm antialiased;
+    line-height: 1.55;
+  }
+  ::selection {
+    background: var(--color-primary);
+    color: var(--color-primary-foreground);
+  }
+  :focus-visible {
+    outline: 1px solid var(--color-ring);
+    outline-offset: 1px;
+  }
+}

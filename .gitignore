@@ -1,0 +1,8 @@
+/data/
+/bin/
+*.db
+*.db-wal
+*.db-shm
+.env
+!deploy/.env.example
+.DS_Store
