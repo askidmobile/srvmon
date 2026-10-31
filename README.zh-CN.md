@@ -63,7 +63,7 @@ sudo docker compose exec -it server /srvmon-server init   # 设置密码并显�
 3. 每次推送到 `main`：CI → Release（镜像 `ghcr.io/<owner>/srvmon-server|agent|ai`，标签 `sha-xxxxxxx` 和 `latest`）→ Deploy（`docker compose pull && up -d`，等待健康检查，失败则回滚到上一个标签）。未设置 `DEPLOY_HOST` 时跳过部署。
 4. 首次部署后执行一次：`cd /opt/srvmon && docker compose exec -it server /srvmon-server init`。
 
-在 fork 中，可将 `deploy/docker-compose.yml` 和 `internal/config/config.go` 中的 `ghcr.io/askidmobile/...` 镜像名改为你自己的（或设置 `SRVMON_AGENT_IMAGE`），也可以继续使用上游镜像。
+在 fork 中，必须将 `deploy/docker-compose.yml`（server、agent、ai 三个镜像）和 `internal/config/config.go` 中的 `ghcr.io/askidmobile/` 改为 `ghcr.io/<你的 owner>/`：Release 只会在你自己的命名空间下发布 `sha-*` 标签，而 Deploy 正是拉取这些标签。上游镜像适用于上文的手动安装。
 
 ## 添加服务器
 

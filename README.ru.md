@@ -63,7 +63,7 @@ sudo docker compose exec -it server /srvmon-server init   # пароль + QR д
 3. Каждый push в `main`: CI → Release (образы `ghcr.io/<owner>/srvmon-server|agent|ai`, теги `sha-xxxxxxx` и `latest`) → Deploy (`docker compose pull && up -d`, ждёт healthcheck, при провале откатывает на прошлый тег). Пока `DEPLOY_HOST` не задан, Deploy пропускается. Ручной деплой нужного тега: Actions → Deploy → Run workflow.
 4. После первого деплоя один раз: `cd /opt/srvmon && docker compose exec -it server /srvmon-server init`.
 
-В форке замените имена образов `ghcr.io/askidmobile/...` в `deploy/docker-compose.yml` и `internal/config/config.go` (или задайте `SRVMON_AGENT_IMAGE`) на свои, либо пользуйтесь образами основного репозитория. Если ваш образ агента в GHCR приватный, задайте в `.env` `SRVMON_AGENT_REGISTRY_USER` и `SRVMON_AGENT_REGISTRY_TOKEN` (PAT с `read:packages`): токен используется для одного `docker pull` и сразу разлогинивается.
+В форке замените `ghcr.io/askidmobile/` на `ghcr.io/<ваш-owner>/` в `deploy/docker-compose.yml` (образы server, agent и ai) и в `internal/config/config.go`: Release публикует теги `sha-*` только в вашем пространстве имён, а Deploy запрашивает именно их. Образы основного репозитория предназначены для ручной установки выше. Если ваш образ агента в GHCR приватный, задайте в `.env` `SRVMON_AGENT_REGISTRY_USER` и `SRVMON_AGENT_REGISTRY_TOKEN` (PAT с `read:packages`): токен используется для одного `docker pull` и сразу разлогинивается.
 
 ## Добавление серверов
 

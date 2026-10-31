@@ -63,7 +63,7 @@ Back up the `/data` volume together with `/data/master.key`: without the master 
 3. Every push to `main`: CI → Release (images `ghcr.io/<owner>/srvmon-server|agent|ai`, tags `sha-xxxxxxx` and `latest`) → Deploy (`docker compose pull && up -d`, waits for the healthcheck, rolls back to the previous tag on failure). Deploy is skipped until `DEPLOY_HOST` is set. Manual deploy of a tag: Actions → Deploy → Run workflow.
 4. After the first deploy, once: `cd /opt/srvmon && docker compose exec -it server /srvmon-server init`.
 
-In a fork, change the `ghcr.io/askidmobile/...` image names in `deploy/docker-compose.yml` and `internal/config/config.go` (or set `SRVMON_AGENT_IMAGE`) to your own, or keep using the upstream images. If your agent image on GHCR is private, set `SRVMON_AGENT_REGISTRY_USER` and `SRVMON_AGENT_REGISTRY_TOKEN` (PAT with `read:packages`) in `.env` so the wizard can pull it.
+In a fork, replace `ghcr.io/askidmobile/` with `ghcr.io/<your-owner>/` in `deploy/docker-compose.yml` (server, agent and ai images) and in `internal/config/config.go`: Release publishes `sha-*` tags only under your own namespace, and Deploy asks for exactly those tags. The upstream images are meant for the manual install above. If your agent image on GHCR is private, set `SRVMON_AGENT_REGISTRY_USER` and `SRVMON_AGENT_REGISTRY_TOKEN` (PAT with `read:packages`) in `.env` so the wizard can pull it.
 
 ## Adding servers
 
