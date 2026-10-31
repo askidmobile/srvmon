@@ -30,6 +30,7 @@ type Server struct {
 	authLogMu sync.Mutex
 	limiter   *auth.Limiter
 	vm        *metrics.Writer
+	vmRead    *metrics.Reader
 	latest    *metrics.Latest
 	web       fs.FS
 	version   string
@@ -46,7 +47,8 @@ type Options struct {
 	Log     *slog.Logger
 	AuthLog io.Writer // fail2ban log; nil = discard
 	VM      *metrics.Writer
-	Web     fs.FS // built frontend (contents of web/dist)
+	VMRead  *metrics.Reader // nil: graphs use only in-memory history
+	Web     fs.FS           // built frontend (contents of web/dist)
 	Version string
 }
 
@@ -65,6 +67,7 @@ func New(o Options) *Server {
 		authLog: o.AuthLog,
 		limiter: auth.NewLimiter(5, 10*time.Minute),
 		vm:      o.VM,
+		vmRead:  o.VMRead,
 		latest:  metrics.NewLatest(),
 		web:     o.Web,
 		version: o.Version,
@@ -86,6 +89,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/ingest", s.handleIngest)
 
 	mux.Handle("GET /api/servers", s.requireSession(http.HandlerFunc(s.handleServers)))
+	mux.Handle("GET /api/servers/{id}", s.requireSession(http.HandlerFunc(s.handleServer)))
+	mux.Handle("PATCH /api/servers/{id}", s.requireSession(http.HandlerFunc(s.handleServerCard)))
+	mux.Handle("GET /api/servers/{id}/history", s.requireSession(http.HandlerFunc(s.handleHistory)))
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "not_found")
 	})

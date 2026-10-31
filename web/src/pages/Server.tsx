@@ -1,0 +1,1030 @@
+import * as React from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+
+import { Hotkey, Shell } from "@/components/Shell";
+import { Button } from "@/components/ui/button";
+import { Panel } from "@/components/ui/panel";
+import {
+  api,
+  ApiError,
+  historyRanges,
+  type Container,
+  type History,
+  type HistoryRange,
+  type LogLine,
+  type Process,
+  type ServerCard,
+  type ServerDetailView,
+} from "@/lib/api";
+import { href, navigate, typingIn, type Route } from "@/lib/router";
+import { cn, formatBytes, formatUptime } from "@/lib/utils";
+
+const C = {
+  ok: "#3ddc6e",
+  okDark: "#1f8f45",
+  warn: "#f2c14e",
+  crit: "#ff6b5e",
+  tx: "#5ab0ff",
+  cached: "#9b8cff",
+  muted: "#7f9c86",
+};
+
+function levelColor(p: number) {
+  if (p >= 85) return C.crit;
+  if (p >= 60) return C.warn;
+  return C.ok;
+}
+
+const pct = (v: number) => `${v >= 10 || v === 0 ? v.toFixed(0) : v.toFixed(1)}%`;
+const rate = (bps: number) => `${formatBytes(bps)}/s`;
+
+function ago(iso?: string): string {
+  if (!iso) return "—";
+  const s = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000));
+  if (s < 60) return `${s}с назад`;
+  if (s < 3600) return `${Math.floor(s / 60)}м назад`;
+  if (s < 86400) return `${Math.floor(s / 3600)}ч назад`;
+  return `${Math.floor(s / 86400)}д назад`;
+}
+
+function ruDate(ymd: string): string {
+  const [y, m, d] = ymd.split("-");
+  return y && m && d ? `${d}.${m}.${y}` : ymd;
+}
+
+function daysUntil(ymd: string): number | null {
+  const t = new Date(`${ymd}T00:00:00`).getTime();
+  if (Number.isNaN(t)) return null;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return Math.round((t - today.getTime()) / 86400000);
+}
+
+// --- small building blocks ---
+
+function Track({ value, color, className }: { value: number; color?: string; className?: string }) {
+  const v = Math.min(100, Math.max(0, value));
+  return (
+    <div className={cn("flex h-2 min-w-0 flex-auto bg-[#16261b]", className)}>
+      <div className="h-full" style={{ width: `${v}%`, background: color ?? levelColor(v) }} />
+    </div>
+  );
+}
+
+// Column graph like btop: one bar per bucket, empty buckets stay blank.
+function Bars({
+  values,
+  max,
+  height,
+  color,
+  down = false,
+  grid = false,
+  label,
+}: {
+  values: (number | null)[];
+  max: number;
+  height: number;
+  color: string;
+  down?: boolean;
+  grid?: boolean;
+  label: string;
+}) {
+  return (
+    <div
+      role="img"
+      aria-label={label}
+      className={cn("flex w-full gap-px", down ? "items-start" : "items-end")}
+      style={{
+        height,
+        backgroundImage: grid ? "linear-gradient(to top, rgba(42,74,51,.5) 1px, transparent 1px)" : undefined,
+        backgroundSize: grid ? `100% ${height / 4}px` : undefined,
+      }}
+    >
+      {values.map((v, i) => (
+        <div
+          key={i}
+          className="min-w-0 flex-1"
+          style={{
+            height: v == null || max <= 0 ? 0 : `${Math.max(v > 0 ? 2 : 0, Math.min(100, (v / max) * 100))}%`,
+            background: color,
+          }}
+        />
+      ))}
+    </div>
+  );
+}
+
+function Empty({ children }: { children: React.ReactNode }) {
+  return <div className="py-4 text-muted-foreground">{children}</div>;
+}
+
+const scrollBox = "overflow-auto [scrollbar-color:#2a4a33_transparent] [scrollbar-width:thin]";
+
+// --- panels ---
+
+function CpuPanel({ data, hist }: { data: ServerDetailView; hist: History | null }) {
+  const h = data.snapshot?.report.host;
+  const d = data.detail;
+  const inv = data.inventory;
+  const right = [
+    inv?.cpu_model,
+    h && `${h.cpu_cores} vCPU`,
+    h && `load ${h.load1.toFixed(2)} ${h.load5.toFixed(2)} ${h.load15.toFixed(2)}`,
+    d?.temp_c != null && `${d.temp_c.toFixed(0)}°C`,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  const cols = d && d.cores.length > 16 ? 4 : 2;
+  return (
+    <Panel title="cpu" right={right}>
+      <div className="flex flex-wrap gap-4">
+        <div className="min-w-0 flex-[999_1_380px]">
+          <div className="flex flex-wrap items-baseline justify-between gap-x-4">
+            <span className="text-xl font-bold text-hi">{h ? pct(h.cpu_percent) : "—"}</span>
+            <span className="text-xs text-muted-foreground">
+              {hist?.range ?? ""}
+              {d &&
+                ` · usr ${pct(d.cpu_user)} · sys ${pct(d.cpu_system)} · iowait ${pct(d.cpu_iowait)} · steal ${pct(d.cpu_steal)}`}
+            </span>
+          </div>
+          <Bars
+            values={hist?.cpu ?? []}
+            max={100}
+            height={132}
+            color={`linear-gradient(to top, ${C.okDark}, ${C.ok})`}
+            grid
+            label="загрузка cpu"
+          />
+        </div>
+        <div
+          className="grid min-w-0 flex-[1_1_260px] content-start gap-x-4 gap-y-1.5 pt-1.5"
+          style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}
+        >
+          {d ? (
+            d.cores.map((v, i) => (
+              <div key={i} className="grid grid-cols-[28px_minmax(0,1fr)_40px] items-center gap-2">
+                <span className="text-muted-foreground">C{i}</span>
+                <Track value={v} />
+                <span className="text-right">{pct(v)}</span>
+              </div>
+            ))
+          ) : (
+            <span className="col-span-full text-xs text-muted-foreground">загрузка по ядрам появится через пару секунд</span>
+          )}
+        </div>
+      </div>
+    </Panel>
+  );
+}
+
+function MemRow({ name, value, total, color }: { name: string; value: number; total: number; color: string }) {
+  const p = total > 0 ? (value / total) * 100 : 0;
+  return (
+    <div className="grid grid-cols-[96px_minmax(0,1fr)_44px_56px] items-center gap-2.5">
+      <span className="truncate text-muted-foreground" title={name}>
+        {name}
+      </span>
+      <Track value={p} color={color} />
+      <span className="text-right">{pct(p)}</span>
+      <span className="text-right text-hi">{formatBytes(value)}</span>
+    </div>
+  );
+}
+
+function MemoryPanel({ data }: { data: ServerDetailView }) {
+  const h = data.snapshot?.report.host;
+  if (!h) return <Panel title="память">{<Empty>нет данных</Empty>}</Panel>;
+  const used = Math.max(0, h.mem_total - h.mem_available);
+  const swapUsed = Math.max(0, h.swap_total - h.swap_free);
+  const d = data.detail;
+  return (
+    <Panel title="память" right={formatBytes(h.mem_total)} className="min-w-0 flex-[1_1_360px]">
+      <div className="flex flex-col gap-2">
+        <MemRow name="used" value={used} total={h.mem_total} color={C.ok} />
+        <MemRow name="available" value={h.mem_available} total={h.mem_total} color={C.tx} />
+        {h.mem_cached != null && <MemRow name="cached" value={h.mem_cached} total={h.mem_total} color={C.cached} />}
+        {h.mem_free != null && <MemRow name="free" value={h.mem_free} total={h.mem_total} color={C.muted} />}
+        {h.swap_total > 0 ? (
+          <MemRow name="swap" value={swapUsed} total={h.swap_total} color={C.warn} />
+        ) : (
+          <div className="text-xs text-muted-foreground">swap выключен</div>
+        )}
+      </div>
+      <div className="mt-2.5 flex flex-col gap-1 border-t border-border pt-2">
+        {(h.disks ?? []).map((disk) => {
+          const p = disk.total ? (disk.used / disk.total) * 100 : 0;
+          return (
+            <div key={disk.mount} className="grid grid-cols-[96px_minmax(0,1fr)_44px_56px] items-center gap-2.5">
+              <span className="truncate text-muted-foreground" title={`${disk.mount} (${disk.fs})`}>
+                {disk.mount}
+              </span>
+              <Track value={p} />
+              <span className="text-right">{pct(p)}</span>
+              <span className="text-right text-hi" title={`занято ${formatBytes(disk.used)}`}>
+                {formatBytes(disk.total)}
+              </span>
+            </div>
+          );
+        })}
+        {d && (
+          <div className="text-muted-foreground">
+            io: read <span className="text-hi">{rate(d.disk_read_bps)}</span> · write{" "}
+            <span className="text-hi">{rate(d.disk_write_bps)}</span>
+          </div>
+        )}
+      </div>
+    </Panel>
+  );
+}
+
+function lastValue(xs: (number | null)[] | undefined): number | null {
+  if (!xs) return null;
+  for (let i = xs.length - 1; i >= 0; i--) if (xs[i] != null) return xs[i];
+  return null;
+}
+
+function NetPanel({ data, hist }: { data: ServerDetailView; hist: History | null }) {
+  const net = data.snapshot?.report.host.net ?? [];
+  const rx = hist?.rx ?? [];
+  const tx = hist?.tx ?? [];
+  const peakRx = Math.max(0, ...rx.map((v) => v ?? 0));
+  const peakTx = Math.max(0, ...tx.map((v) => v ?? 0));
+  const max = Math.max(peakRx, peakTx, 1);
+  const totalRx = net.reduce((a, n) => a + n.rx_bytes, 0);
+  const totalTx = net.reduce((a, n) => a + n.tx_bytes, 0);
+  const right = [net.map((n) => n.name).join(", "), data.inventory?.ips?.[0]].filter(Boolean).join(" · ");
+  return (
+    <Panel title="сеть" right={right} className="min-w-0 flex-[1_1_360px]">
+      <div className="flex flex-wrap justify-between gap-x-3">
+        <span>
+          ↓ rx <span className="font-bold text-primary">{rate(lastValue(rx) ?? 0)}</span>
+        </span>
+        <span className="text-muted-foreground">
+          пик {rate(peakRx)} · всего {formatBytes(totalRx)}
+        </span>
+      </div>
+      <Bars values={rx} max={max} height={56} color={C.ok} label="входящий трафик" />
+      <div className="border-t border-border" />
+      <Bars values={tx} max={max} height={40} color={C.tx} down label="исходящий трафик" />
+      <div className="flex flex-wrap justify-between gap-x-3">
+        <span>
+          ↑ tx <span className="font-bold text-tx">{rate(lastValue(tx) ?? 0)}</span>
+        </span>
+        <span className="text-muted-foreground">
+          пик {rate(peakTx)} · всего {formatBytes(totalTx)}
+          {data.detail && ` · tcp ${data.detail.tcp_conns}`}
+        </span>
+      </div>
+    </Panel>
+  );
+}
+
+type ProcSort = "cpu" | "mem" | "pid" | "name";
+
+function ProcessPanel({ data, filterRef }: { data: ServerDetailView; filterRef: React.RefObject<HTMLInputElement | null> }) {
+  const [filter, setFilter] = useState("");
+  const [sort, setSort] = useState<ProcSort>("cpu");
+  const d = data.detail;
+  const rows = useMemo(() => {
+    const q = filter.trim().toLowerCase();
+    const list = (d?.procs ?? []).filter(
+      (p) =>
+        !q ||
+        p.name.toLowerCase().includes(q) ||
+        (p.container ?? "").toLowerCase().includes(q) ||
+        (p.cmd ?? "").toLowerCase().includes(q) ||
+        String(p.pid) === q,
+    );
+    const by: Record<ProcSort, (a: Process, b: Process) => number> = {
+      cpu: (a, b) => b.cpu - a.cpu || b.mem - a.mem,
+      mem: (a, b) => b.mem - a.mem,
+      pid: (a, b) => a.pid - b.pid,
+      name: (a, b) => a.name.localeCompare(b.name),
+    };
+    return [...list].sort(by[sort]);
+  }, [d, filter, sort]);
+  const th = (key: ProcSort, label: string, right = false) => (
+    <th className={cn("px-1.5 py-1 font-normal whitespace-nowrap", right && "text-right")}>
+      <button
+        type="button"
+        className={cn("cursor-pointer", sort === key ? "text-primary" : "hover:text-primary")}
+        onClick={() => setSort(key)}
+      >
+        {label}
+        {sort === key && " ▾"}
+      </button>
+    </th>
+  );
+  return (
+    <Panel
+      title="процессы"
+      right={d ? `сорт: ${sort} · ${d.procs_total} всего · топ ${d.procs.length}` : undefined}
+      className="flex min-w-0 flex-[1_1_380px] flex-col"
+    >
+      <div className="mb-2 flex gap-2">
+        <label htmlFor="proc-filter" className="self-center text-muted-foreground">
+          /
+        </label>
+        <input
+          id="proc-filter"
+          ref={filterRef}
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") {
+              setFilter("");
+              e.currentTarget.blur();
+              e.stopPropagation();
+            }
+          }}
+          placeholder="фильтр: имя, контейнер, pid"
+          className="h-[26px] min-w-0 flex-auto border border-input bg-field px-2 text-hi placeholder:text-muted-foreground"
+        />
+      </div>
+      {d ? (
+        <div className={cn(scrollBox, "max-h-[560px] flex-auto")}>
+          <table className="w-full border-collapse text-left">
+            <thead className="sticky top-0 bg-background text-muted-foreground">
+              <tr className="border-b border-border">
+                {th("pid", "pid", true)}
+                {th("name", "программа")}
+                <th className="px-1.5 py-1 font-normal">конт.</th>
+                {th("cpu", "cpu", true)}
+                {th("mem", "mem", true)}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((p) => (
+                <tr key={p.pid} className="hover:bg-secondary/60">
+                  <td className="px-1.5 text-right text-muted-foreground">{p.pid}</td>
+                  <td
+                    className="max-w-[130px] truncate px-1.5 text-hi"
+                    title={`${p.cmd || p.name}${p.user ? `\nuser: ${p.user}` : ""}`}
+                  >
+                    {p.name}
+                  </td>
+                  <td className="max-w-[90px] truncate px-1.5 text-muted-foreground" title={p.container}>
+                    {p.container || "─"}
+                  </td>
+                  <td className="px-1.5 text-right" style={{ color: levelColor(p.cpu / Math.max(1, d.cores.length) * 4) }}>
+                    {p.cpu.toFixed(1)}
+                  </td>
+                  <td className="px-1.5 text-right whitespace-nowrap">{formatBytes(p.mem)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {rows.length === 0 && <Empty>ничего не найдено</Empty>}
+        </div>
+      ) : (
+        <Empty>
+          {data.online
+            ? "агент переключается в детальный режим, процессы появятся через пару секунд"
+            : "сервер не на связи"}
+        </Empty>
+      )}
+    </Panel>
+  );
+}
+
+function containerRank(c: Container) {
+  if (c.state !== "running" || c.health === "unhealthy") return 0;
+  if (c.health === "starting" || (c.restarts ?? 0) > 0) return 1;
+  return 2;
+}
+
+function DockerPanel({ data, onLogs }: { data: ServerDetailView; onLogs: (name: string) => void }) {
+  const r = data.snapshot?.report;
+  const list = useMemo(
+    () => [...(r?.containers ?? [])].sort((a, b) => containerRank(a) - containerRank(b) || a.name.localeCompare(b.name)),
+    [r],
+  );
+  if (!r?.docker_ok) {
+    return (
+      <Panel title="docker">
+        <Empty>docker недоступен агенту (нет /var/run/docker.sock) или не установлен</Empty>
+      </Panel>
+    );
+  }
+  const running = list.filter((c) => c.state === "running").length;
+  const projects = [...new Set(list.map((c) => c.compose).filter(Boolean))];
+  const right = [`${running} running`, `${list.length - running} stopped`, projects.length > 0 && `compose: ${projects.join(", ")}`]
+    .filter(Boolean)
+    .join(" · ");
+  return (
+    <Panel title="docker" right={right}>
+      <div className={scrollBox}>
+        <table className="w-full min-w-[960px] border-collapse text-left">
+          <thead className="text-muted-foreground">
+            <tr className="border-b border-border">
+              {["st", "имя", "образ", "статус", "cpu", "mem", "порты", "рест.", "health", ""].map((h, i) => (
+                <th key={i} className={cn("px-1.5 py-1 font-normal", (h === "mem" || h === "рест.") && "text-right")}>
+                  {h}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {list.map((c) => {
+              const bad = c.state !== "running" || c.health === "unhealthy";
+              const warn = !bad && (c.health === "starting" || (c.restarts ?? 0) > 0);
+              return (
+                <tr key={c.id} className="hover:bg-secondary/60">
+                  <td className={cn("px-1.5", bad ? "text-crit" : warn ? "text-warn" : "text-primary")}>
+                    {bad ? "○" : warn ? "▲" : "●"}
+                  </td>
+                  <td className="px-1.5 whitespace-nowrap text-hi">{c.name}</td>
+                  <td className="max-w-[280px] truncate px-1.5 text-muted-foreground" title={c.image}>
+                    {c.image}
+                  </td>
+                  <td className="px-1.5 whitespace-nowrap">{c.status}</td>
+                  <td className="px-1.5">
+                    {c.cpu_percent != null ? (
+                      <div className="flex w-[120px] items-center gap-1.5">
+                        <Track value={c.cpu_percent} />
+                        <span className="w-10 text-right">{pct(c.cpu_percent)}</span>
+                      </div>
+                    ) : (
+                      <span className="text-muted-foreground">─</span>
+                    )}
+                  </td>
+                  <td className="px-1.5 text-right whitespace-nowrap">
+                    {c.mem_bytes != null && c.state === "running" ? formatBytes(c.mem_bytes) : "─"}
+                  </td>
+                  <td className="max-w-[200px] truncate px-1.5 text-muted-foreground" title={c.ports?.join(", ")}>
+                    {c.ports?.length ? c.ports.join(", ") : "─"}
+                  </td>
+                  <td className={cn("px-1.5 text-right", (c.restarts ?? 0) > 0 && "text-warn")}>{c.restarts ?? "─"}</td>
+                  <td
+                    className={cn(
+                      "px-1.5",
+                      c.health === "healthy" && "text-primary",
+                      c.health === "starting" && "text-warn",
+                      c.health === "unhealthy" && "text-crit",
+                      !c.health && "text-muted-foreground",
+                    )}
+                  >
+                    {c.health || "─"}
+                  </td>
+                  <td className="px-1.5">
+                    <Button size="sm" variant="outline" onClick={() => onLogs(c.name)} title="показать строки этого контейнера в логах">
+                      логи
+                    </Button>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        {list.length === 0 && <Empty>контейнеров нет</Empty>}
+      </div>
+    </Panel>
+  );
+}
+
+function fmtLogTime(iso: string): string {
+  const d = new Date(iso);
+  const t = d.toLocaleTimeString("ru-RU", { hour12: false });
+  return d.toDateString() === new Date().toDateString()
+    ? t
+    : `${d.toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit" })} ${t}`;
+}
+
+function LogsPanel({
+  logs,
+  source,
+  setSource,
+  watching,
+  panelRef,
+}: {
+  logs: LogLine[];
+  source: string;
+  setSource: (s: string) => void;
+  watching: boolean;
+  panelRef: React.RefObject<HTMLDivElement | null>;
+}) {
+  const [level, setLevel] = useState<"all" | "ERR" | "WARN">("all");
+  const hourAgo = Date.now() - 3600_000;
+  const errHour = logs.filter((l) => l.level === "ERR" && new Date(l.ts).getTime() > hourAgo).length;
+  const rows = logs.filter((l) => (level === "all" || l.level === level) && (!source || l.source === source));
+  return (
+    <div ref={panelRef} className="min-w-0 flex-[999_1_760px]">
+      <Panel title="логи" right={`syslog + docker · warn и выше · ошибок за час: ${errHour}`} className="h-full">
+        <div className="mb-2 flex flex-wrap items-center gap-2">
+          {(["all", "ERR", "WARN"] as const).map((l) => (
+            <Button key={l} size="sm" variant={level === l ? "default" : "outline"} onClick={() => setLevel(l)}>
+              {l === "all" ? "все" : l}
+            </Button>
+          ))}
+          {source && (
+            <Button size="sm" variant="outline" onClick={() => setSource("")} title="сбросить фильтр источника">
+              источник: {source} ✕
+            </Button>
+          )}
+        </div>
+        <div className={cn(scrollBox, "max-h-[360px]")}>
+          <table className="w-full min-w-[640px] border-collapse text-left">
+            <thead className="sticky top-0 bg-background text-muted-foreground">
+              <tr className="border-b border-border">
+                <th className="px-1.5 py-1 font-normal">время</th>
+                <th className="px-1.5 py-1 font-normal">ур.</th>
+                <th className="px-1.5 py-1 font-normal">источник</th>
+                <th className="px-1.5 py-1 font-normal">сообщение</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((l, i) => (
+                <tr key={`${l.ts}-${i}`} className="align-top hover:bg-secondary/60">
+                  <td className="px-1.5 whitespace-nowrap text-muted-foreground">{fmtLogTime(l.ts)}</td>
+                  <td className={cn("px-1.5", l.level === "ERR" ? "text-crit" : "text-warn")}>{l.level}</td>
+                  <td className="px-1.5 whitespace-nowrap">
+                    <button type="button" className="cursor-pointer hover:text-primary" onClick={() => setSource(l.source)}>
+                      {l.source}
+                    </button>
+                  </td>
+                  <td className="px-1.5 break-all">{l.msg}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {rows.length === 0 && (
+            <Empty>
+              {logs.length === 0
+                ? watching
+                  ? "предупреждений и ошибок не найдено (агент читает /var/log/syslog и логи контейнеров)"
+                  : "логи собираются, пока экран открыт"
+                : "нет строк под фильтр"}
+            </Empty>
+          )}
+        </div>
+      </Panel>
+    </div>
+  );
+}
+
+function cardOf(s: ServerDetailView): ServerCard {
+  return {
+    description: s.description,
+    project: s.project,
+    group: s.group,
+    tags: s.tags,
+    provider: s.provider,
+    plan: s.plan,
+    cost: s.cost ?? null,
+    currency: s.currency,
+    next_payment: s.next_payment,
+  };
+}
+
+const fieldErrors: Record<string, string> = {
+  description: "описание слишком длинное",
+  project: "проект: до 64 символов",
+  group: "группа: до 64 символов",
+  provider: "провайдер: до 64 символов",
+  plan: "тариф: до 128 символов",
+  currency: "валюта: до 8 символов",
+  next_payment: "дата оплаты в формате ГГГГ-ММ-ДД",
+  cost: "стоимость должна быть числом ≥ 0",
+  tags: "теги: до 20 штук, без пробелов, до 32 символов",
+};
+
+function PassportForm({ data, onDone }: { data: ServerDetailView; onDone: (saved: boolean) => void }) {
+  const [card, setCard] = useState(() => cardOf(data));
+  const [tags, setTags] = useState(() => data.tags.map((t) => `#${t}`).join(" "));
+  const [cost, setCost] = useState(() => (data.cost != null ? String(data.cost) : ""));
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const field = (key: keyof ServerCard, label: string, opts: { type?: string; placeholder?: string } = {}) => (
+    <>
+      <label htmlFor={`pp-${key}`} className="self-center text-muted-foreground">
+        {label}
+      </label>
+      <input
+        id={`pp-${key}`}
+        type={opts.type ?? "text"}
+        placeholder={opts.placeholder}
+        value={String(card[key] ?? "")}
+        onChange={(e) => setCard({ ...card, [key]: e.target.value })}
+        className="h-7 min-w-0 border border-input bg-field px-2 text-hi placeholder:text-muted-foreground"
+      />
+    </>
+  );
+  const save = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const c = cost.trim().replace(",", ".");
+    const parsed = c === "" ? null : Number(c);
+    if (parsed != null && !Number.isFinite(parsed)) {
+      setError(fieldErrors.cost);
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      await api.updateCard(data.id, {
+        ...card,
+        cost: parsed,
+        tags: tags.split(/[\s,]+/).map((t) => t.replace(/^#/, "")).filter(Boolean),
+      });
+      onDone(true);
+    } catch (err) {
+      setError(err instanceof ApiError && err.status === 400 ? "проверьте поля формы" : "не удалось сохранить");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <form onSubmit={save} className="flex flex-col gap-3">
+      <div className="grid grid-cols-[120px_minmax(0,1fr)] gap-x-3 gap-y-1.5">
+        {field("description", "описание")}
+        {field("project", "проект")}
+        {field("group", "группа", { placeholder: "prod / staging / infra" })}
+        <label htmlFor="pp-tags" className="self-center text-muted-foreground">
+          теги
+        </label>
+        <input
+          id="pp-tags"
+          value={tags}
+          onChange={(e) => setTags(e.target.value)}
+          placeholder="#db #public"
+          className="h-7 min-w-0 border border-input bg-field px-2 text-hi placeholder:text-muted-foreground"
+        />
+        {field("provider", "провайдер", { placeholder: "Hetzner" })}
+        {field("plan", "тариф", { placeholder: "CPX31" })}
+        <label htmlFor="pp-cost" className="self-center text-muted-foreground">
+          стоимость
+        </label>
+        <div className="flex gap-2">
+          <input
+            id="pp-cost"
+            inputMode="decimal"
+            value={cost}
+            onChange={(e) => setCost(e.target.value)}
+            placeholder="15.90"
+            className="h-7 min-w-0 flex-auto border border-input bg-field px-2 text-hi placeholder:text-muted-foreground"
+          />
+          <input
+            aria-label="валюта"
+            value={card.currency}
+            onChange={(e) => setCard({ ...card, currency: e.target.value })}
+            placeholder="EUR"
+            className="h-7 w-16 border border-input bg-field px-2 text-hi placeholder:text-muted-foreground"
+          />
+        </div>
+        {field("next_payment", "след. оплата", { type: "date" })}
+      </div>
+      {error && <div className="text-crit">{error}</div>}
+      <div className="flex gap-2">
+        <Button type="submit" size="sm" disabled={busy}>
+          сохранить
+        </Button>
+        <Button type="button" size="sm" variant="outline" onClick={() => onDone(false)}>
+          отмена
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+function Passport({
+  data,
+  editing,
+  setEditing,
+  onSaved,
+}: {
+  data: ServerDetailView;
+  editing: boolean;
+  setEditing: (v: boolean) => void;
+  onSaved: () => void;
+}) {
+  const inv = data.inventory;
+  const r = data.snapshot?.report;
+  const days = data.next_payment ? daysUntil(data.next_payment) : null;
+  const kv: [string, React.ReactNode][] = [
+    ["описание", data.description || "—"],
+    ["проект", data.project || "—"],
+    ["группа", data.group || "—"],
+    ["теги", data.tags.length ? data.tags.map((t) => `#${t}`).join(" ") : "—"],
+    ["провайдер", data.provider || "—"],
+    ["тариф", data.plan || "—"],
+    [
+      "стоимость",
+      data.cost != null ? (
+        <span className="text-hi">
+          {data.cost} {data.currency}
+        </span>
+      ) : (
+        "—"
+      ),
+    ],
+    [
+      "след. оплата",
+      data.next_payment ? (
+        <span>
+          {ruDate(data.next_payment)}
+          {days != null && (
+            <span className={cn("ml-1", days <= 3 ? "text-warn" : "text-muted-foreground")}>
+              · {days >= 0 ? `через ${days} дн` : `просрочено ${-days} дн`}
+            </span>
+          )}
+        </span>
+      ) : (
+        "—"
+      ),
+    ],
+    ["ssh", data.host ? `${data.host}:${data.port}` : "не настроен"],
+    ["ос", inv?.os || "—"],
+    ["ядро", inv?.kernel || "—"],
+    ["docker", inv?.docker_version || (r?.docker_ok ? "есть" : "—")],
+    ["ip", inv?.ips?.join(", ") || "—"],
+    ["агент", r ? `${r.agent_version} · push ${ago(data.snapshot?.received)}` : "не подключён"],
+  ];
+  return (
+    <Panel
+      title="паспорт"
+      right={
+        editing ? (
+          "редактирование"
+        ) : (
+          <button type="button" className="cursor-pointer hover:text-primary" onClick={() => setEditing(true)}>
+            e изменить
+          </button>
+        )
+      }
+      className="min-w-0 flex-[1_1_380px]"
+    >
+      {editing ? (
+        <PassportForm
+          data={data}
+          onDone={(saved) => {
+            setEditing(false);
+            if (saved) onSaved();
+          }}
+        />
+      ) : (
+        <div className="grid grid-cols-[120px_minmax(0,1fr)] gap-x-3 gap-y-1">
+          {kv.map(([k, v]) => (
+            <React.Fragment key={k}>
+              <span className="text-muted-foreground">{k}</span>
+              <span className="min-w-0 break-words">{v}</span>
+            </React.Fragment>
+          ))}
+        </div>
+      )}
+    </Panel>
+  );
+}
+
+// --- page ---
+
+const historyEvery: Record<HistoryRange, number> = { "15m": 5000, "1h": 15000, "6h": 60000, "24h": 60000, "7d": 120000 };
+
+function loadRange(): HistoryRange {
+  try {
+    const v = localStorage.getItem("srvmon.range") as HistoryRange | null;
+    if (v && historyRanges.includes(v)) return v;
+  } catch {
+    /* storage unavailable */
+  }
+  return "15m";
+}
+
+export function ServerScreen({
+  id,
+  route,
+  version,
+  onLogout,
+}: {
+  id: number;
+  route: Route;
+  version: string;
+  onLogout: () => void;
+}) {
+  const [data, setData] = useState<ServerDetailView | null>(null);
+  const [hist, setHist] = useState<History | null>(null);
+  const [error, setError] = useState("");
+  const [missing, setMissing] = useState(false);
+  const [range, setRangeState] = useState<HistoryRange>(loadRange);
+  const [editing, setEditing] = useState(false);
+  const [logSource, setLogSource] = useState("");
+  const filterRef = useRef<HTMLInputElement>(null);
+  const logsRef = useRef<HTMLDivElement>(null);
+
+  const setRange = useCallback((r: HistoryRange) => {
+    setRangeState(r);
+    try {
+      localStorage.setItem("srvmon.range", r);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  const fail = useCallback(
+    (e: unknown) => {
+      if (e instanceof ApiError && e.status === 401) onLogout();
+      else if (e instanceof ApiError && e.status === 404) setMissing(true);
+      else setError("нет связи с сервером");
+    },
+    [onLogout],
+  );
+
+  const load = useCallback(
+    () =>
+      api
+        .server(id)
+        .then((d) => {
+          setData(d);
+          setError("");
+        })
+        .catch(fail),
+    [id, fail],
+  );
+
+  // The screen polls every 2 s; while it does, the agent sends detailed data.
+  useEffect(() => {
+    let alive = true;
+    const tick = () => alive && load();
+    tick();
+    const t = setInterval(tick, 2000);
+    return () => {
+      alive = false;
+      clearInterval(t);
+    };
+  }, [load]);
+
+  useEffect(() => {
+    let alive = true;
+    const tick = () =>
+      api
+        .history(id, range)
+        .then((h) => alive && setHist(h))
+        .catch(() => undefined);
+    tick();
+    const t = setInterval(tick, historyEvery[range]);
+    return () => {
+      alive = false;
+      clearInterval(t);
+    };
+  }, [id, range]);
+
+  const showLogs = useCallback((name: string) => {
+    setLogSource(name);
+    logsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, []);
+
+  useEffect(() => {
+    const on = (e: KeyboardEvent) => {
+      if (typingIn(e) || e.ctrlKey || e.metaKey || e.altKey) return;
+      const i = historyRanges.indexOf(range);
+      switch (e.key) {
+        case "Escape":
+          if (editing) setEditing(false);
+          else navigate(href.overview());
+          break;
+        case "t":
+          navigate(href.terminal(id));
+          break;
+        case "p":
+          filterRef.current?.focus();
+          break;
+        case "l":
+          logsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+          break;
+        case "e":
+          setEditing(true);
+          break;
+        case "+":
+        case "=":
+          setRange(historyRanges[Math.min(historyRanges.length - 1, i + 1)]);
+          break;
+        case "-":
+          setRange(historyRanges[Math.max(0, i - 1)]);
+          break;
+        default:
+          return;
+      }
+      e.preventDefault();
+    };
+    window.addEventListener("keydown", on);
+    return () => window.removeEventListener("keydown", on);
+  }, [id, range, editing, setRange]);
+
+  const r = data?.snapshot?.report;
+  const status = data && (
+    <span className={data.online ? "text-primary" : "text-crit"}>
+      {data.online ? "● online" : "○ offline"}
+    </span>
+  );
+
+  let body: React.ReactNode;
+  if (missing) {
+    body = (
+      <p className="text-muted-foreground">
+        Сервер не найден.{" "}
+        <a href={href.overview()} className="text-primary">
+          ← к обзору
+        </a>
+      </p>
+    );
+  } else if (!data) {
+    body = <p className="text-muted-foreground">{error || "загрузка…"}</p>;
+  } else {
+    const ip = data.inventory?.ips?.[0] || data.host;
+    const facts = [
+      ip,
+      data.inventory?.os,
+      data.provider,
+      data.cost != null && `${data.cost} ${data.currency}`,
+      data.next_payment && `оплата ${ruDate(data.next_payment).slice(0, 5)}`,
+    ].filter(Boolean);
+    body = (
+      <>
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2.5">
+          <span className="text-muted-foreground">
+            <a href={href.overview()} className="text-primary hover:text-primary-hover">
+              серверы
+            </a>
+            {data.group && ` / ${data.group}`}
+            {data.project && ` / ${data.project}`} /
+          </span>
+          <h1 className="text-lg font-bold text-hi">{data.name}</h1>
+          {data.online ? (
+            <span className="text-primary">● online {r ? formatUptime(r.host.uptime_sec) : ""}</span>
+          ) : (
+            <span className="text-crit">○ offline · последний push {ago(data.snapshot?.received ?? data.last_seen)}</span>
+          )}
+          {facts.length > 0 && <span className="text-muted-foreground">{facts.join(" · ")}</span>}
+          {data.tags.length > 0 && (
+            <span>
+              {data.tags.map((t) => (
+                <span key={t} className="mr-1 inline-block border border-border px-1.5 text-xs leading-[17px] text-[#9fc3a7]">
+                  #{t}
+                </span>
+              ))}
+            </span>
+          )}
+          <span className="flex-auto" />
+          <Button asChild>
+            <a href={href.terminal(id)}>&gt;_ терминал</a>
+          </Button>
+          <Button variant="outline" onClick={() => setEditing(true)}>
+            ✎ паспорт
+          </Button>
+          <span className="flex items-center gap-1" role="group" aria-label="окно графиков">
+            {historyRanges.map((x) => (
+              <Button key={x} size="sm" variant={x === range ? "default" : "outline"} onClick={() => setRange(x)}>
+                {x}
+              </Button>
+            ))}
+          </span>
+        </div>
+        {error && <div className="text-crit">{error}</div>}
+
+        <div className="flex flex-wrap items-stretch gap-x-4 gap-y-5">
+          <div className="flex min-w-0 flex-[999_1_760px] flex-col gap-5">
+            <CpuPanel data={data} hist={hist} />
+            <div className="flex flex-wrap gap-x-4 gap-y-5">
+              <MemoryPanel data={data} />
+              <NetPanel data={data} hist={hist} />
+            </div>
+          </div>
+          <ProcessPanel data={data} filterRef={filterRef} />
+        </div>
+
+        <DockerPanel data={data} onLogs={showLogs} />
+
+        <div className="flex flex-wrap gap-x-4 gap-y-5">
+          <LogsPanel
+            logs={data.logs}
+            source={logSource}
+            setSource={setLogSource}
+            watching={!!data.detail}
+            panelRef={logsRef}
+          />
+          <Passport data={data} editing={editing} setEditing={setEditing} onSaved={load} />
+        </div>
+      </>
+    );
+  }
+
+  return (
+    <Shell
+      route={route}
+      version={version}
+      onLogout={onLogout}
+      status={status}
+      footer={
+        <>
+          <Hotkey k="t">терминал</Hotkey>
+          <Hotkey k="p">процессы</Hotkey>
+          <Hotkey k="l">логи</Hotkey>
+          <Hotkey k="e">паспорт</Hotkey>
+          <Hotkey k="+/-">окно графиков</Hotkey>
+          <Hotkey k="esc">назад</Hotkey>
+        </>
+      }
+      footerNote="live · детальные метрики шлются, пока экран открыт"
+    >
+      {body}
+    </Shell>
+  );
+}

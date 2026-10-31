@@ -18,15 +18,17 @@ import (
 
 // Config of the agent loop.
 type Config struct {
-	URL        string        // panel base URL, e.g. https://mon.example.com
-	Token      string        // agent token from `srvmon-server add-server`
-	TokenFile  string        // if set, re-read after a failed push (token rotated by the server)
-	Interval   time.Duration // default 5s
-	HostProc   string
-	HostRoot   string
-	DockerSock string
-	Version    string
-	MaxBuffer  int // reports kept while the panel is unreachable; default 720 (1h at 5s)
+	URL       string        // panel base URL, e.g. https://mon.example.com
+	Token     string        // agent token from `srvmon-server add-server`
+	TokenFile string        // if set, re-read after a failed push (token rotated by the server)
+	Interval  time.Duration // default 5s
+	// DetailInterval is the push interval while the server screen is open.
+	DetailInterval time.Duration // default 2s
+	HostProc       string
+	HostRoot       string
+	DockerSock     string
+	Version        string
+	MaxBuffer      int // reports kept while the panel is unreachable; default 720 (1h at 5s)
 }
 
 // Run collects and pushes until ctx is done.
@@ -36,6 +38,9 @@ func Run(ctx context.Context, cfg Config, log *slog.Logger) error {
 	}
 	if cfg.Interval <= 0 {
 		cfg.Interval = 5 * time.Second
+	}
+	if cfg.DetailInterval <= 0 {
+		cfg.DetailInterval = 2 * time.Second
 	}
 	if cfg.MaxBuffer <= 0 {
 		cfg.MaxBuffer = 720
@@ -53,19 +58,33 @@ func Run(ctx context.Context, cfg Config, log *slog.Logger) error {
 	client := &http.Client{Timeout: 15 * time.Second}
 	endpoint := strings.TrimRight(cfg.URL, "/") + "/api/ingest"
 
+	det := &DetailCollector{HostProc: cfg.HostProc, HostRoot: cfg.HostRoot}
+	logs := &LogTailer{HostRoot: cfg.HostRoot, Docker: dock}
+	restarts := map[string]int{}
+	var restartsAt, logsAt, invAt time.Time
+	var detailUntil time.Time
+
 	// Prime CPU counters so the first report has a real percentage.
 	_, _ = col.Collect()
 	var buf []protocol.Report
-	t := time.NewTicker(cfg.Interval)
-	defer t.Stop()
+	timer := time.NewTimer(cfg.Interval)
+	defer timer.Stop()
 	log.Info("srvmon-agent started", "url", cfg.URL, "interval", cfg.Interval, "docker", dock != nil, "version", cfg.Version)
 	for {
 		select {
 		case <-ctx.Done():
 			return nil
-		case <-t.C:
+		case <-timer.C:
 		}
-		rep := protocol.Report{Hostname: hostname, AgentVersion: cfg.Version, Timestamp: time.Now().UTC()}
+		now := time.Now()
+		detail := now.Before(detailUntil)
+		if detail {
+			timer.Reset(cfg.DetailInterval)
+		} else {
+			timer.Reset(cfg.Interval)
+		}
+
+		rep := protocol.Report{Hostname: hostname, AgentVersion: cfg.Version, Timestamp: now.UTC()}
 		h, err := col.Collect()
 		if err != nil {
 			log.Warn("collect", "err", err)
@@ -81,6 +100,46 @@ func Run(ctx context.Context, cfg Config, log *slog.Logger) error {
 				rep.Containers, rep.DockerOK = cs, true
 			}
 		}
+		if now.Sub(invAt) >= time.Minute {
+			ictx, cancel := context.WithTimeout(ctx, 3*time.Second)
+			rep.Inventory = Inventory(ictx, cfg.HostProc, cfg.HostRoot, dock)
+			cancel()
+			invAt = now
+		}
+		if detail {
+			ids := make(map[string]string, len(rep.Containers))
+			for _, c := range rep.Containers {
+				ids[c.ID] = c.Name
+			}
+			d, usage := det.Collect(ids)
+			if dock != nil && now.Sub(restartsAt) >= 30*time.Second {
+				rctx, cancel := context.WithTimeout(ctx, 4*time.Second)
+				for _, c := range rep.Containers {
+					if n, err := dock.RestartCount(rctx, c.ID); err == nil {
+						restarts[c.ID] = n
+					}
+				}
+				cancel()
+				restartsAt = now
+			}
+			for i := range rep.Containers {
+				c := &rep.Containers[i]
+				if n, ok := restarts[c.ID]; ok {
+					c.Restarts = &n
+				}
+				if c.State == "running" {
+					u := usage[c.Name]
+					c.CPUPercent, c.MemBytes = &u.CPUPercent, &u.MemBytes
+				}
+			}
+			if now.Sub(logsAt) >= logsEvery {
+				lctx, cancel := context.WithTimeout(ctx, 4*time.Second)
+				d.Logs = logs.Collect(lctx, rep.Containers)
+				cancel()
+				logsAt = now
+			}
+			rep.Detail = d
+		}
 		buf = append(buf, rep)
 		if len(buf) > cfg.MaxBuffer {
 			buf = buf[len(buf)-cfg.MaxBuffer:]
@@ -88,7 +147,8 @@ func Run(ctx context.Context, cfg Config, log *slog.Logger) error {
 		// When catching up, send at most maxBatchReports reports and stay
 		// well under the server's decompressed body limit.
 		batch := nextBatch(buf, maxBatchReports, maxBatchBytes)
-		if err := push(ctx, client, endpoint, cfg.Token, batch); err != nil {
+		resp, err := push(ctx, client, endpoint, cfg.Token, batch)
+		if err != nil {
 			log.Warn("push failed, will retry", "err", err, "buffered", len(buf))
 			if tok, changed := reloadToken(cfg.TokenFile, cfg.Token); changed {
 				cfg.Token = tok
@@ -97,8 +157,24 @@ func Run(ctx context.Context, cfg Config, log *slog.Logger) error {
 			continue
 		}
 		buf = buf[len(batch):]
+		if resp.Detail {
+			if !detail {
+				// Switch to the fast cadence right away and refresh the
+				// passport (the server may have restarted and lost it).
+				timer.Reset(cfg.DetailInterval)
+				invAt = time.Time{}
+			}
+			detailUntil = time.Now().Add(detailHold)
+		}
 	}
 }
+
+const (
+	// detailHold keeps detail mode on this long after the last server
+	// request for it, so a short network hiccup does not flap it.
+	detailHold = 15 * time.Second
+	logsEvery  = 6 * time.Second
+)
 
 const (
 	maxBatchReports = 100
@@ -126,32 +202,35 @@ func nextBatch(buf []protocol.Report, maxReports, maxBytes int) []protocol.Repor
 	return buf
 }
 
-func push(ctx context.Context, c *http.Client, url, token string, reports []protocol.Report) error {
+func push(ctx context.Context, c *http.Client, url, token string, reports []protocol.Report) (protocol.IngestResponse, error) {
+	var out protocol.IngestResponse
 	var body bytes.Buffer
 	zw := gzip.NewWriter(&body)
 	if err := json.NewEncoder(zw).Encode(reports); err != nil {
-		return err
+		return out, err
 	}
 	if err := zw.Close(); err != nil {
-		return err
+		return out, err
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, &body)
 	if err != nil {
-		return err
+		return out, err
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Content-Encoding", "gzip")
 	resp, err := c.Do(req)
 	if err != nil {
-		return err
+		return out, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 256))
-		return fmt.Errorf("%s: %s", resp.Status, strings.TrimSpace(string(msg)))
+		return out, fmt.Errorf("%s: %s", resp.Status, strings.TrimSpace(string(msg)))
 	}
-	return nil
+	// An older server may answer without a body; that just means no detail.
+	_ = json.NewDecoder(io.LimitReader(resp.Body, 4<<10)).Decode(&out)
+	return out, nil
 }
 
 // reloadToken returns the token from file when it differs from cur.
