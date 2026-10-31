@@ -31,7 +31,8 @@ See the README for running an agent against a local server.
 - One change per PR; describe what and why, and how you tested it.
 - `make lint` and `make test` must pass; CI runs the same checks.
 - Add or update tests for behaviour changes, especially in auth, the SSH gateway and the AI command policy (`internal/aiagent/policy.go`).
-- Keep the UI in the existing TUI style (see `docs/design`). UI text is currently Russian.
+- Keep the UI in the existing TUI style (see `docs/design`).
+- User-facing text is written in English in the code and translated through dictionaries keyed by that English text: `t("…")` / `tn(…)` with `web/src/i18n/<lang>.ts` in the panel, `i18n.T("…")` / `i18n.N(…)` with `internal/i18n/<lang>.go` on the server. Add the Russian and Chinese translation with every new string (a missing one falls back to English). Prompts and tool texts for the AI agent stay in English; the agent replies in the panel language.
 - Don't commit secrets, real hostnames or IP addresses; use `example.com` and documentation IPs (`192.0.2.0/24`, `203.0.113.0/24`).
 
 ## License of contributions

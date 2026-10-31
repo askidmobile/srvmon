@@ -3,16 +3,17 @@ import { useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { api, type AlertSummary } from "@/lib/api";
+import { t, tn } from "@/lib/i18n";
 import { href, type Route } from "@/lib/router";
 import { cn } from "@/lib/utils";
 
 const nav: { key: string; label: string; to?: string; match: Route["name"][] }[] = [
-  { key: "1", label: "обзор", to: href.overview(), match: ["overview"] },
-  { key: "2", label: "серверы", match: ["server", "add"] },
-  { key: "3", label: "терминал", to: href.terminal(), match: ["terminal"] },
-  { key: "4", label: "агент", to: href.agent(), match: ["agent"] },
-  { key: "5", label: "алерты", to: href.alerts(), match: ["alerts"] },
-  { key: "6", label: "настройки", to: href.settings(), match: ["settings"] },
+  { key: "1", label: "overview", to: href.overview(), match: ["overview"] },
+  { key: "2", label: "servers", match: ["server", "add"] },
+  { key: "3", label: "terminal", to: href.terminal(), match: ["terminal"] },
+  { key: "4", label: "agent", to: href.agent(), match: ["agent"] },
+  { key: "5", label: "alerts", to: href.alerts(), match: ["alerts"] },
+  { key: "6", label: "settings", to: href.settings(), match: ["settings"] },
 ];
 
 function Clock() {
@@ -47,22 +48,14 @@ function AlertBadge() {
     <a href={href.alerts()} className="flex gap-3 whitespace-nowrap hover:opacity-80">
       {sum.open > 0 ? (
         <span className={sum.crit > 0 ? "text-crit" : "text-warn"}>
-          ▲ {sum.open} {plural(sum.open, "алерт", "алерта", "алертов")}
+          ▲ {tn(sum.open, "{n} alert", "{n} alerts")}
         </span>
       ) : (
-        <span className="text-muted-foreground">алертов нет</span>
+        <span className="text-muted-foreground">{t("no alerts")}</span>
       )}
-      <span className={tg}>tg: {sum.telegram === "ok" ? "ok" : sum.telegram === "off" ? "выкл" : "ошибка"}</span>
+      <span className={tg}>tg: {sum.telegram === "ok" ? "ok" : sum.telegram === "off" ? t("off") : t("error")}</span>
     </a>
   );
-}
-
-export function plural(n: number, one: string, few: string, many: string): string {
-  const m10 = n % 10;
-  const m100 = n % 100;
-  if (m10 === 1 && m100 !== 11) return one;
-  if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return few;
-  return many;
 }
 
 export function Hotkey({ k, children }: { k: string; children: React.ReactNode }) {
@@ -98,21 +91,21 @@ export function Shell({
         <a href={href.overview()} className="font-bold text-primary">
           ▌srvmon
         </a>
-        <nav className="flex flex-1 flex-wrap gap-1" aria-label="разделы">
+        <nav className="flex flex-1 flex-wrap gap-1" aria-label={t("sections")}>
           {nav.map((n) => {
             const on = n.match.includes(route.name);
             const cls = cn("px-2 py-0.5", on ? "bg-primary text-primary-foreground" : "text-primary hover:text-primary-hover");
             return n.to ? (
               <a key={n.key} href={n.to} className={cls} aria-current={on ? "page" : undefined}>
-                [{n.key}] {n.label}
+                [{n.key}] {t(n.label)}
               </a>
             ) : (
               <span
                 key={n.key}
                 className={on ? cls : "px-2 py-0.5 text-muted-foreground/60"}
-                title={on ? undefined : "скоро"}
+                title={on ? undefined : t("soon")}
               >
-                [{n.key}] {n.label}
+                [{n.key}] {t(n.label)}
               </span>
             );
           })}
@@ -129,7 +122,7 @@ export function Shell({
             onLogout();
           }}
         >
-          выйти
+          {t("log out")}
         </Button>
       </header>
       <main className="flex flex-1 flex-col gap-5 px-4 py-4 sm:px-5">{children}</main>

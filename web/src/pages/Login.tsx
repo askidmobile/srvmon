@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Panel } from "@/components/ui/panel";
 import { api, ApiError } from "@/lib/api";
+import { t } from "@/lib/i18n";
 
 const LOGO = String.raw`  ___ _ ____   ___ __ ___   ___  _ __
  / __| '__\ \ / / '_ ${"`"} _ \ / _ \| '_ \
@@ -11,20 +12,20 @@ const LOGO = String.raw`  ___ _ ____   ___ __ ___   ___  _ __
  |___/_|    \_/ |_| |_| |_|\___/|_| |_|`;
 
 function errorText(e: unknown): string {
-  if (!(e instanceof ApiError)) return "сервер недоступен";
+  if (!(e instanceof ApiError)) return t("server unavailable");
   switch (e.code) {
     case "invalid_password":
-      return "неверный пароль";
+      return t("wrong password");
     case "invalid_code":
-      return "неверный код";
+      return t("wrong code");
     case "password_required":
-      return "время шага истекло, введите пароль снова";
+      return t("this step timed out, enter the password again");
     case "too_many_attempts":
-      return `слишком много попыток, повторите через ${Math.ceil((e.retryAfter ?? 600) / 60)} мин`;
+      return t("too many attempts, try again in {m} min", { m: Math.ceil((e.retryAfter ?? 600) / 60) });
     case "not_initialized":
-      return "панель не настроена: выполните srvmon-server init на сервере";
+      return t("the panel is not set up: run srvmon-server init on the server");
     default:
-      return `ошибка: ${e.code}`;
+      return t("error: {code}", { code: e.code });
   }
 }
 
@@ -88,10 +89,10 @@ export function Login({ onSuccess }: { onSuccess: () => void }) {
         </pre>
 
         {step === "password" ? (
-          <Panel title="вход ── шаг 1/2" accent className="w-full">
+          <Panel title={t("sign in ── step 1/2")} accent className="w-full">
             <form onSubmit={submitPassword} className="flex flex-col gap-3.5">
               <label htmlFor="pw" className="text-muted-foreground">
-                пароль
+                {t("password")}
               </label>
               <Input
                 id="pw"
@@ -102,19 +103,19 @@ export function Login({ onSuccess }: { onSuccess: () => void }) {
                 onChange={(e) => setPassword(e.target.value)}
               />
               <Button type="submit" size="lg" disabled={busy || !password}>
-                продолжить ⏎
+                {t("continue")} ⏎
               </Button>
               {error && <p className="m-0 text-crit">{error}</p>}
               <p className="m-0 text-xs text-muted-foreground">
-                логина нет · 5 неверных попыток → бан ip на 1ч (fail2ban)
+                {t("no username · 5 wrong attempts → ip banned for 1h (fail2ban)")}
               </p>
             </form>
           </Panel>
         ) : (
-          <Panel title="вход ── шаг 2/2 · google authenticator" accent className="w-full">
+          <Panel title={t("sign in ── step 2/2 · google authenticator")} accent className="w-full">
             <form onSubmit={submitCode} className="flex flex-col gap-3.5">
               <label htmlFor="code" className="text-muted-foreground">
-                6-значный код из приложения или резервный код
+                {t("6-digit code from the app or a recovery code")}
               </label>
               <Input
                 id="code"
@@ -126,7 +127,7 @@ export function Login({ onSuccess }: { onSuccess: () => void }) {
                 onChange={(e) => setCode(e.target.value)}
               />
               <Button type="submit" size="lg" disabled={busy || !code}>
-                войти ⏎
+                {t("sign in")} ⏎
               </Button>
               {error && <p className="m-0 text-crit">{error}</p>}
               <div className="flex flex-wrap justify-between gap-2">
@@ -139,16 +140,16 @@ export function Login({ onSuccess }: { onSuccess: () => void }) {
                     setError("");
                   }}
                 >
-                  ← назад
+                  ← {t("back")}
                 </Button>
-                <span className="self-center text-xs text-muted-foreground">код обновится через {left}с</span>
+                <span className="self-center text-xs text-muted-foreground">{t("code refreshes in {s}s", { s: left })}</span>
               </div>
             </form>
           </Panel>
         )}
 
         <p className="m-0 text-center text-xs text-muted-foreground">
-          tls · попытки входа логируются · вход только для владельца
+          {t("tls · sign-in attempts are logged · owner access only")}
         </p>
       </div>
     </main>

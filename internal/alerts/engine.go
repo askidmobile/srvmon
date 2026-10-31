@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/askidmobile/srvmon/internal/i18n"
 	"github.com/askidmobile/srvmon/internal/metrics"
 	"github.com/askidmobile/srvmon/internal/protocol"
 	"github.com/askidmobile/srvmon/internal/store"
@@ -340,7 +341,7 @@ func (e *Engine) check(r store.Rule, srv store.Server, now time.Time) ([]cond, b
 			return nil, false
 		}
 		if quiet := now.Sub(last); quiet > r.Duration() {
-			return []cond{{message: fmt.Sprintf("агент не отвечает %s (последние данные %s UTC)",
+			return []cond{{message: i18n.T("agent not responding for %s (last data %s UTC)",
 				FormatDuration(quiet), last.UTC().Format("02.01 15:04"))}}, true
 		}
 		return nil, true
@@ -358,7 +359,7 @@ func (e *Engine) check(r store.Rule, srv store.Server, now time.Time) ([]cond, b
 		}
 		v := float64(rep.Host.MemUsed()) / float64(rep.Host.MemTotal) * 100
 		if v > r.Threshold {
-			return []cond{{message: fmt.Sprintf("память %.0f%% > %.0f%%%s", v, r.Threshold, forText(r))}}, true
+			return []cond{{message: i18n.T("memory %.0f%% > %.0f%%%s", v, r.Threshold, forText(r))}}, true
 		}
 		return nil, true
 	case store.KindDisk:
@@ -371,7 +372,7 @@ func (e *Engine) check(r store.Rule, srv store.Server, now time.Time) ([]cond, b
 				continue
 			}
 			if v := float64(d.Used) / float64(d.Total) * 100; v > r.Threshold {
-				out = append(out, cond{subject: d.Mount, message: fmt.Sprintf("диск %s заполнен на %.0f%% (> %.0f%%), свободно %s",
+				out = append(out, cond{subject: d.Mount, message: i18n.T("disk %s is %.0f%% full (> %.0f%%), %s free",
 					d.Mount, v, r.Threshold, formatBytes(d.Total-d.Used))})
 			}
 		}
@@ -383,7 +384,7 @@ func (e *Engine) check(r store.Rule, srv store.Server, now time.Time) ([]cond, b
 		var out []cond
 		for _, c := range rep.Containers {
 			if why := containerDown(c); why != "" {
-				out = append(out, cond{subject: c.Name, message: fmt.Sprintf("контейнер %s %s", c.Name, why)})
+				out = append(out, cond{subject: c.Name, message: i18n.T("container %s %s", c.Name, why)})
 			}
 		}
 		return out, true
@@ -394,7 +395,7 @@ func (e *Engine) check(r store.Rule, srv store.Server, now time.Time) ([]cond, b
 		var out []cond
 		for name, n := range e.restarts.counts(srv.ID, now.Add(-r.Duration())) {
 			if float64(n) > r.Threshold {
-				out = append(out, cond{subject: name, message: fmt.Sprintf("контейнер %s перезапускался %d раз за %s",
+				out = append(out, cond{subject: name, message: i18n.N(n, "container %s restarted %d time in %s", "container %s restarted %d times in %s",
 					name, n, FormatDuration(r.Duration()))})
 			}
 		}
@@ -433,18 +434,18 @@ func PaymentText(srv store.Server, days int) string {
 	}
 	switch {
 	case days < 0:
-		return fmt.Sprintf("оплата%s%s просрочена на %d дн. (%s)", sum, prov, -days, date)
+		return i18n.N(-days, "payment%s%s is %d day overdue (%s)", "payment%s%s is %d days overdue (%s)", sum, prov, -days, date)
 	case days == 0:
-		return fmt.Sprintf("оплата%s%s сегодня (%s)", sum, prov, date)
+		return i18n.T("payment%s%s is due today (%s)", sum, prov, date)
 	}
-	return fmt.Sprintf("оплата%s%s через %d дн. (%s)", sum, prov, days, date)
+	return i18n.N(days, "payment%s%s due in %d day (%s)", "payment%s%s due in %d days (%s)", sum, prov, days, date)
 }
 
 func forText(r store.Rule) string {
 	if r.DurationSec <= 0 {
 		return ""
 	}
-	return " дольше " + FormatDuration(r.Duration())
+	return " " + i18n.T("for over %s", FormatDuration(r.Duration()))
 }
 
 // containerDown returns why a container counts as down, or "".
@@ -458,7 +459,7 @@ func containerDown(c protocol.Container) string {
 		// Exited (0) is a finished one-shot job or a manual stop.
 		code := exitCode(c.Status)
 		if code != 0 {
-			return fmt.Sprintf("упал (exit %d)", code)
+			return i18n.T("crashed (exit %d)", code)
 		}
 	}
 	return ""
@@ -580,23 +581,24 @@ func (e *Engine) Silence(ctx context.Context, id int64, d time.Duration) (store.
 	return a, until, err
 }
 
-// FormatDuration renders 90s as "1м30с", 2h as "2ч".
+// FormatDuration renders 90s as "1m30s", 2h as "2h" (units in the current
+// language).
 func FormatDuration(d time.Duration) string {
 	d = d.Round(time.Second)
 	if d <= 0 {
-		return "0с"
+		return i18n.T("%ds", 0)
 	}
 	var b strings.Builder
 	units := []struct {
 		d    time.Duration
 		name string
-	}{{24 * time.Hour, "д"}, {time.Hour, "ч"}, {time.Minute, "м"}, {time.Second, "с"}}
+	}{{24 * time.Hour, "%dd"}, {time.Hour, "%dh"}, {time.Minute, "%dm"}, {time.Second, "%ds"}}
 	parts := 0
 	for _, u := range units {
 		if d >= u.d && parts < 2 {
 			n := d / u.d
 			d -= n * u.d
-			fmt.Fprintf(&b, "%d%s", n, u.name)
+			b.WriteString(i18n.T(u.name, n))
 			parts++
 		} else if parts > 0 {
 			break

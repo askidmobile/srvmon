@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"time"
+
+	"github.com/askidmobile/srvmon/internal/i18n"
 )
 
 // AI agent state: chats with their display transcript, commands waiting for
@@ -514,7 +516,7 @@ func (s *Store) FinishAgentTask(ctx context.Context, id int64, status, result st
 
 // ResetRunningAgentTasks clears 'running' left by a restart.
 func (s *Store) ResetRunningAgentTasks(ctx context.Context) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE agent_tasks SET last_status = 'error', last_result = 'прервано перезапуском srvmon'
-		WHERE last_status = 'running'`)
+	_, err := s.db.ExecContext(ctx, `UPDATE agent_tasks SET last_status = 'error', last_result = ?
+		WHERE last_status = 'running'`, i18n.T("interrupted by a srvmon restart"))
 	return err
 }

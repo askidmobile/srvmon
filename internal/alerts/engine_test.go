@@ -275,7 +275,7 @@ func TestPaymentDue(t *testing.T) {
 	if len(open) != 1 || open[0].Kind != store.KindPaymentDue || open[0].Subject != due {
 		t.Fatalf("open = %+v", open)
 	}
-	if want := "оплата 15.9 EUR (Hetzner) через 2 дн."; open[0].Message[:len(want)] != want {
+	if want := "payment 15.9 EUR (Hetzner) due in 2 days"; open[0].Message[:len(want)] != want {
 		t.Fatalf("message = %q", open[0].Message)
 	}
 	// Paid: the date moves on, the alert resolves.
@@ -401,7 +401,7 @@ func TestEventsAndFail2banTail(t *testing.T) {
 
 func TestFormatDuration(t *testing.T) {
 	for d, want := range map[time.Duration]string{
-		90 * time.Second: "1м30с", 2 * time.Hour: "2ч", 26 * time.Hour: "1д2ч", 5 * time.Minute: "5м", 0: "0с",
+		90 * time.Second: "1m30s", 2 * time.Hour: "2h", 26 * time.Hour: "1d2h", 5 * time.Minute: "5m", 0: "0s",
 	} {
 		if got := FormatDuration(d); got != want {
 			t.Errorf("%v: %q, want %q", d, got, want)

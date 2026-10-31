@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/askidmobile/srvmon/internal/alerts"
+	"github.com/askidmobile/srvmon/internal/i18n"
 	"github.com/askidmobile/srvmon/internal/store"
 	"github.com/askidmobile/srvmon/internal/telegram"
 )
@@ -164,37 +165,37 @@ func (s *Server) handleRules(w http.ResponseWriter, r *http.Request) {
 // validateRule checks a rule and returns a message for the UI, or "".
 func validateRule(r *store.Rule) string {
 	if !store.KnownKind(r.Kind) {
-		return "неизвестный тип правила"
+		return i18n.T("unknown rule type")
 	}
 	if r.Severity != store.SevCrit && r.Severity != store.SevWarn && r.Severity != store.SevInfo {
-		return "уровень: crit, warn или info"
+		return i18n.T("level: crit, warn or info")
 	}
 	if r.Channel != store.ChanTelegram && r.Channel != store.ChanWeb {
-		return "канал: tg или web"
+		return i18n.T("channel: tg or web")
 	}
 	if r.DurationSec < 0 || r.DurationSec > 7*24*3600 {
-		return "длительность от 0 до 7 дней"
+		return i18n.T("duration from 0 to 7 days")
 	}
 	switch r.Kind {
 	case store.KindCPU, store.KindMem, store.KindDisk:
 		if r.Threshold <= 0 || r.Threshold >= 100 {
-			return "порог в процентах: от 1 до 99"
+			return i18n.T("threshold in percent: from 1 to 99")
 		}
 	case store.KindContainerRestarts:
 		if r.Threshold < 0 || r.Threshold > 1000 || r.Threshold != float64(int(r.Threshold)) {
-			return "порог: целое число рестартов"
+			return i18n.T("threshold: a whole number of restarts")
 		}
 		if r.DurationSec < 60 {
-			return "окно подсчёта рестартов — от 1 минуты"
+			return i18n.T("the restart counting window is at least 1 minute")
 		}
 	case store.KindPaymentDue:
 		if r.Threshold < 0 || r.Threshold > 60 || r.Threshold != float64(int(r.Threshold)) {
-			return "порог: от 0 до 60 дней"
+			return i18n.T("threshold: from 0 to 60 days")
 		}
 		r.DurationSec = 0
 	case store.KindAgentSilent:
 		if r.DurationSec < 30 {
-			return "агент шлёт данные раз в 5 с: порог от 30 секунд"
+			return i18n.T("the agent sends data every 5 s: the threshold is at least 30 seconds")
 		}
 		r.Threshold = 0
 	default: // container_down and events
@@ -329,14 +330,14 @@ func (s *Server) handleTelegramSave(w http.ResponseWriter, r *http.Request) {
 	if c := strings.TrimSpace(req.ChatID); c != "" {
 		var err error
 		if chat, err = strconv.ParseInt(c, 10, 64); err != nil || chat == 0 {
-			s.writeValidation(w, "chat id — целое число, у групп со знаком минус")
+			s.writeValidation(w, i18n.T("the chat id is a whole number, negative for groups"))
 			return
 		}
 	}
 	if req.Token != nil {
 		t := strings.TrimSpace(*req.Token)
 		if t != "" && (len(t) > 100 || !strings.Contains(t, ":") || strings.ContainsAny(t, "/?# ")) {
-			s.writeValidation(w, "токен выглядит как 123456789:AA… — скопируйте его из BotFather целиком")
+			s.writeValidation(w, i18n.T("a token looks like 123456789:AA…: copy it from BotFather in full"))
 			return
 		}
 		req.Token = &t
@@ -344,14 +345,14 @@ func (s *Server) handleTelegramSave(w http.ResponseWriter, r *http.Request) {
 	err := s.bot.Configure(r.Context(), req.Token, chat)
 	switch {
 	case errors.Is(err, telegram.ErrBadToken):
-		s.writeValidation(w, "Telegram не принял токен")
+		s.writeValidation(w, i18n.T("Telegram did not accept the token"))
 		return
 	case errors.Is(err, telegram.ErrNoSecrets):
 		writeError(w, http.StatusServiceUnavailable, "no_master_key")
 		return
 	case err != nil:
 		s.log.Warn("telegram: configure", "err", err)
-		s.writeValidation(w, "не удалось проверить токен: "+err.Error())
+		s.writeValidation(w, i18n.T("could not check the token: %s", err.Error()))
 		return
 	}
 	_ = s.store.Audit(r.Context(), s.clientIP(r), "telegram_config", "chat="+req.ChatID)
@@ -365,10 +366,10 @@ func (s *Server) handleTelegramTest(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := s.bot.Test(r.Context()); err != nil {
 		if errors.Is(err, telegram.ErrNotConfigured) {
-			s.writeValidation(w, "сначала укажите токен и chat id")
+			s.writeValidation(w, i18n.T("set the token and chat id first"))
 			return
 		}
-		s.writeValidation(w, "не отправилось: "+err.Error())
+		s.writeValidation(w, i18n.T("not sent: %s", err.Error()))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})

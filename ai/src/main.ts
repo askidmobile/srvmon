@@ -18,7 +18,7 @@ import { join } from "node:path";
 
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 
-import { Agents, type AgentConfig, type Event } from "./agent.js";
+import { Agents, type AgentConfig, DEFAULT_LANG, type Event } from "./agent.js";
 import { type AIConfig, Setup } from "./setup.js";
 
 const version = process.env.SRVMON_VERSION ?? "dev";
@@ -69,14 +69,14 @@ async function stream(req: IncomingMessage, res: ServerResponse, run: (emit: (e:
   };
   const ok = await run(emit, ac.signal);
   if (!ok && !started) return json(res, 409, { error: "busy" });
-  if (!started) emit({ t: "error", msg: "пустой ответ" });
+  if (!started) emit({ t: "error", msg: "empty reply" });
   res.end();
 }
 
 export function status(setup: Setup): Status {
   // Until the saved settings arrive, the environment defaults may name
   // another provider: runs wait rather than go to the wrong one.
-  const error = setup.loading ? "жду настройки из srvmon" : setup.error;
+  const error = setup.loading ? "waiting for the settings from srvmon" : setup.error;
   return { ready: !error && !!setup.provider, provider: setup.provider, model: setup.modelId, error, version };
 }
 
@@ -123,17 +123,17 @@ export function createApp(cfg: AgentConfig) {
         case "POST /v1/test": {
           const body = (await readBody(req)) as { model?: string };
           const model = setup.resolve(body.model);
-          if (!model) return json(res, 200, { ok: false, error: st.error ?? "модель не настроена" });
+          if (!model) return json(res, 200, { ok: false, error: st.error ?? "model not configured" });
           const t0 = Date.now();
           try {
             const reply = await modelRuntime.completeSimple(
               model,
-              { messages: [{ role: "user", content: "Проверка связи. Ответь одним словом: работает.", timestamp: Date.now() }] },
+              { messages: [{ role: "user", content: "Connection check. Answer with one word: works.", timestamp: Date.now() }] },
               { maxTokens: 1024, signal: AbortSignal.timeout(45_000) },
             );
             const r = reply as unknown as { stopReason?: string; errorMessage?: string; content?: { type: string; text?: string }[] };
             if (r.stopReason === "error" || r.stopReason === "aborted") {
-              return json(res, 200, { ok: false, model: model.id, error: r.errorMessage || "ошибка модели", ms: Date.now() - t0 });
+              return json(res, 200, { ok: false, model: model.id, error: r.errorMessage || "model error", ms: Date.now() - t0 });
             }
             return json(res, 200, { ok: true, model: model.id, text: assistantText(r).slice(0, 200), ms: Date.now() - t0 });
           } catch (err) {
@@ -150,17 +150,17 @@ export function createApp(cfg: AgentConfig) {
       const isRun = req.method === "POST" && ((chat && chat[2]) || url.pathname === "/v1/run");
       if (!isRun) return json(res, 404, { error: "not_found" });
       if (!st.ready) return json(res, 503, { error: st.error ?? "not_ready" });
-      const body = (await readBody(req)) as { text?: string; server?: string; task_id?: number; model?: string };
+      const body = (await readBody(req)) as { text?: string; server?: string; task_id?: number; model?: string; lang?: string };
       const text = (body.text ?? "").trim();
       if (!text) return json(res, 400, { error: "bad_text" });
       if (chat) {
         const id = Number(chat[1]);
         return await stream(req, res, (emit, signal) =>
-          agents.runChat(id, text, body.server || undefined, body.model ?? "", emit, signal),
+          agents.runChat(id, text, body.server || undefined, body.model ?? "", emit, signal, replyLang(body.lang)),
         );
       }
       return await stream(req, res, async (emit, signal) => {
-        await agents.runTask(body.task_id ?? 0, text, emit, signal);
+        await agents.runTask(body.task_id ?? 0, text, emit, signal, replyLang(body.lang));
         return true;
       });
     } catch (err) {
@@ -169,6 +169,11 @@ export function createApp(cfg: AgentConfig) {
       else res.end();
     }
   });
+}
+
+/** The reply language srvmon asked for: an English language name, else English. */
+export function replyLang(v: unknown): string {
+  return typeof v === "string" && /^[A-Za-z][A-Za-z ]{1,39}$/.test(v) ? v : DEFAULT_LANG;
 }
 
 /** Asks srvmon for the setup saved in the panel, retrying until it answers. */
@@ -196,7 +201,7 @@ async function pullConfig(toolsUrl: string, token: string, setup: Setup, onAppli
           await setup.apply(cfg);
           onApplied();
         } catch (err) {
-          setup.error = `сохранённые настройки не применились: ${err instanceof Error ? err.message : err}`;
+          setup.error = `the saved settings did not apply: ${err instanceof Error ? err.message : err}`;
         }
         setup.loading = false;
         console.log(JSON.stringify({ msg: "srvmon-ai: settings from srvmon", provider: setup.provider, model: setup.modelId, error: setup.error }));

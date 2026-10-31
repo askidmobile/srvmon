@@ -215,7 +215,7 @@ func TestUnknownChatThenCommands(t *testing.T) {
 	e.api.queue(msg(777, "/status"))
 	sent = e.api.waitSent(t, 2)
 	text := sent[1]["text"].(string)
-	if sent[1]["chat_id"].(float64) != 777 || !strings.Contains(text, "1/1 онлайн") || !strings.Contains(text, "cpu 42%") {
+	if sent[1]["chat_id"].(float64) != 777 || !strings.Contains(text, "1/1 online") || !strings.Contains(text, "cpu 42%") {
 		t.Fatalf("status reply = %v", sent[1])
 	}
 	time.Sleep(100 * time.Millisecond)
@@ -273,7 +273,7 @@ func TestBillsText(t *testing.T) {
 	due := time.Now().AddDate(0, 0, 1).Format("2006-01-02")
 	_ = e.st.UpdateServerCard(ctx, e.srvID, store.ServerCard{Cost: &cost, Currency: "EUR", Period: "year", NextPayment: due})
 	text := e.bot.billsText(ctx)
-	if !strings.Contains(text, "🟡") || !strings.Contains(text, "В месяц: 10.00 EUR") {
+	if !strings.Contains(text, "🟡") || !strings.Contains(text, "Per month: 10.00 EUR") {
 		t.Fatalf("bills = %s", text)
 	}
 }
@@ -328,7 +328,7 @@ func TestAgentActionButtonsAndAsk(t *testing.T) {
 
 	e.api.queue(msg(777, "/ask что с диском?"))
 	sent = e.api.waitSent(t, 2)
-	if !strings.Contains(sent[1]["text"].(string), "думает") {
+	if !strings.Contains(sent[1]["text"].(string), "thinking") {
 		t.Fatalf("ask ack = %v", sent[1])
 	}
 	// While the answer is pending, a button press is still handled.

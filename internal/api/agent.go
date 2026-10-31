@@ -12,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/askidmobile/srvmon/internal/aiagent"
+	"github.com/askidmobile/srvmon/internal/i18n"
 	"github.com/askidmobile/srvmon/internal/store"
 )
 
@@ -52,7 +53,7 @@ func (s *Server) handleAgentStatus(w http.ResponseWriter, r *http.Request) {
 		st, err := s.ai.Status(r.Context())
 		if err != nil {
 			out["ready"] = false
-			out["error"] = "srvmon-ai недоступен"
+			out["error"] = i18n.T("srvmon-ai is unavailable")
 		} else {
 			out["ready"] = st.Ready
 			out["provider"] = st.Provider
@@ -322,11 +323,11 @@ func (s *Server) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 		msg := "srvmon-ai: " + err.Error()
 		switch {
 		case errors.Is(err, context.Canceled):
-			msg = "остановлено"
+			msg = i18n.T("stopped")
 		case errors.Is(err, context.DeadlineExceeded):
-			msg = "превышено время ответа"
+			msg = i18n.T("the reply timed out")
 		case aiagent.IsBusy(err):
-			msg = "агент ещё отвечает в этом чате"
+			msg = i18n.T("the agent is still replying in this chat")
 		}
 		if tr.err == "" {
 			tr.err = msg

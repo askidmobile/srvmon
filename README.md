@@ -4,7 +4,7 @@
 
 Self-hosted monitoring panel for your own servers: host metrics and docker containers, an SSH terminal in the browser, an AI agent that works on your servers with your approval, and Telegram alerts. Sign-in is a password plus a TOTP code (Google Authenticator and compatible apps), protected by fail2ban.
 
-The interface is a dark TUI-style dashboard (btop-like) with a green accent. The UI language is currently Russian.
+The interface is a dark TUI-style dashboard (btop-like) with a green accent. The interface is available in English (default), Russian and Chinese; switch it in settings. The language also applies to Telegram messages and AI agent replies.
 
 - Architecture: [docs/architecture.md](docs/architecture.md)
 - Mockups: [docs/design](docs/design)

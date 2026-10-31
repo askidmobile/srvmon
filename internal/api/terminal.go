@@ -16,6 +16,7 @@ import (
 	"golang.org/x/crypto/ssh"
 
 	"github.com/askidmobile/srvmon/internal/auth"
+	"github.com/askidmobile/srvmon/internal/i18n"
 	"github.com/askidmobile/srvmon/internal/sshgw"
 	"github.com/askidmobile/srvmon/internal/store"
 )
@@ -120,7 +121,7 @@ func (s *Server) handleTerminal(w http.ResponseWriter, r *http.Request) {
 	out.msg(fmt.Sprintf("srvmon: ssh %s@%s:%d …", access.User, access.Host, access.Port))
 	client, err := s.dialServer(ctx, access)
 	if err != nil {
-		out.msg("не удалось подключиться: " + err.Error())
+		out.msg(i18n.T("could not connect: %s", err.Error()))
 		conn.Close(websocket.StatusNormalClosure, "dial failed")
 		return
 	}
@@ -163,7 +164,7 @@ func (s *Server) handleTerminal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !setup.Stop() {
-		out.msg("сервер не ответил вовремя")
+		out.msg(i18n.T("the server did not answer in time"))
 		conn.Close(websocket.StatusNormalClosure, "setup timeout")
 		return
 	}
@@ -207,7 +208,7 @@ func (s *Server) handleTerminal(w http.ResponseWriter, r *http.Request) {
 				}
 				kind, err := s.store.SessionKind(ctx, auth.HashToken(sessCookie.Value))
 				if err != nil || kind != store.SessionFull {
-					out.msg("сессия панели истекла")
+					out.msg(i18n.T("the panel session expired"))
 					cancel()
 					return
 				}
@@ -220,7 +221,7 @@ func (s *Server) handleTerminal(w http.ResponseWriter, r *http.Request) {
 	reason := "exit"
 	select {
 	case <-done:
-		out.msg("сессия завершена")
+		out.msg(i18n.T("session ended"))
 	case <-ctx.Done():
 		reason = "closed"
 	}
@@ -232,7 +233,7 @@ func (s *Server) handleTerminal(w http.ResponseWriter, r *http.Request) {
 // dialServer opens an SSH connection with the server's stored key.
 func (s *Server) dialServer(ctx context.Context, a store.SSHAccess) (*ssh.Client, error) {
 	if s.secrets == nil {
-		return nil, errors.New("мастер-ключ не загружен")
+		return nil, errors.New(i18n.T("the master key is not loaded"))
 	}
 	hostKey, err := sshgw.ParseHostKey(a.HostKey)
 	if err != nil {

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/askidmobile/srvmon/internal/i18n"
 	"github.com/askidmobile/srvmon/internal/store"
 )
 
@@ -82,11 +83,10 @@ func (e *Engine) TailFail2ban(ctx context.Context, path, hostName string) {
 						}
 						line, partial = partial+line, ""
 						if ev, ok := parseFail2ban(strings.TrimSpace(line)); ok {
-							msg := "fail2ban забанил " + ev.IP + " (jail " + ev.Jail
+							msg := i18n.T("fail2ban banned %s (jail %s)", ev.IP, ev.Jail)
 							if ev.Failures != "" {
-								msg += ", попыток " + ev.Failures
+								msg = i18n.T("fail2ban banned %s (jail %s, %s attempts)", ev.IP, ev.Jail, ev.Failures)
 							}
-							msg += ")"
 							e.Event(ctx, store.KindFail2ban, 0, hostName, ev.IP, msg)
 						}
 					}

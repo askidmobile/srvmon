@@ -1,6 +1,8 @@
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
 
+import { t } from "@/lib/i18n";
+
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
@@ -19,7 +21,7 @@ export function formatBytes(n: number): string {
 export function formatUptime(sec: number): string {
   const d = Math.floor(sec / 86400);
   const h = Math.floor((sec % 86400) / 3600);
-  if (d > 0) return `${d}д ${h}ч`;
+  if (d > 0) return t("{d}d {h}h", { d, h });
   const m = Math.floor((sec % 3600) / 60);
-  return `${h}ч ${m}м`;
+  return t("{h}h {m}m", { h, m });
 }

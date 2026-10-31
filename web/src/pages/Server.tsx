@@ -16,6 +16,7 @@ import {
   type ServerCard,
   type ServerDetailView,
 } from "@/lib/api";
+import { locale, t, tn } from "@/lib/i18n";
 import { href, navigate, typingIn, type Route } from "@/lib/router";
 import { cn, formatBytes, formatUptime } from "@/lib/utils";
 
@@ -41,15 +42,20 @@ const rate = (bps: number) => `${formatBytes(bps)}/s`;
 function ago(iso?: string): string {
   if (!iso) return "—";
   const s = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000));
-  if (s < 60) return `${s}с назад`;
-  if (s < 3600) return `${Math.floor(s / 60)}м назад`;
-  if (s < 86400) return `${Math.floor(s / 3600)}ч назад`;
-  return `${Math.floor(s / 86400)}д назад`;
+  if (s < 60) return t("{n}s ago", { n: s });
+  if (s < 3600) return t("{n}m ago", { n: Math.floor(s / 60) });
+  if (s < 86400) return t("{n}h ago", { n: Math.floor(s / 3600) });
+  return t("{n}d ago", { n: Math.floor(s / 86400) });
 }
 
-function ruDate(ymd: string): string {
-  const [y, m, d] = ymd.split("-");
-  return y && m && d ? `${d}.${m}.${y}` : ymd;
+// A YYYY-MM-DD date in the interface locale; short drops the year.
+function fmtDate(ymd: string, short = false): string {
+  const [y, m, d] = ymd.split("-").map(Number);
+  if (!y || !m || !d) return ymd;
+  const opts: Intl.DateTimeFormatOptions = short
+    ? { day: "2-digit", month: "2-digit" }
+    : { day: "2-digit", month: "2-digit", year: "numeric" };
+  return new Date(y, m - 1, d).toLocaleDateString(locale(), opts);
 }
 
 function daysUntil(ymd: string): number | null {
@@ -153,7 +159,7 @@ function CpuPanel({ data, hist }: { data: ServerDetailView; hist: History | null
             height={132}
             color={`linear-gradient(to top, ${C.okDark}, ${C.ok})`}
             grid
-            label="загрузка cpu"
+            label={t("cpu load")}
           />
         </div>
         <div
@@ -169,7 +175,7 @@ function CpuPanel({ data, hist }: { data: ServerDetailView; hist: History | null
               </div>
             ))
           ) : (
-            <span className="col-span-full text-xs text-muted-foreground">загрузка по ядрам появится через пару секунд</span>
+            <span className="col-span-full text-xs text-muted-foreground">{t("per-core load shows up in a couple of seconds")}</span>
           )}
         </div>
       </div>
@@ -193,12 +199,12 @@ function MemRow({ name, value, total, color }: { name: string; value: number; to
 
 function MemoryPanel({ data }: { data: ServerDetailView }) {
   const h = data.snapshot?.report.host;
-  if (!h) return <Panel title="память">{<Empty>нет данных</Empty>}</Panel>;
+  if (!h) return <Panel title={t("memory")}>{<Empty>{t("no data")}</Empty>}</Panel>;
   const used = Math.max(0, h.mem_total - h.mem_available);
   const swapUsed = Math.max(0, h.swap_total - h.swap_free);
   const d = data.detail;
   return (
-    <Panel title="память" right={formatBytes(h.mem_total)} className="min-w-0 flex-[1_1_360px]">
+    <Panel title={t("memory")} right={formatBytes(h.mem_total)} className="min-w-0 flex-[1_1_360px]">
       <div className="flex flex-col gap-2">
         <MemRow name="used" value={used} total={h.mem_total} color={C.ok} />
         <MemRow name="available" value={h.mem_available} total={h.mem_total} color={C.tx} />
@@ -207,7 +213,7 @@ function MemoryPanel({ data }: { data: ServerDetailView }) {
         {h.swap_total > 0 ? (
           <MemRow name="swap" value={swapUsed} total={h.swap_total} color={C.warn} />
         ) : (
-          <div className="text-xs text-muted-foreground">swap выключен</div>
+          <div className="text-xs text-muted-foreground">{t("swap is off")}</div>
         )}
       </div>
       <div className="mt-2.5 flex flex-col gap-1 border-t border-border pt-2">
@@ -220,7 +226,7 @@ function MemoryPanel({ data }: { data: ServerDetailView }) {
               </span>
               <Track value={p} />
               <span className="text-right">{pct(p)}</span>
-              <span className="text-right text-hi" title={`занято ${formatBytes(disk.used)}`}>
+              <span className="text-right text-hi" title={t("used {size}", { size: formatBytes(disk.used) })}>
                 {formatBytes(disk.total)}
               </span>
             </div>
@@ -254,24 +260,24 @@ function NetPanel({ data, hist }: { data: ServerDetailView; hist: History | null
   const totalTx = net.reduce((a, n) => a + n.tx_bytes, 0);
   const right = [net.map((n) => n.name).join(", "), data.inventory?.ips?.[0]].filter(Boolean).join(" · ");
   return (
-    <Panel title="сеть" right={right} className="min-w-0 flex-[1_1_360px]">
+    <Panel title={t("network")} right={right} className="min-w-0 flex-[1_1_360px]">
       <div className="flex flex-wrap justify-between gap-x-3">
         <span>
           ↓ rx <span className="font-bold text-primary">{rate(lastValue(rx) ?? 0)}</span>
         </span>
         <span className="text-muted-foreground">
-          пик {rate(peakRx)} · всего {formatBytes(totalRx)}
+          {t("peak {rate} · total {size}", { rate: rate(peakRx), size: formatBytes(totalRx) })}
         </span>
       </div>
-      <Bars values={rx} max={max} height={56} color={C.ok} label="входящий трафик" />
+      <Bars values={rx} max={max} height={56} color={C.ok} label={t("incoming traffic")} />
       <div className="border-t border-border" />
-      <Bars values={tx} max={max} height={40} color={C.tx} down label="исходящий трафик" />
+      <Bars values={tx} max={max} height={40} color={C.tx} down label={t("outgoing traffic")} />
       <div className="flex flex-wrap justify-between gap-x-3">
         <span>
           ↑ tx <span className="font-bold text-tx">{rate(lastValue(tx) ?? 0)}</span>
         </span>
         <span className="text-muted-foreground">
-          пик {rate(peakTx)} · всего {formatBytes(totalTx)}
+          {t("peak {rate} · total {size}", { rate: rate(peakTx), size: formatBytes(totalTx) })}
           {data.detail && ` · tcp ${data.detail.tcp_conns}`}
         </span>
       </div>
@@ -317,8 +323,8 @@ function ProcessPanel({ data, filterRef }: { data: ServerDetailView; filterRef: 
   );
   return (
     <Panel
-      title="процессы"
-      right={d ? `сорт: ${sort} · ${d.procs_total} всего · топ ${d.procs.length}` : undefined}
+      title={t("processes")}
+      right={d ? t("sort: {sort} · {total} total · top {top}", { sort, total: d.procs_total, top: d.procs.length }) : undefined}
       className="flex min-w-0 flex-[1_1_380px] flex-col"
     >
       <div className="mb-2 flex gap-2">
@@ -337,7 +343,7 @@ function ProcessPanel({ data, filterRef }: { data: ServerDetailView; filterRef: 
               e.stopPropagation();
             }
           }}
-          placeholder="фильтр: имя, контейнер, pid"
+          placeholder={t("filter: name, container, pid")}
           className="h-[26px] min-w-0 flex-auto border border-input bg-field px-2 text-hi placeholder:text-muted-foreground"
         />
       </div>
@@ -347,8 +353,8 @@ function ProcessPanel({ data, filterRef }: { data: ServerDetailView; filterRef: 
             <thead className="sticky top-0 bg-background text-muted-foreground">
               <tr className="border-b border-border">
                 {th("pid", "pid", true)}
-                {th("name", "программа")}
-                <th className="px-1.5 py-1 font-normal">конт.</th>
+                {th("name", t("program"))}
+                <th className="px-1.5 py-1 font-normal">{t("cont.")}</th>
                 {th("cpu", "cpu", true)}
                 {th("mem", "mem", true)}
               </tr>
@@ -374,13 +380,13 @@ function ProcessPanel({ data, filterRef }: { data: ServerDetailView; filterRef: 
               ))}
             </tbody>
           </table>
-          {rows.length === 0 && <Empty>ничего не найдено</Empty>}
+          {rows.length === 0 && <Empty>{t("nothing found")}</Empty>}
         </div>
       ) : (
         <Empty>
           {data.online
-            ? "агент переключается в детальный режим, процессы появятся через пару секунд"
-            : "сервер не на связи"}
+            ? t("the agent is switching to detailed mode, processes show up in a couple of seconds")
+            : t("the server is offline")}
         </Empty>
       )}
     </Panel>
@@ -402,7 +408,7 @@ function DockerPanel({ data, onLogs }: { data: ServerDetailView; onLogs: (name: 
   if (!r?.docker_ok) {
     return (
       <Panel title="docker">
-        <Empty>docker недоступен агенту (нет /var/run/docker.sock) или не установлен</Empty>
+        <Empty>{t("docker is not available to the agent (no /var/run/docker.sock) or not installed")}</Empty>
       </Panel>
     );
   }
@@ -417,9 +423,9 @@ function DockerPanel({ data, onLogs }: { data: ServerDetailView; onLogs: (name: 
         <table className="w-full min-w-[960px] border-collapse text-left">
           <thead className="text-muted-foreground">
             <tr className="border-b border-border">
-              {["st", "имя", "образ", "статус", "cpu", "mem", "порты", "рест.", "health", ""].map((h, i) => (
-                <th key={i} className={cn("px-1.5 py-1 font-normal", (h === "mem" || h === "рест.") && "text-right")}>
-                  {h}
+              {["st", "name", "image", "status", "cpu", "mem", "ports", "rest.", "health", ""].map((h, i) => (
+                <th key={i} className={cn("px-1.5 py-1 font-normal", (h === "mem" || h === "rest.") && "text-right")}>
+                  {h && t(h)}
                 </th>
               ))}
             </tr>
@@ -467,8 +473,8 @@ function DockerPanel({ data, onLogs }: { data: ServerDetailView; onLogs: (name: 
                     {c.health || "─"}
                   </td>
                   <td className="px-1.5">
-                    <Button size="sm" variant="outline" onClick={() => onLogs(c.name)} title="показать строки этого контейнера в логах">
-                      логи
+                    <Button size="sm" variant="outline" onClick={() => onLogs(c.name)} title={t("show this container's lines in the logs")}>
+                      {t("logs")}
                     </Button>
                   </td>
                 </tr>
@@ -476,7 +482,7 @@ function DockerPanel({ data, onLogs }: { data: ServerDetailView; onLogs: (name: 
             })}
           </tbody>
         </table>
-        {list.length === 0 && <Empty>контейнеров нет</Empty>}
+        {list.length === 0 && <Empty>{t("no containers")}</Empty>}
       </div>
     </Panel>
   );
@@ -484,10 +490,10 @@ function DockerPanel({ data, onLogs }: { data: ServerDetailView; onLogs: (name: 
 
 function fmtLogTime(iso: string): string {
   const d = new Date(iso);
-  const t = d.toLocaleTimeString("ru-RU", { hour12: false });
+  const time = d.toLocaleTimeString(locale(), { hour12: false });
   return d.toDateString() === new Date().toDateString()
-    ? t
-    : `${d.toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit" })} ${t}`;
+    ? time
+    : `${d.toLocaleDateString(locale(), { day: "2-digit", month: "2-digit" })} ${time}`;
 }
 
 function LogsPanel({
@@ -509,16 +515,16 @@ function LogsPanel({
   const rows = logs.filter((l) => (level === "all" || l.level === level) && (!source || l.source === source));
   return (
     <div ref={panelRef} className="min-w-0 flex-[999_1_760px]">
-      <Panel title="логи" right={`syslog + docker · warn и выше · ошибок за час: ${errHour}`} className="h-full">
+      <Panel title={t("logs")} right={t("syslog + docker · warn and up · errors in the last hour: {n}", { n: errHour })} className="h-full">
         <div className="mb-2 flex flex-wrap items-center gap-2">
           {(["all", "ERR", "WARN"] as const).map((l) => (
             <Button key={l} size="sm" variant={level === l ? "default" : "outline"} onClick={() => setLevel(l)}>
-              {l === "all" ? "все" : l}
+              {l === "all" ? t("all") : l}
             </Button>
           ))}
           {source && (
-            <Button size="sm" variant="outline" onClick={() => setSource("")} title="сбросить фильтр источника">
-              источник: {source} ✕
+            <Button size="sm" variant="outline" onClick={() => setSource("")} title={t("clear the source filter")}>
+              {t("source:")} {source} ✕
             </Button>
           )}
         </div>
@@ -526,10 +532,10 @@ function LogsPanel({
           <table className="w-full min-w-[640px] border-collapse text-left">
             <thead className="sticky top-0 bg-background text-muted-foreground">
               <tr className="border-b border-border">
-                <th className="px-1.5 py-1 font-normal">время</th>
-                <th className="px-1.5 py-1 font-normal">ур.</th>
-                <th className="px-1.5 py-1 font-normal">источник</th>
-                <th className="px-1.5 py-1 font-normal">сообщение</th>
+                <th className="px-1.5 py-1 font-normal">{t("time")}</th>
+                <th className="px-1.5 py-1 font-normal">{t("lvl")}</th>
+                <th className="px-1.5 py-1 font-normal">{t("source")}</th>
+                <th className="px-1.5 py-1 font-normal">{t("message")}</th>
               </tr>
             </thead>
             <tbody>
@@ -551,9 +557,9 @@ function LogsPanel({
             <Empty>
               {logs.length === 0
                 ? watching
-                  ? "предупреждений и ошибок не найдено (агент читает /var/log/syslog и логи контейнеров)"
-                  : "логи собираются, пока экран открыт"
-                : "нет строк под фильтр"}
+                  ? t("no warnings or errors found (the agent reads /var/log/syslog and container logs)")
+                  : t("logs are collected while this screen is open")
+                : t("no lines match the filter")}
             </Empty>
           )}
         </div>
@@ -577,15 +583,15 @@ function cardOf(s: ServerDetailView): ServerCard {
 }
 
 const fieldErrors: Record<string, string> = {
-  description: "описание слишком длинное",
-  project: "проект: до 64 символов",
-  group: "группа: до 64 символов",
-  provider: "провайдер: до 64 символов",
-  plan: "тариф: до 128 символов",
-  currency: "валюта: до 8 символов",
-  next_payment: "дата оплаты в формате ГГГГ-ММ-ДД",
-  cost: "стоимость должна быть числом ≥ 0",
-  tags: "теги: до 20 штук, без пробелов, до 32 символов",
+  description: "the description is too long",
+  project: "project: up to 64 characters",
+  group: "group: up to 64 characters",
+  provider: "provider: up to 64 characters",
+  plan: "plan: up to 128 characters",
+  currency: "currency: up to 8 characters",
+  next_payment: "payment date as YYYY-MM-DD",
+  cost: "the cost must be a number ≥ 0",
+  tags: "tags: up to 20, no spaces, up to 32 characters each",
 };
 
 function PassportForm({ data, onDone }: { data: ServerDetailView; onDone: (saved: boolean) => void }) {
@@ -614,7 +620,7 @@ function PassportForm({ data, onDone }: { data: ServerDetailView; onDone: (saved
     const c = cost.trim().replace(",", ".");
     const parsed = c === "" ? null : Number(c);
     if (parsed != null && !Number.isFinite(parsed)) {
-      setError(fieldErrors.cost);
+      setError(t(fieldErrors.cost));
       return;
     }
     setBusy(true);
@@ -627,7 +633,7 @@ function PassportForm({ data, onDone }: { data: ServerDetailView; onDone: (saved
       });
       onDone(true);
     } catch (err) {
-      setError(err instanceof ApiError && err.status === 400 ? "проверьте поля формы" : "не удалось сохранить");
+      setError(err instanceof ApiError && err.status === 400 ? t("check the form fields") : t("could not save"));
     } finally {
       setBusy(false);
     }
@@ -635,11 +641,11 @@ function PassportForm({ data, onDone }: { data: ServerDetailView; onDone: (saved
   return (
     <form onSubmit={save} className="flex flex-col gap-3">
       <div className="grid grid-cols-[120px_minmax(0,1fr)] gap-x-3 gap-y-1.5">
-        {field("description", "описание")}
-        {field("project", "проект")}
-        {field("group", "группа", { placeholder: "prod / staging / infra" })}
+        {field("description", t("description"))}
+        {field("project", t("project"))}
+        {field("group", t("group"), { placeholder: "prod / staging / infra" })}
         <label htmlFor="pp-tags" className="self-center text-muted-foreground">
-          теги
+          {t("tags")}
         </label>
         <input
           id="pp-tags"
@@ -648,10 +654,10 @@ function PassportForm({ data, onDone }: { data: ServerDetailView; onDone: (saved
           placeholder="#db #public"
           className="h-7 min-w-0 border border-input bg-field px-2 text-hi placeholder:text-muted-foreground"
         />
-        {field("provider", "провайдер", { placeholder: "Hetzner" })}
-        {field("plan", "тариф", { placeholder: "CPX31" })}
+        {field("provider", t("provider"), { placeholder: "Hetzner" })}
+        {field("plan", t("plan"), { placeholder: "CPX31" })}
         <label htmlFor="pp-cost" className="self-center text-muted-foreground">
-          стоимость
+          {t("cost")}
         </label>
         <div className="flex gap-2">
           <input
@@ -663,22 +669,22 @@ function PassportForm({ data, onDone }: { data: ServerDetailView; onDone: (saved
             className="h-7 min-w-0 flex-auto border border-input bg-field px-2 text-hi placeholder:text-muted-foreground"
           />
           <input
-            aria-label="валюта"
+            aria-label={t("currency")}
             value={card.currency}
             onChange={(e) => setCard({ ...card, currency: e.target.value })}
             placeholder="EUR"
             className="h-7 w-16 border border-input bg-field px-2 text-hi placeholder:text-muted-foreground"
           />
         </div>
-        {field("next_payment", "след. оплата", { type: "date" })}
+        {field("next_payment", t("next payment"), { type: "date" })}
       </div>
       {error && <div className="text-crit">{error}</div>}
       <div className="flex gap-2">
         <Button type="submit" size="sm" disabled={busy}>
-          сохранить
+          {t("save")}
         </Button>
         <Button type="button" size="sm" variant="outline" onClick={() => onDone(false)}>
-          отмена
+          {t("cancel")}
         </Button>
       </div>
     </form>
@@ -700,14 +706,14 @@ function Passport({
   const r = data.snapshot?.report;
   const days = data.next_payment ? daysUntil(data.next_payment) : null;
   const kv: [string, React.ReactNode][] = [
-    ["описание", data.description || "—"],
-    ["проект", data.project || "—"],
-    ["группа", data.group || "—"],
-    ["теги", data.tags.length ? data.tags.map((t) => `#${t}`).join(" ") : "—"],
-    ["провайдер", data.provider || "—"],
-    ["тариф", data.plan || "—"],
+    [t("description"), data.description || "—"],
+    [t("project"), data.project || "—"],
+    [t("group"), data.group || "—"],
+    [t("tags"), data.tags.length ? data.tags.map((tag) => `#${tag}`).join(" ") : "—"],
+    [t("provider"), data.provider || "—"],
+    [t("plan"), data.plan || "—"],
     [
-      "стоимость",
+      t("cost"),
       data.cost != null ? (
         <span className="text-hi">
           {data.cost} {data.currency}
@@ -717,13 +723,13 @@ function Passport({
       ),
     ],
     [
-      "след. оплата",
+      t("next payment"),
       data.next_payment ? (
         <span>
-          {ruDate(data.next_payment)}
+          {fmtDate(data.next_payment)}
           {days != null && (
             <span className={cn("ml-1", days <= 3 ? "text-warn" : "text-muted-foreground")}>
-              · {days >= 0 ? `через ${days} дн` : `просрочено ${-days} дн`}
+              · {days >= 0 ? tn(days, "in {n} day", "in {n} days") : tn(-days, "{n} day overdue", "{n} days overdue")}
             </span>
           )}
         </span>
@@ -731,22 +737,22 @@ function Passport({
         "—"
       ),
     ],
-    ["ssh", data.host ? `${data.host}:${data.port}` : "не настроен"],
-    ["ос", inv?.os || "—"],
-    ["ядро", inv?.kernel || "—"],
-    ["docker", inv?.docker_version || (r?.docker_ok ? "есть" : "—")],
+    ["ssh", data.host ? `${data.host}:${data.port}` : t("not set up")],
+    [t("os"), inv?.os || "—"],
+    [t("kernel"), inv?.kernel || "—"],
+    ["docker", inv?.docker_version || (r?.docker_ok ? t("yes") : "—")],
     ["ip", inv?.ips?.join(", ") || "—"],
-    ["агент", r ? `${r.agent_version} · push ${ago(data.snapshot?.received)}` : "не подключён"],
+    [t("agent"), r ? `${r.agent_version} · push ${ago(data.snapshot?.received)}` : t("not connected")],
   ];
   return (
     <Panel
-      title="паспорт"
+      title={t("passport")}
       right={
         editing ? (
-          "редактирование"
+          t("editing")
         ) : (
           <button type="button" className="cursor-pointer hover:text-primary" onClick={() => setEditing(true)}>
-            e изменить
+            e {t("edit")}
           </button>
         )
       }
@@ -822,7 +828,7 @@ export function ServerScreen({
     (e: unknown) => {
       if (e instanceof ApiError && e.status === 401) onLogout();
       else if (e instanceof ApiError && e.status === 404) setMissing(true);
-      else setError("нет связи с сервером");
+      else setError(t("no connection to the server"));
     },
     [onLogout],
   );
@@ -919,14 +925,14 @@ export function ServerScreen({
   if (missing) {
     body = (
       <p className="text-muted-foreground">
-        Сервер не найден.{" "}
+        {t("Server not found.")}{" "}
         <a href={href.overview()} className="text-primary">
-          ← к обзору
+          ← {t("to the overview")}
         </a>
       </p>
     );
   } else if (!data) {
-    body = <p className="text-muted-foreground">{error || "загрузка…"}</p>;
+    body = <p className="text-muted-foreground">{error || t("loading…")}</p>;
   } else {
     const ip = data.inventory?.ips?.[0] || data.host;
     const facts = [
@@ -934,14 +940,14 @@ export function ServerScreen({
       data.inventory?.os,
       data.provider,
       data.cost != null && `${data.cost} ${data.currency}`,
-      data.next_payment && `оплата ${ruDate(data.next_payment).slice(0, 5)}`,
+      data.next_payment && t("payment {date}", { date: fmtDate(data.next_payment, true) }),
     ].filter(Boolean);
     body = (
       <>
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2.5">
           <span className="text-muted-foreground">
             <a href={href.overview()} className="text-primary hover:text-primary-hover">
-              серверы
+              {t("servers")}
             </a>
             {data.group && ` / ${data.group}`}
             {data.project && ` / ${data.project}`} /
@@ -950,26 +956,26 @@ export function ServerScreen({
           {data.online ? (
             <span className="text-primary">● online {r ? formatUptime(r.host.uptime_sec) : ""}</span>
           ) : (
-            <span className="text-crit">○ offline · последний push {ago(data.snapshot?.received ?? data.last_seen)}</span>
+            <span className="text-crit">○ offline · {t("last push")} {ago(data.snapshot?.received ?? data.last_seen)}</span>
           )}
           {facts.length > 0 && <span className="text-muted-foreground">{facts.join(" · ")}</span>}
           {data.tags.length > 0 && (
             <span>
-              {data.tags.map((t) => (
-                <span key={t} className="mr-1 inline-block border border-border px-1.5 text-xs leading-[17px] text-[#9fc3a7]">
-                  #{t}
+              {data.tags.map((tag) => (
+                <span key={tag} className="mr-1 inline-block border border-border px-1.5 text-xs leading-[17px] text-[#9fc3a7]">
+                  #{tag}
                 </span>
               ))}
             </span>
           )}
           <span className="flex-auto" />
           <Button asChild>
-            <a href={href.terminal(id)}>&gt;_ терминал</a>
+            <a href={href.terminal(id)}>&gt;_ {t("terminal")}</a>
           </Button>
           <Button variant="outline" onClick={() => setEditing(true)}>
-            ✎ паспорт
+            ✎ {t("passport")}
           </Button>
-          <span className="flex items-center gap-1" role="group" aria-label="окно графиков">
+          <span className="flex items-center gap-1" role="group" aria-label={t("chart window")}>
             {historyRanges.map((x) => (
               <Button key={x} size="sm" variant={x === range ? "default" : "outline"} onClick={() => setRange(x)}>
                 {x}
@@ -1014,15 +1020,15 @@ export function ServerScreen({
       status={status}
       footer={
         <>
-          <Hotkey k="t">терминал</Hotkey>
-          <Hotkey k="p">процессы</Hotkey>
-          <Hotkey k="l">логи</Hotkey>
-          <Hotkey k="e">паспорт</Hotkey>
-          <Hotkey k="+/-">окно графиков</Hotkey>
-          <Hotkey k="esc">назад</Hotkey>
+          <Hotkey k="t">{t("terminal")}</Hotkey>
+          <Hotkey k="p">{t("processes")}</Hotkey>
+          <Hotkey k="l">{t("logs")}</Hotkey>
+          <Hotkey k="e">{t("passport")}</Hotkey>
+          <Hotkey k="+/-">{t("chart window")}</Hotkey>
+          <Hotkey k="esc">{t("back")}</Hotkey>
         </>
       }
-      footerNote="live · детальные метрики шлются, пока экран открыт"
+      footerNote={t("live · detailed metrics are sent while this screen is open")}
     >
       {body}
     </Shell>

@@ -4,8 +4,10 @@
 package aiagent
 
 import (
-	"fmt"
+	"errors"
 	"strings"
+
+	"github.com/askidmobile/srvmon/internal/i18n"
 )
 
 // Classify reports whether cmd only reads state and can run without
@@ -24,7 +26,7 @@ func Classify(cmd string) (readOnly bool, reason string) {
 	}
 	for _, words := range segs {
 		if len(words) == 0 {
-			return false, "пустая команда в конвейере"
+			return false, i18n.T("empty command in a pipeline")
 		}
 		if r := checkProgram(words); r != "" {
 			return false, r
@@ -38,10 +40,10 @@ func Classify(cmd string) (readOnly bool, reason string) {
 func splitPipeline(cmd string) ([][]string, error) {
 	cmd = strings.TrimSpace(cmd)
 	if cmd == "" {
-		return nil, fmt.Errorf("пустая команда")
+		return nil, errors.New(i18n.T("empty command"))
 	}
 	if len(cmd) > 2000 {
-		return nil, fmt.Errorf("слишком длинная команда")
+		return nil, errors.New(i18n.T("command too long"))
 	}
 	var segs [][]string
 	var words []string
@@ -60,7 +62,7 @@ func splitPipeline(cmd string) ([][]string, error) {
 		case c == '\'':
 			j := strings.IndexByte(cmd[i+1:], '\'')
 			if j < 0 {
-				return nil, fmt.Errorf("незакрытая кавычка")
+				return nil, errors.New(i18n.T("unclosed quote"))
 			}
 			cur.WriteString(cmd[i+1 : i+1+j])
 			inWord = true
@@ -68,11 +70,11 @@ func splitPipeline(cmd string) ([][]string, error) {
 		case c == '"':
 			j := strings.IndexByte(cmd[i+1:], '"')
 			if j < 0 {
-				return nil, fmt.Errorf("незакрытая кавычка")
+				return nil, errors.New(i18n.T("unclosed quote"))
 			}
 			body := cmd[i+1 : i+1+j]
 			if strings.ContainsAny(body, "$`\\") {
-				return nil, fmt.Errorf("подстановка внутри кавычек")
+				return nil, errors.New(i18n.T("substitution inside quotes"))
 			}
 			cur.WriteString(body)
 			inWord = true
@@ -81,19 +83,19 @@ func splitPipeline(cmd string) ([][]string, error) {
 			flush()
 		case c == '|':
 			if i+1 < len(cmd) && cmd[i+1] == '|' {
-				return nil, fmt.Errorf("оператор ||")
+				return nil, errors.New(i18n.T("operator ||"))
 			}
 			flush()
 			segs = append(segs, words)
 			words = nil
 		case strings.IndexByte(";&<>`$(){}\\\n\r!#~", c) >= 0:
-			return nil, fmt.Errorf("спецсимвол %q", string(c))
+			return nil, i18n.Errorf("special character %q", string(c))
 		case c < 0x20 || c == 0x7f:
-			return nil, fmt.Errorf("управляющий символ")
+			return nil, errors.New(i18n.T("control character"))
 		case c == '*' || c == '?' || c == '[':
 			// The remote shell would expand it into names nobody checked
 			// (a file named -exec turns into a find action).
-			return nil, fmt.Errorf("шаблон имён без кавычек")
+			return nil, errors.New(i18n.T("unquoted file name pattern"))
 		default:
 			cur.WriteByte(c)
 			inWord = true
@@ -143,7 +145,7 @@ func hasArg(words []string, bad ...string) string {
 func checkProgram(words []string) string {
 	prog := words[0]
 	if strings.ContainsAny(prog, "/=") {
-		return "команда задана путём или с переменной окружения"
+		return i18n.T("the command is given by a path or with an environment variable")
 	}
 	if anyArgs[prog] {
 		return ""
@@ -157,7 +159,7 @@ func checkProgram(words []string) string {
 	case "hostname":
 		for _, w := range words[1:] {
 			if !hostnameFlags[w] {
-				return "hostname " + w + " меняет имя хоста"
+				return i18n.T("hostname %s changes the host name", w)
 			}
 		}
 		return ""
@@ -168,19 +170,19 @@ func checkProgram(words []string) string {
 		return ""
 	case "sensors":
 		if a := hasArg(words, "-s", "--set"); a != "" {
-			return "sensors " + a + " меняет пороги"
+			return i18n.T("sensors %s changes thresholds", a)
 		}
 		return ""
 	case "file":
 		if a := hasArg(words, "-C", "--compile"); a != "" {
-			return "file " + a + " пишет файл"
+			return i18n.T("file %s writes a file", a)
 		}
 		return ""
 	case "uniq":
 		// uniq [INPUT [OUTPUT]]: "-" is stdin and still an operand.
 		pos, why := parseOpts(words, uniqOpts)
 		if why == "" && len(pos) > 1 {
-			why = "uniq с файлом вывода"
+			why = i18n.T("uniq with an output file")
 		}
 		return why
 	case "dmesg":
@@ -203,7 +205,7 @@ func checkProgram(words []string) string {
 			"list-units", "list-unit-files", "list-timers", "list-sockets", "list-dependencies", "list-jobs"), true)
 	case "top":
 		if hasArg(words, "-b") == "" {
-			return "top без -b"
+			return i18n.T("top without -b")
 		}
 		return ""
 	case "hostnamectl", "timedatectl", "loginctl", "networkctl", "resolvectl":
@@ -214,7 +216,7 @@ func checkProgram(words []string) string {
 	case "docker":
 		return checkDocker(words)
 	}
-	return prog + " нет в списке команд только для чтения"
+	return i18n.T("%s is not in the read-only command list", prog)
 }
 
 // opts maps an allowed option to whether it takes a value. Anything not in
@@ -250,10 +252,10 @@ func parseOpts(words []string, o opts) ([]string, string) {
 			name, _, hasVal := strings.Cut(w, "=")
 			takes, ok := o[name]
 			if !ok {
-				return nil, prog + " " + name + " нет в списке безопасных опций"
+				return nil, i18n.T("%s %s is not in the safe option list", prog, name)
 			}
 			if hasVal && !takes {
-				return nil, prog + " " + name + " без значения"
+				return nil, i18n.T("%s %s without a value", prog, name)
 			}
 			if takes && !hasVal {
 				i++
@@ -264,7 +266,7 @@ func parseOpts(words []string, o opts) ([]string, string) {
 				f := "-" + string(w[j])
 				takes, ok := o[f]
 				if !ok {
-					return nil, prog + " " + f + " нет в списке безопасных опций"
+					return nil, i18n.T("%s %s is not in the safe option list", prog, f)
 				}
 				if takes {
 					if j == len(w)-1 {
@@ -289,7 +291,7 @@ func checkSub(words []string, o opts, allowed map[string]bool, emptyOK bool) str
 		if emptyOK {
 			return ""
 		}
-		return words[0] + " без подкоманды"
+		return i18n.T("%s without a subcommand", words[0])
 	}
 	if !allowed[pos[0]] {
 		return words[0] + " " + pos[0]
@@ -333,11 +335,11 @@ func checkIP(words []string) string {
 	i := 1
 	for ; i < len(words) && strings.HasPrefix(words[i], "-"); i++ {
 		if !ipFlags[words[i]] {
-			return "ip " + words[i] + " нет в списке безопасных опций"
+			return i18n.T("%s %s is not in the safe option list", "ip", words[i])
 		}
 	}
 	if i == len(words) {
-		return "ip без объекта"
+		return i18n.T("ip without an object")
 	}
 	obj := words[i]
 	if !ipObjects[obj] {
@@ -382,11 +384,11 @@ func checkDocker(words []string) string {
 		if sub == "--version" || sub == "-v" {
 			return ""
 		}
-		return "глобальные флаги docker"
+		return i18n.T("docker global flags")
 	}
 	if dockerRead[sub] {
 		if sub == "stats" && hasArg(words, "--no-stream") == "" {
-			return "docker stats без --no-stream"
+			return i18n.T("docker stats without --no-stream")
 		}
 		return ""
 	}
@@ -397,7 +399,7 @@ func checkDocker(words []string) string {
 	for _, w := range words[2:] {
 		name, _, _ := strings.Cut(w, "=")
 		if dockerFileOpts[name] || (len(w) > 2 && w[0] == '-' && w[1] != '-' && strings.ContainsRune(w[1:], 'o')) {
-			return "docker " + sub + " " + w + " пишет в файл"
+			return i18n.T("docker %s %s writes to a file", sub, w)
 		}
 	}
 	for i := 2; i < len(words); i++ {
@@ -409,7 +411,7 @@ func checkDocker(words []string) string {
 			name, _, hasVal := strings.Cut(w, "=")
 			takes, ok := composeGlobal[name]
 			if !ok {
-				return "docker compose " + name + " нет в списке безопасных опций"
+				return i18n.T("%s %s is not in the safe option list", "docker compose", name)
 			}
 			if takes && !hasVal {
 				i++
@@ -420,11 +422,11 @@ func checkDocker(words []string) string {
 			return "docker " + sub + " " + w
 		}
 		if w == "stats" && hasArg(words, "--no-stream") == "" {
-			return "docker stats без --no-stream"
+			return i18n.T("docker stats without --no-stream")
 		}
 		return ""
 	}
-	return "docker " + sub + " без подкоманды"
+	return i18n.T("%s without a subcommand", "docker "+sub)
 }
 
 var hostnameFlags = set("-s", "-f", "-d", "-i", "-I", "-A", "-a", "-y", "--short", "--fqdn", "--long", "--domain",
@@ -454,7 +456,7 @@ func checkSort(words []string) string {
 				continue
 			}
 			if hasVal || !sortLong[name] {
-				return "sort " + name + " нет в списке безопасных опций"
+				return i18n.T("%s %s is not in the safe option list", "sort", name)
 			}
 		default:
 			for j := 1; j < len(w); j++ {
@@ -466,7 +468,7 @@ func checkSort(words []string) string {
 					break
 				}
 				if strings.IndexByte(sortShort, c) < 0 {
-					return "sort -" + string(c) + " нет в списке безопасных опций"
+					return i18n.T("%s %s is not in the safe option list", "sort", "-"+string(c))
 				}
 			}
 		}
@@ -487,7 +489,7 @@ func checkDate(words []string) string {
 		case strings.HasPrefix(w, "--"):
 			name, _, hasVal := strings.Cut(w, "=")
 			if !dateLong[name] {
-				return "date " + name + " нет в списке безопасных опций"
+				return i18n.T("%s %s is not in the safe option list", "date", name)
 			}
 			if !hasVal && (name == "--date" || name == "--file" || name == "--reference") {
 				i++
@@ -505,11 +507,11 @@ func checkDate(words []string) string {
 					}
 					break short
 				default:
-					return "date -" + string(w[j]) + " нет в списке безопасных опций"
+					return i18n.T("%s %s is not in the safe option list", "date", "-"+string(w[j]))
 				}
 			}
 		default:
-			return "date " + w + " ставит время"
+			return i18n.T("date %s sets the time", w)
 		}
 	}
 	return ""

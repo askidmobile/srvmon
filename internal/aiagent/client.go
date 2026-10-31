@@ -11,6 +11,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/askidmobile/srvmon/internal/i18n"
 )
 
 // Event is one line of the NDJSON stream srvmon-ai sends for a run:
@@ -52,6 +54,9 @@ type RunRequest struct {
 	// Model overrides the default model for this run (a model id of the
 	// configured provider).
 	Model string `json:"model,omitempty"`
+	// Lang is the language the agent replies in, as an English name
+	// ("Russian"); empty: the current panel language.
+	Lang string `json:"lang,omitempty"`
 }
 
 // Config is the model setup srvmon-ai runs with. srvmon keeps it (the key
@@ -192,6 +197,8 @@ func (c *Client) Status(ctx context.Context) (Status, error) {
 	defer resp.Body.Close()
 	var s Status
 	err = json.NewDecoder(io.LimitReader(resp.Body, 64<<10)).Decode(&s)
+	// srvmon-ai speaks English; its fixed messages have translations here.
+	s.Error = i18n.T(s.Error)
 	return s, err
 }
 
@@ -201,6 +208,9 @@ func (c *Client) Run(ctx context.Context, chatID int64, req RunRequest, fn func(
 	path := "/v1/run"
 	if chatID > 0 {
 		path = fmt.Sprintf("/v1/chats/%d/run", chatID)
+	}
+	if req.Lang == "" {
+		req.Lang = i18n.Name(i18n.Current())
 	}
 	resp, err := c.do(ctx, http.MethodPost, path, req)
 	if err != nil {
@@ -231,7 +241,7 @@ func (c *Client) Run(ctx context.Context, chatID int64, req RunRequest, fn func(
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		return errors.New("srvmon-ai оборвал ответ")
+		return errors.New(i18n.T("srvmon-ai cut the reply short"))
 	}
 	return nil
 }

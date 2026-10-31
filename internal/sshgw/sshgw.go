@@ -261,7 +261,7 @@ func (b *CappedBuffer) String() string {
 		for len(tail) > 0 && tail[0]&0xC0 == 0x80 {
 			tail = tail[1:]
 		}
-		return string(b.head) + fmt.Sprintf("\n[… пропущено %d байт …]\n", dropped) + string(tail)
+		return string(b.head) + fmt.Sprintf("\n[… %d bytes skipped …]\n", dropped) + string(tail)
 	}
 	return string(b.head) + string(tail)
 }

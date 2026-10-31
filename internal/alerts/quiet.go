@@ -4,10 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"time"
 	_ "time/tzdata" // distroless images have no zoneinfo
 
+	"github.com/askidmobile/srvmon/internal/i18n"
 	"github.com/askidmobile/srvmon/internal/store"
 )
 
@@ -40,7 +40,7 @@ func (q Quiet) Location() *time.Location {
 func parseHM(s string) (int, error) {
 	t, err := time.Parse("15:04", s)
 	if err != nil {
-		return 0, fmt.Errorf("время %q: нужен формат ЧЧ:ММ", s)
+		return 0, i18n.Errorf("time %q: HH:MM format needed", s)
 	}
 	return t.Hour()*60 + t.Minute(), nil
 }
@@ -48,7 +48,7 @@ func parseHM(s string) (int, error) {
 // Validate checks the format.
 func (q Quiet) Validate() error {
 	if (q.From == "") != (q.To == "") {
-		return errors.New("нужны оба времени или ни одного")
+		return errors.New(i18n.T("set both times or neither"))
 	}
 	if q.From != "" {
 		if _, err := parseHM(q.From); err != nil {
@@ -60,7 +60,7 @@ func (q Quiet) Validate() error {
 	}
 	if q.TZ != "" {
 		if _, err := time.LoadLocation(q.TZ); err != nil {
-			return fmt.Errorf("неизвестный часовой пояс %q", q.TZ)
+			return i18n.Errorf("unknown time zone %q", q.TZ)
 		}
 	}
 	return nil

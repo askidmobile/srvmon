@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/askidmobile/srvmon/internal/aiagent"
+	"github.com/askidmobile/srvmon/internal/i18n"
 	"github.com/askidmobile/srvmon/internal/store"
 )
 
@@ -74,18 +75,18 @@ func (s *Server) startTask(t store.AgentTask, trigger string) bool {
 
 func taskPrompt(t store.AgentTask) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "Это запуск задачи по расписанию #%d «%s» (%s, запуск: %s UTC).\n", t.ID, t.Name, t.Schedule,
+	fmt.Fprintf(&b, "This is a run of scheduled task #%d %q (%s, run at %s UTC).\n", t.ID, t.Name, t.Schedule,
 		time.Now().UTC().Format("2006-01-02 15:04"))
 	if len(t.Servers) > 0 {
-		fmt.Fprintf(&b, "Серверы задачи: %s.\n", strings.Join(t.Servers, ", "))
+		fmt.Fprintf(&b, "Task servers: %s.\n", strings.Join(t.Servers, ", "))
 	} else {
-		b.WriteString("Серверы задачи: все серверы srvmon.\n")
+		b.WriteString("Task servers: all srvmon servers.\n")
 	}
-	b.WriteString("Ответ сохранится как результат задачи")
+	b.WriteString("The reply is saved as the task result")
 	if t.Notify == "telegram" {
-		b.WriteString(" и уйдёт в Telegram, если начинается со строки ALERT")
+		b.WriteString(" and goes to Telegram if it starts with a line ALERT")
 	}
-	b.WriteString(". Будь краток: итог в 1–5 строках. Если всё в порядке, так и напиши одной строкой.\n\n")
+	b.WriteString(". Be brief: the outcome in 1–5 lines. If all is well, say so in one line.\n\n")
 	b.WriteString(t.Prompt)
 	return b.String()
 }
@@ -104,7 +105,7 @@ func (s *Server) runTask(t store.AgentTask, trigger string) {
 		if e == "" {
 			e = err.Error()
 		}
-		result = strings.TrimSpace(result + "\nошибка: " + e)
+		result = strings.TrimSpace(result + "\n" + i18n.T("error: %s", e))
 	}
 	result = truncate(result, taskResultMax)
 	if err := s.store.FinishAgentTask(context.Background(), t.ID, status, result); err != nil {
@@ -112,7 +113,7 @@ func (s *Server) runTask(t store.AgentTask, trigger string) {
 	}
 	_ = s.store.Audit(context.Background(), "agent", "agent_task_run", fmt.Sprintf("%s %s", t.Name, status))
 	if t.Notify == "telegram" && s.notify != nil && (status == "error" || strings.HasPrefix(result, "ALERT")) {
-		text := fmt.Sprintf("🤖 <b>задача #%d %s</b>\n%s", t.ID, html.EscapeString(t.Name), html.EscapeString(result))
+		text := "🤖 " + i18n.T("<b>task #%d %s</b>\n%s", t.ID, html.EscapeString(t.Name), html.EscapeString(result))
 		if err := s.notify(context.Background(), text); err != nil {
 			s.log.Warn("agent task notify", "err", err)
 		}

@@ -35,7 +35,7 @@ async function call(ctx: ToolContext, method: string, path: string, body: unknow
   }
   if (!res.ok) {
     const d = data as { error?: string; hint?: string; field?: string };
-    const msg = [d?.error ?? `HTTP ${res.status}`, d?.field && `поле ${d.field}`, d?.hint].filter(Boolean).join(": ");
+    const msg = [d?.error ?? `HTTP ${res.status}`, d?.field && `field ${d.field}`, d?.hint].filter(Boolean).join(": ");
     throw new ToolApiError(msg);
   }
   return data;
@@ -43,7 +43,7 @@ async function call(ctx: ToolContext, method: string, path: string, body: unknow
 
 function text(v: unknown) {
   let s = typeof v === "string" ? v : JSON.stringify(v, null, 1);
-  if (s.length > MAX_RESULT) s = s.slice(0, MAX_RESULT) + "\n…(обрезано)";
+  if (s.length > MAX_RESULT) s = s.slice(0, MAX_RESULT) + "\n…(truncated)";
   return { content: [{ type: "text" as const, text: s }], details: {} };
 }
 
@@ -60,12 +60,12 @@ export function formatExec(r: ExecResult): string {
   const head: string[] = [];
   switch (r.status) {
     case "rejected":
-      return `Владелец ОТКЛОНИЛ команду (действие #${r.action_id}). Не повторяй её без нового запроса; предложи альтернативу или спроси.`;
+      return `The owner REJECTED the command (action #${r.action_id}). Do not repeat it without a new request; offer an alternative or ask.`;
     case "expired":
-      return `Команду никто не подтвердил вовремя (действие #${r.action_id}), она НЕ выполнена.`;
+      return `Nobody confirmed the command in time (action #${r.action_id}); it did NOT run.`;
   }
-  head.push(r.read_only ? "выполнено сразу (только чтение)" : `выполнено после подтверждения (действие #${r.action_id})`);
-  if (r.exit_code !== undefined) head.push(`код выхода ${r.exit_code}`);
+  head.push(r.read_only ? "ran at once (read-only)" : `ran after confirmation (action #${r.action_id})`);
+  if (r.exit_code !== undefined) head.push(`exit code ${r.exit_code}`);
   if (r.note) head.push(r.note);
   return `[${head.join(", ")}]\n${r.output ?? ""}`;
 }
@@ -73,10 +73,10 @@ export function formatExec(r: ExecResult): string {
 export function srvmonTools(ctx: ToolContext): ToolDefinition[] {
   const servers = defineTool({
     name: "srvmon_servers",
-    label: "серверы",
+    label: "servers",
     description:
-      "Список серверов srvmon с текущими метриками: онлайн, CPU, память, максимальная занятость диска, контейнеры, есть ли ssh-доступ.",
-    promptSnippet: "srvmon_servers: список серверов и их состояние",
+      "The srvmon servers with current metrics: online, CPU, memory, the fullest disk, containers, whether there is ssh access.",
+    promptSnippet: "srvmon_servers: the servers and their state",
     parameters: Type.Object({}),
     async execute(_id, _p, signal) {
       return text(await call(ctx, "GET", "/tools/servers", undefined, signal));
@@ -85,11 +85,11 @@ export function srvmonTools(ctx: ToolContext): ToolDefinition[] {
 
   const server = defineTool({
     name: "srvmon_server",
-    label: "сервер",
+    label: "server",
     description:
-      "Подробности одного сервера: метрики, диски, все docker-контейнеры со статусом и health, ОС, последние предупреждения из логов.",
-    promptSnippet: "srvmon_server: подробности сервера и его контейнеров",
-    parameters: Type.Object({ server: Type.String({ description: "имя сервера из srvmon_servers" }) }),
+      "Details of one server: metrics, disks, all docker containers with status and health, OS, recent warnings from the logs.",
+    promptSnippet: "srvmon_server: details of a server and its containers",
+    parameters: Type.Object({ server: Type.String({ description: "server name from srvmon_servers" }) }),
     async execute(_id, p, signal) {
       return text(await call(ctx, "GET", `/tools/servers/${encodeURIComponent(p.server)}`, undefined, signal));
     },
@@ -97,23 +97,23 @@ export function srvmonTools(ctx: ToolContext): ToolDefinition[] {
 
   const exec = defineTool({
     name: "srvmon_exec",
-    label: "выполнить",
+    label: "run",
     description:
-      "Выполнить shell-команду на сервере через SSH-шлюз srvmon (пользователь srvmon, группа docker). " +
-      "Команды только для чтения (docker ps/logs/inspect, df, free, journalctl, systemctl status, cat, grep, конвейеры через | и т.п.) выполняются сразу. " +
-      "Любая другая команда (restart, up -d, rm, sudo, запись в файлы, ; && > и т.п.) ждёт подтверждения владельца в панели — до 15 минут — и выполняется только после него. " +
-      "Шаблоны имён (* ? [) без кавычек тоже требуют подтверждения: для чтения используй find -name '*.log' или конкретные пути. " +
-      "Таймаут: 60 с для чтения, 10 минут для подтверждённых команд. Вывод обрезается до 32 КБ.",
-    promptSnippet: "srvmon_exec: команда на сервере (изменения — после подтверждения владельца)",
+      "Run a shell command on a server through the srvmon SSH gateway (user srvmon, docker group). " +
+      "Read-only commands (docker ps/logs/inspect, df, free, journalctl, systemctl status, cat, grep, pipelines with | and so on) run at once. " +
+      "Any other command (restart, up -d, rm, sudo, writing files, ; && > and so on) waits for the owner's confirmation in the panel, up to 15 minutes, and runs only after it. " +
+      "Unquoted name patterns (* ? [) also need confirmation: to read, use find -name '*.log' or exact paths. " +
+      "Timeout: 60 s for reads, 10 minutes for confirmed commands. Output is cut to 32 KB.",
+    promptSnippet: "srvmon_exec: a command on a server (changes only after the owner confirms)",
     promptGuidelines: [
-      "srvmon_exec: перед изменяющей командой коротко объясни в reason, что и зачем она меняет — владелец видит это рядом с кнопкой подтверждения.",
-      "srvmon_exec: одна изменяющая команда = одно подтверждение; не склеивай несвязанные изменения и не прячь их в конвейеры.",
-      "srvmon_exec: не пытайся обойти подтверждение (eval, base64, скрипты в файлах и т.п.).",
+      "srvmon_exec: before a changing command, briefly explain in reason what it changes and why (in the language of the conversation): the owner sees it next to the confirm button.",
+      "srvmon_exec: one changing command = one confirmation; do not glue unrelated changes together or hide them in pipelines.",
+      "srvmon_exec: do not try to get around the confirmation (eval, base64, scripts in files and so on).",
     ],
     parameters: Type.Object({
-      server: Type.String({ description: "имя сервера" }),
-      command: Type.String({ description: "команда для sh -c" }),
-      reason: Type.Optional(Type.String({ description: "зачем нужна команда (для подтверждения владельцем)" })),
+      server: Type.String({ description: "server name" }),
+      command: Type.String({ description: "command for sh -c" }),
+      reason: Type.Optional(Type.String({ description: "why the command is needed (shown to the owner for confirmation)" })),
     }),
     async execute(_id, p, signal) {
       const r = (await call(
@@ -130,9 +130,9 @@ export function srvmonTools(ctx: ToolContext): ToolDefinition[] {
 
   const tasks = defineTool({
     name: "srvmon_tasks",
-    label: "задачи",
-    description: "Список задач агента по расписанию: id, имя, расписание (cron UTC), промпт, серверы, уведомление, последний результат.",
-    promptSnippet: "srvmon_tasks: задачи по расписанию",
+    label: "tasks",
+    description: "The agent's scheduled tasks: id, name, schedule (cron UTC), prompt, servers, notification, last result.",
+    promptSnippet: "srvmon_tasks: scheduled tasks",
     parameters: Type.Object({}),
     async execute(_id, _p, signal) {
       return text(await call(ctx, "GET", "/tools/tasks", undefined, signal));
@@ -141,17 +141,17 @@ export function srvmonTools(ctx: ToolContext): ToolDefinition[] {
 
   const taskCreate = defineTool({
     name: "srvmon_task_create",
-    label: "новая задача",
+    label: "new task",
     description:
-      "Создать задачу мониторинга: srvmon будет по расписанию запускать агента с этим промптом. " +
-      "schedule — cron из 5 полей в UTC (не чаще раза в 5 минут, например '*/15 * * * *') или '@every 30m'. " +
-      "notify='telegram' — при ошибке или ответе, начинающемся с ALERT, придёт уведомление в Telegram.",
-    promptSnippet: "srvmon_task_create: создать задачу по расписанию",
+      "Create a monitoring task: srvmon runs the agent with this prompt on a schedule. " +
+      "schedule: a 5-field cron in UTC (at most every 5 minutes, for example '*/15 * * * *') or '@every 30m'. " +
+      "notify='telegram': an error or a reply starting with ALERT sends a Telegram notification.",
+    promptSnippet: "srvmon_task_create: create a scheduled task",
     parameters: Type.Object({
-      name: Type.String({ description: "короткое имя, например restart-watch" }),
+      name: Type.String({ description: "a short name, for example restart-watch" }),
       schedule: Type.String(),
-      prompt: Type.String({ description: "что проверять и когда поднимать тревогу (ответ с ALERT)" }),
-      servers: Type.Optional(Type.Array(Type.String(), { description: "имена серверов; пусто = все" })),
+      prompt: Type.String({ description: "what to check and when to raise an alarm (a reply with ALERT)" }),
+      servers: Type.Optional(Type.Array(Type.String(), { description: "server names; empty = all" })),
       notify: Type.Optional(Type.Union([Type.Literal(""), Type.Literal("telegram")])),
     }),
     async execute(_id, p, signal) {
@@ -169,8 +169,8 @@ export function srvmonTools(ctx: ToolContext): ToolDefinition[] {
 
   const taskDelete = defineTool({
     name: "srvmon_task_delete",
-    label: "удалить задачу",
-    description: "Удалить задачу по id.",
+    label: "delete task",
+    description: "Delete a task by id.",
     parameters: Type.Object({ id: Type.Integer() }),
     async execute(_id, p, signal) {
       return text(await call(ctx, "DELETE", `/tools/tasks/${p.id}`, undefined, signal));

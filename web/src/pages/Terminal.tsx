@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Panel } from "@/components/ui/panel";
 import { type TermStatus, XTerm } from "@/components/XTerm";
 import { api, type ServerView } from "@/lib/api";
+import { t } from "@/lib/i18n";
 import { href, type Route } from "@/lib/router";
 import { cn } from "@/lib/utils";
 
@@ -136,24 +137,24 @@ export function TerminalPage({
               ssh ed25519 · {curServer.host}:{curServer.port || 22}
             </span>
             {size[cur.key] && <span>{size[cur.key]}</span>}
-            <span>через srvmon-gateway</span>
-            <span>{cur.status === "open" ? "подключено" : cur.status === "closed" ? "закрыто" : "подключение…"}</span>
+            <span>{t("via srvmon-gateway")}</span>
+            <span>{cur.status === "open" ? t("connected") : cur.status === "closed" ? t("closed") : t("connecting…")}</span>
             {cur.status === "closed" && (
               <button type="button" className="text-primary" onClick={() => open(cur.serverId, cur.container)}>
-                ⟳ переподключить
+                ⟳ {t("reconnect")}
               </button>
             )}
           </>
         ) : (
           <>
-            <Hotkey k="esc">к сессии</Hotkey>
-            <span className="text-muted-foreground">нет открытых сессий</span>
+            <Hotkey k="esc">{t("to the session")}</Hotkey>
+            <span className="text-muted-foreground">{t("no open sessions")}</span>
           </>
         )
       }
       footerNote={
         <>
-          <Hotkey k="F9">агент ⇄ терминал</Hotkey> · приватный ключ не покидает сервер мониторинга
+          <Hotkey k="F9">{t("agent ⇄ terminal")}</Hotkey> · {t("the private key never leaves the monitoring server")}
         </>
       }
     >
@@ -161,30 +162,30 @@ export function TerminalPage({
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           <div className="flex items-end gap-1">
             <div className="flex min-w-0 flex-1 items-end gap-1 overflow-x-auto [scrollbar-width:thin]">
-              {tabs.map((t, i) => (
+              {tabs.map((tab, i) => (
                 <div
-                  key={t.key}
+                  key={tab.key}
                   className={cn(
                     "flex h-8 shrink-0 items-center border border-b-0",
-                    t.key === active ? "border-primary bg-[#12361d] text-hi" : "border-border",
+                    tab.key === active ? "border-primary bg-[#12361d] text-hi" : "border-border",
                   )}
                 >
-                  <button type="button" className="h-full pl-3 pr-2 whitespace-nowrap" onClick={() => setActive(t.key)}>
+                  <button type="button" className="h-full pl-3 pr-2 whitespace-nowrap" onClick={() => setActive(tab.key)}>
                     <span
                       className={cn(
                         "mr-1.5",
-                        t.status === "open" ? "text-primary" : t.status === "closed" ? "text-crit" : "text-warn",
+                        tab.status === "open" ? "text-primary" : tab.status === "closed" ? "text-crit" : "text-warn",
                       )}
                     >
                       ●
                     </span>
-                    [{i + 1}] {label(t)}
+                    [{i + 1}] {label(tab)}
                   </button>
                   <button
                     type="button"
                     className="h-full pr-2.5 text-muted-foreground hover:text-crit"
-                    aria-label="закрыть сессию"
-                    onClick={() => close(t.key)}
+                    aria-label={t("close the session")}
+                    onClick={() => close(tab.key)}
                   >
                     ×
                   </button>
@@ -192,7 +193,7 @@ export function TerminalPage({
               ))}
             </div>
             <Button variant="outline" className="h-8" onClick={() => setPicker((p) => !p)}>
-              + сессия
+              + {t("session")}
             </Button>
           </div>
 
@@ -216,13 +217,13 @@ export function TerminalPage({
 
             {picker && (
               <div className="absolute inset-0 z-10 overflow-auto bg-background/95 p-5">
-                <Panel title="новая сессия" className="mx-auto max-w-3xl">
-                  {servers === null && <div className="text-muted-foreground">загрузка…</div>}
+                <Panel title={t("new session")} className="mx-auto max-w-3xl">
+                  {servers === null && <div className="text-muted-foreground">{t("loading…")}</div>}
                   {servers && withSSH.length === 0 && (
                     <div className="text-muted-foreground">
-                      нет серверов с ssh-доступом. Добавьте сервер через{" "}
+                      {t("No servers with ssh access. Add one with the")}{" "}
                       <a className="text-primary" href={href.add()}>
-                        мастер
+                        {t("wizard")}
                       </a>
                       .
                     </div>
@@ -260,7 +261,7 @@ export function TerminalPage({
                   </div>
                   {withoutSSH.length > 0 && (
                     <div className="mt-4 text-xs text-muted-foreground">
-                      без ssh-доступа:{" "}
+                      {t("without ssh access:")}{" "}
                       {withoutSSH.map((s, i) => (
                         <span key={s.id}>
                           {i > 0 && ", "}
@@ -269,13 +270,13 @@ export function TerminalPage({
                           </a>
                         </span>
                       ))}{" "}
-                      — нажмите, чтобы подключить
+                      — {t("click to connect")}
                     </div>
                   )}
                   {tabs.length > 0 && (
                     <div className="mt-4">
                       <Button variant="ghost" size="sm" onClick={() => setPicker(false)}>
-                        esc · вернуться к сессии
+                        esc · {t("back to the session")}
                       </Button>
                     </div>
                   )}

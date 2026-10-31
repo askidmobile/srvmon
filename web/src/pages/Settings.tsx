@@ -11,7 +11,8 @@ import {
   type AISettingsInput,
   type AITest,
 } from "@/lib/agent";
-import { ApiError } from "@/lib/api";
+import { api as panelApi, ApiError } from "@/lib/api";
+import { LANGS, type Lang, setLang, t, tn, useLang } from "@/lib/i18n";
 import { type Route } from "@/lib/router";
 import { cn } from "@/lib/utils";
 
@@ -25,28 +26,28 @@ const customAPIs: { id: string; name: string }[] = [
   { id: "anthropic-messages", name: "Anthropic Messages (/v1/messages)" },
 ];
 const thinkingLevels = [
-  { id: "off", name: "выкл." },
-  { id: "minimal", name: "минимум" },
-  { id: "low", name: "низкий" },
-  { id: "medium", name: "средний" },
-  { id: "high", name: "высокий" },
+  { id: "off", name: "off" },
+  { id: "minimal", name: "minimal" },
+  { id: "low", name: "low" },
+  { id: "medium", name: "medium" },
+  { id: "high", name: "high" },
 ];
 
 const fieldNames: Record<string, string> = {
-  provider: "провайдер",
-  base_url: "адрес API",
-  api: "протокол",
-  model: "модель",
-  models: "список моделей",
-  thinking: "размышления",
-  api_key: "ключ API",
+  provider: "provider",
+  base_url: "API address",
+  api: "protocol",
+  model: "model",
+  models: "model list",
+  thinking: "thinking",
+  api_key: "API key",
 };
 
 function errText(e: unknown, fallback: string) {
   if (e instanceof ApiError) {
-    if (fieldNames[e.code]) return `проверьте поле «${fieldNames[e.code]}»`;
-    if (e.code === "ai_unavailable") return "srvmon-ai недоступен";
-    if (e.code === "agent_disabled") return "агент выключен: нет контейнера srvmon-ai";
+    if (fieldNames[e.code]) return t("check the field “{field}”", { field: t(fieldNames[e.code]) });
+    if (e.code === "ai_unavailable") return t("srvmon-ai is unavailable");
+    if (e.code === "agent_disabled") return t("the agent is off: no srvmon-ai container");
   }
   return fallback;
 }
@@ -66,6 +67,50 @@ function Field({ label, htmlFor, hint, children }: { label: string; htmlFor?: st
 function ctxText(n?: number) {
   if (!n) return "";
   return n >= 1_000_000 ? `${Math.round(n / 100_000) / 10}M` : `${Math.round(n / 1000)}k`;
+}
+
+// Interface language. Stored on the server: Telegram messages and the AI
+// agent use it too.
+function LanguagePanel() {
+  const cur = useLang();
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const change = async (l: Lang) => {
+    setBusy(true);
+    setErr("");
+    try {
+      await panelApi.setLanguage(l);
+      setLang(l);
+    } catch (e) {
+      setErr(errText(e, t("could not save")));
+    }
+    setBusy(false);
+  };
+  return (
+    <Panel title={t("language")}>
+      <div className="flex flex-col gap-2">
+        <div className="flex flex-wrap gap-2" role="radiogroup" aria-label={t("language")}>
+          {LANGS.map((l) => (
+            <Button
+              key={l.code}
+              size="sm"
+              variant={l.code === cur ? "default" : "outline"}
+              role="radio"
+              aria-checked={l.code === cur}
+              disabled={busy}
+              onClick={() => l.code !== cur && void change(l.code)}
+            >
+              {l.name}
+            </Button>
+          ))}
+        </div>
+        {err && <div className="text-sm text-crit">{err}</div>}
+        <div className="text-xs text-muted-foreground">
+          {t("The language of the panel, Telegram bot messages and AI agent replies.")}
+        </div>
+      </div>
+    </Panel>
+  );
 }
 
 function AIPanel() {
@@ -106,7 +151,7 @@ function AIPanel() {
     agentApi
       .settings()
       .then(fill)
-      .catch((e) => setLoadErr(errText(e, "не удалось загрузить настройки")));
+      .catch((e) => setLoadErr(errText(e, t("could not load the settings"))));
     agentApi
       .providers()
       .then(setProviders)
@@ -158,7 +203,7 @@ function AIPanel() {
         setOnlyLive(r.live);
       }
     } catch (e) {
-      if (endpointRef.current === asked) setMsg({ ok: false, text: errText(e, "не удалось получить список моделей") });
+      if (endpointRef.current === asked) setMsg({ ok: false, text: errText(e, t("could not get the model list")) });
     }
     setBusy("");
   };
@@ -189,9 +234,9 @@ function AIPanel() {
     ...(apiKey !== undefined ? { api_key: apiKey } : {}),
   });
 
-  const save = async (apiKey?: string, okText = "сохранено") => {
+  const save = async (apiKey?: string, okText = t("saved")) => {
     if (!model) {
-      setMsg({ ok: false, text: "выберите модель по умолчанию" });
+      setMsg({ ok: false, text: t("pick a default model") });
       return;
     }
     setBusy("save");
@@ -202,7 +247,7 @@ function AIPanel() {
       fill(v);
       setMsg(v.error ? { ok: false, text: v.error } : { ok: true, text: okText });
     } catch (e) {
-      setMsg({ ok: false, text: errText(e, "не удалось сохранить") });
+      setMsg({ ok: false, text: errText(e, t("could not save")) });
     }
     setBusy("");
   };
@@ -213,7 +258,7 @@ function AIPanel() {
     try {
       setTest(await agentApi.test());
     } catch (e) {
-      setTest({ ok: false, error: errText(e, "нет связи с srvmon-ai") });
+      setTest({ ok: false, error: errText(e, t("no connection to srvmon-ai")) });
     }
     setBusy("");
   };
@@ -224,45 +269,52 @@ function AIPanel() {
     return list.filter((m) => (!onlyLive || m.live || picked.includes(m.id)) && (!q || m.id.toLowerCase().includes(q) || (m.name ?? "").toLowerCase().includes(q)));
   }, [list, filter, onlyLive, picked]);
 
-  if (loadErr) return <Panel title="AI-агент">{<div className="text-crit">{loadErr}</div>}</Panel>;
-  if (!s) return <Panel title="AI-агент">загрузка…</Panel>;
+  if (loadErr) return <Panel title={t("AI agent")}>{<div className="text-crit">{loadErr}</div>}</Panel>;
+  if (!s) return <Panel title={t("AI agent")}>{t("loading…")}</Panel>;
 
   const st = s.status;
   const status = !st ? (
-    <span className="text-crit">✕ {s.error ?? "srvmon-ai недоступен"}</span>
+    <span className="text-crit">✕ {s.error ?? t("srvmon-ai is unavailable")}</span>
   ) : st.ready ? (
     <span className="text-primary">
-      ● готов · {st.provider} / {st.model}
+      ● {t("ready")} · {st.provider} / {st.model}
     </span>
   ) : (
-    <span className="text-warn">○ {st.error ?? "не готов"}</span>
+    <span className="text-warn">○ {st.error ?? t("not ready")}</span>
   );
   const defaultUrl = isCustom ? "https://api.example.com/v1" : prov?.base_url || "";
 
   return (
-    <Panel title="AI-агент" right={s.saved ? undefined : "сейчас из переменных окружения"}>
+    <Panel title={t("AI agent")} right={s.saved ? undefined : t("currently from environment variables")}>
       <div className="flex flex-col gap-3">
         <div className="text-sm">
-          <span className="text-muted-foreground">статус</span> {status}
+          <span className="text-muted-foreground">{t("status")}</span> {status}
         </div>
 
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-          <Field label="провайдер" htmlFor="ai-provider">
+          <Field label={t("provider")} htmlFor="ai-provider">
             <select id="ai-provider" className={fieldCls} value={provider} onChange={(e) => changeProvider(e.target.value)}>
               {!providers.some((p) => p.id === provider) && provider !== CUSTOM && <option value={provider}>{provider}</option>}
               {providers.map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.name}
-                  {(s.keys ?? []).includes(p.id) ? " · ключ сохранён" : ""}
+                  {(s.keys ?? []).includes(p.id) ? ` · ${t("key saved")}` : ""}
                 </option>
               ))}
-              <option value={CUSTOM}>Свой (OpenAI / Anthropic-совместимый){(s.keys ?? []).includes(CUSTOM) ? " · ключ сохранён" : ""}</option>
+              <option value={CUSTOM}>
+                {t("Custom (OpenAI / Anthropic compatible)")}
+                {(s.keys ?? []).includes(CUSTOM) ? ` · ${t("key saved")}` : ""}
+              </option>
             </select>
           </Field>
           <Field
-            label={isCustom ? "адрес API" : "адрес API (необязательно)"}
+            label={isCustom ? t("API address") : t("API address (optional)")}
             htmlFor="ai-url"
-            hint={isCustom ? "например http://ollama:11434/v1 или https://api.example.com/v1" : "для прокси или своего шлюза; пусто — адрес провайдера"}
+            hint={
+              isCustom
+                ? t("for example http://ollama:11434/v1 or https://api.example.com/v1")
+                : t("for a proxy or your own gateway; empty: the provider's address")
+            }
           >
             <input
               id="ai-url"
@@ -275,7 +327,7 @@ function AIPanel() {
             />
           </Field>
           {isCustom && (
-            <Field label="протокол" htmlFor="ai-api">
+            <Field label={t("protocol")} htmlFor="ai-api">
               <select id="ai-api" className={fieldCls} value={api} onChange={(e) => setApi(e.target.value)}>
                 {customAPIs.map((a) => (
                   <option key={a.id} value={a.id}>
@@ -286,23 +338,24 @@ function AIPanel() {
             </Field>
           )}
           <Field
-            label="ключ API"
+            label={t("API key")}
             htmlFor="ai-key"
             hint={
               keyStored ? (
                 <>
-                  сохранён{sameProvider && s.key_hint ? ` (${s.key_hint})` : ""}, хранится зашифрованным ·{" "}
+                  {t("saved")}
+                  {sameProvider && s.key_hint ? ` (${s.key_hint})` : ""}, {t("stored encrypted")} ·{" "}
                   <button
                     type="button"
                     className="text-crit hover:underline"
                     disabled={!!busy}
-                    onClick={() => confirm("Удалить ключ API этого провайдера?") && void save("", "ключ удалён")}
+                    onClick={() => confirm(t("Delete the API key of this provider?")) && void save("", t("key deleted"))}
                   >
-                    удалить
+                    {t("delete")}
                   </button>
                 </>
               ) : (
-                "хранится на сервере зашифрованным, в браузер не возвращается"
+                t("stored encrypted on the server, never sent back to the browser")
               )
             }
           >
@@ -312,15 +365,15 @@ function AIPanel() {
               autoComplete="off"
               className={fieldCls}
               value={key}
-              placeholder={keyStored ? "оставьте пустым, чтобы не менять" : isCustom ? "если нужен" : "sk-…"}
+              placeholder={keyStored ? t("leave empty to keep it") : isCustom ? t("if needed") : "sk-…"}
               onChange={(e) => setKey(e.target.value)}
             />
           </Field>
-          <Field label="размышления (для моделей с reasoning)" htmlFor="ai-thinking">
+          <Field label={t("thinking (for reasoning models)")} htmlFor="ai-thinking">
             <select id="ai-thinking" className={fieldCls} value={thinking} onChange={(e) => setThinking(e.target.value)}>
-              {thinkingLevels.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.name}
+              {thinkingLevels.map((lv) => (
+                <option key={lv.id} value={lv.id}>
+                  {t(lv.name)}
                 </option>
               ))}
             </select>
@@ -329,14 +382,14 @@ function AIPanel() {
 
         <div className="flex flex-col gap-2 border-t border-border/60 pt-3">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-sm text-muted-foreground">модели</span>
+            <span className="text-sm text-muted-foreground">{t("models")}</span>
             <span className="text-sm">
-              по умолчанию: <span className="text-hi">{model || "не выбрана"}</span>
-              {picked.length > 1 && <span className="text-muted-foreground"> · в чате на выбор: {picked.length}</span>}
+              {t("default:")} <span className="text-hi">{model || t("not selected")}</span>
+              {picked.length > 1 && <span className="text-muted-foreground"> · {t("selectable in chat: {n}", { n: picked.length })}</span>}
             </span>
             <span className="flex-1" />
             <Button size="sm" variant="outline" disabled={!!busy || (isCustom && !baseUrl.trim())} onClick={loadModels}>
-              {busy === "models" ? "загружаю…" : list ? "обновить список" : "загрузить список у провайдера"}
+              {busy === "models" ? t("loading…") : list ? t("refresh the list") : t("load the list from the provider")}
             </Button>
           </div>
 
@@ -345,12 +398,12 @@ function AIPanel() {
               {picked.map((m) => (
                 <span key={m} className={cn("flex items-center gap-1 border px-1.5 text-xs", m === model ? "border-primary text-primary" : "border-border text-hi")}>
                   {m === model ? "★" : (
-                    <button type="button" title="сделать моделью по умолчанию" className="text-muted-foreground hover:text-primary" onClick={() => makeDefault(m)}>
+                    <button type="button" title={t("make it the default model")} className="text-muted-foreground hover:text-primary" onClick={() => makeDefault(m)}>
                       ☆
                     </button>
                   )}
                   {m}
-                  <button type="button" aria-label={`убрать ${m}`} className="text-muted-foreground hover:text-crit" onClick={() => {
+                  <button type="button" aria-label={t("remove {m}", { m })} className="text-muted-foreground hover:text-crit" onClick={() => {
                     setPicked((p) => p.filter((x) => x !== m));
                     if (m === model) setModel(picked.find((x) => x !== m) ?? "");
                   }}>
@@ -364,8 +417,8 @@ function AIPanel() {
           {listInfo && (
             <div className={cn("text-xs", listInfo.live ? "text-muted-foreground" : "text-warn")}>
               {listInfo.live
-                ? `провайдер отдал ${list?.filter((m) => m.live).length ?? 0} моделей`
-                : `список у провайдера не получен: ${listInfo.error ?? "ошибка"}${list?.length ? " · показан каталог pi" : ""}`}
+                ? tn(list?.filter((m) => m.live).length ?? 0, "the provider returned {n} model", "the provider returned {n} models")
+                : `${t("could not get the list from the provider: {err}", { err: listInfo.error ?? t("error") })}${list?.length ? ` · ${t("showing the pi catalog")}` : ""}`}
             </div>
           )}
 
@@ -374,15 +427,15 @@ function AIPanel() {
               <div className="flex flex-wrap items-center gap-3">
                 <input
                   className={cn(fieldCls, "h-8 max-w-72")}
-                  placeholder="фильтр"
+                  placeholder={t("filter")}
                   value={filter}
                   onChange={(e) => setFilter(e.target.value)}
-                  aria-label="фильтр моделей"
+                  aria-label={t("model filter")}
                 />
                 {listInfo?.live && list.some((m) => !m.live) && (
                   <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
                     <input type="checkbox" checked={onlyLive} onChange={(e) => setOnlyLive(e.target.checked)} />
-                    только доступные по ключу
+                    {t("only available with the key")}
                   </label>
                 )}
               </div>
@@ -392,7 +445,7 @@ function AIPanel() {
                     {shown.slice(0, 300).map((m) => (
                       <tr key={m.id} className="border-t border-border/40 first:border-t-0 hover:bg-white/[0.02]">
                         <td className="w-8 py-1 pl-2">
-                          <input type="checkbox" checked={picked.includes(m.id)} onChange={() => togglePick(m.id)} aria-label={`в чате: ${m.id}`} />
+                          <input type="checkbox" checked={picked.includes(m.id)} onChange={() => togglePick(m.id)} aria-label={t("in chat: {id}", { id: m.id })} />
                         </td>
                         <td className="py-1 pr-2">
                           <span className={cn(m.id === model ? "text-primary" : "text-hi")}>{m.id}</span>
@@ -401,15 +454,15 @@ function AIPanel() {
                         <td className="py-1 pr-2 text-xs whitespace-nowrap text-muted-foreground">
                           {m.reasoning ? "reasoning · " : ""}
                           {ctxText(m.context)}
-                          {!m.catalog && !isCustom && " · нет в каталоге pi"}
-                          {listInfo?.live && !m.live && " · нет у провайдера"}
+                          {!m.catalog && !isCustom && ` · ${t("not in the pi catalog")}`}
+                          {listInfo?.live && !m.live && ` · ${t("not at the provider")}`}
                         </td>
                         <td className="py-1 pr-2 text-right">
                           {m.id === model ? (
-                            <span className="text-xs text-primary">★ по умолч.</span>
+                            <span className="text-xs text-primary">★ {t("default")}</span>
                           ) : (
                             <button type="button" className="text-xs text-muted-foreground hover:text-primary" onClick={() => makeDefault(m.id)}>
-                              по умолчанию
+                              {t("make default")}
                             </button>
                           )}
                         </td>
@@ -417,49 +470,52 @@ function AIPanel() {
                     ))}
                     {shown.length === 0 && (
                       <tr>
-                        <td className="p-2 text-muted-foreground">ничего не найдено</td>
+                        <td className="p-2 text-muted-foreground">{t("nothing found")}</td>
                       </tr>
                     )}
                   </tbody>
                 </table>
               </div>
-              {shown.length > 300 && <div className="text-xs text-muted-foreground">показаны первые 300 — уточните фильтр</div>}
+              {shown.length > 300 && <div className="text-xs text-muted-foreground">{t("showing the first 300, narrow the filter")}</div>}
             </>
           )}
 
           <div className="flex flex-wrap items-center gap-2">
             <input
               className={cn(fieldCls, "h-8 max-w-72")}
-              placeholder="или id модели вручную"
+              placeholder={t("or a model id by hand")}
               value={manual}
               onChange={(e) => setManual(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addManual())}
-              aria-label="id модели"
+              aria-label={t("model id")}
               spellCheck={false}
             />
             <Button size="sm" variant="ghost" disabled={!manual.trim()} onClick={addManual}>
-              добавить
+              {t("add")}
             </Button>
           </div>
         </div>
 
         <div className="flex flex-wrap items-center gap-2 border-t border-border/60 pt-3">
           <Button disabled={!!busy} onClick={() => void save(key.trim() || undefined)}>
-            {busy === "save" ? "сохраняю…" : "сохранить и применить"}
+            {busy === "save" ? t("saving…") : t("save and apply")}
           </Button>
           <Button variant="outline" disabled={!!busy || !st?.ready} onClick={runTest}>
-            {busy === "test" ? "проверяю…" : "проверить связь"}
+            {busy === "test" ? t("checking…") : t("test connection")}
           </Button>
           {msg && <span className={cn("text-sm", msg.ok ? "text-primary" : "text-crit")}>{msg.text}</span>}
         </div>
         {test && (
           <div className={cn("text-sm", test.ok ? "text-primary" : "text-crit")}>
-            {test.ok ? `✓ ${test.model} ответила за ${((test.ms ?? 0) / 1000).toFixed(1)} с: «${test.text}»` : `✕ ${test.error}`}
+            {test.ok
+              ? `✓ ${t("{model} replied in {s} s: “{text}”", { model: test.model ?? "", s: ((test.ms ?? 0) / 1000).toFixed(1), text: test.text ?? "" })}`
+              : `✕ ${test.error}`}
           </div>
         )}
         <div className="text-xs text-muted-foreground">
-          Применяется сразу, без перезапуска. Открытые чаты продолжат с новой моделью, история сохраняется. Отмеченные
-          модели можно выбрать для отдельного чата в панели агента.
+          {t(
+            "Applies at once, no restart. Open chats continue with the new model and keep their history. Checked models can be picked for a single chat in the agent panel.",
+          )}
         </div>
       </div>
     </Panel>
@@ -478,12 +534,13 @@ export function SettingsPage({ route, version, onLogout }: { route: Route; versi
       onLogout={onLogout}
       footer={
         <>
-          <Hotkey k="4">агент</Hotkey>
-          <Hotkey k="6">настройки</Hotkey>
+          <Hotkey k="4">{t("agent")}</Hotkey>
+          <Hotkey k="6">{t("settings")}</Hotkey>
         </>
       }
     >
-      <div className="max-w-5xl">
+      <div className="flex max-w-5xl flex-col gap-5">
+        <LanguagePanel />
         <AIPanel />
       </div>
     </Shell>

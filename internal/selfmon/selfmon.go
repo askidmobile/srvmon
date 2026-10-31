@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/askidmobile/srvmon/internal/auth"
+	"github.com/askidmobile/srvmon/internal/i18n"
 	"github.com/askidmobile/srvmon/internal/store"
 )
 
@@ -41,7 +42,7 @@ func Ensure(ctx context.Context, st *store.Store, name, tokenFile string) (bool,
 		id, err = st.CreateServer(ctx, store.Server{
 			Name:        name,
 			Group:       "infra",
-			Description: "сервер мониторинга",
+			Description: i18n.T("monitoring server"),
 			Tags:        []string{"srvmon"},
 		})
 	}

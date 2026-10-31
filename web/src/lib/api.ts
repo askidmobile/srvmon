@@ -38,6 +38,7 @@ export interface Me {
   authenticated: boolean;
   initialized: boolean;
   version: string;
+  lang?: string;
 }
 
 export interface Container {
@@ -106,6 +107,7 @@ export const api = {
   me: () => request<Me>("GET", "/api/auth/me"),
   password: (password: string) => request<{ next: string }>("POST", "/api/auth/password", { password }),
   totp: (code: string) => request<{ authenticated: boolean }>("POST", "/api/auth/totp", { code }),
+  setLanguage: (lang: string) => request<{ lang: string }>("PUT", "/api/settings/lang", { lang }),
   logout: () => request<unknown>("POST", "/api/auth/logout"),
   servers: () => request<ServerView[]>("GET", "/api/servers"),
   server: (id: number) => request<ServerDetailView>("GET", `/api/servers/${id}`),

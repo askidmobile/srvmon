@@ -23,6 +23,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/askidmobile/srvmon/internal/alerts"
+	"github.com/askidmobile/srvmon/internal/i18n"
 	"github.com/askidmobile/srvmon/internal/metrics"
 	"github.com/askidmobile/srvmon/internal/secret"
 	"github.com/askidmobile/srvmon/internal/store"
@@ -212,7 +213,7 @@ func (b *Bot) SendAction(id int64, text string) bool {
 		return false
 	}
 	ids := strconv.FormatInt(id, 10)
-	kb := [][]button{{{Text: "✓ выполнить", Data: "act:" + ids + ":ok"}, {Text: "✗ отклонить", Data: "act:" + ids + ":no"}}}
+	kb := [][]button{{{Text: "✓ " + i18n.T("run"), Data: "act:" + ids + ":ok"}, {Text: "✗ " + i18n.T("reject"), Data: "act:" + ids + ":no"}}}
 	select {
 	case b.out <- outMsg{text: text, keyboard: kb}:
 		return true
@@ -339,14 +340,17 @@ func (b *Bot) setError(err error) {
 	}
 }
 
-var commands = []map[string]string{
-	{"command": "status", "description": "сводка по серверам"},
-	{"command": "server", "description": "сервер подробно: /server <имя>"},
-	{"command": "alerts", "description": "активные алерты"},
-	{"command": "ack", "description": "подтвердить алерт: /ack <id>"},
-	{"command": "bills", "description": "ближайшие оплаты серверов"},
-	{"command": "ask", "description": "вопрос AI-агенту"},
-	{"command": "help", "description": "список команд"},
+// commands is the bot menu in the current language.
+func commands() []map[string]string {
+	return []map[string]string{
+		{"command": "status", "description": i18n.T("server summary")},
+		{"command": "server", "description": i18n.T("server details: /server <name>")},
+		{"command": "alerts", "description": i18n.T("active alerts")},
+		{"command": "ack", "description": i18n.T("acknowledge an alert: /ack <id>")},
+		{"command": "bills", "description": i18n.T("upcoming server payments")},
+		{"command": "ask", "description": i18n.T("ask the AI agent")},
+		{"command": "help", "description": i18n.T("list of commands")},
+	}
 }
 
 func (b *Bot) poll(ctx context.Context, token string) error {
@@ -357,9 +361,13 @@ func (b *Bot) poll(ctx context.Context, token string) error {
 	b.mu.Lock()
 	b.status.Connected, b.status.BotName, b.status.LastError = true, me, ""
 	b.mu.Unlock()
-	_ = b.call(ctx, token, "setMyCommands", map[string]any{"commands": commands}, nil)
 	var offset int64
+	var menuLang i18n.Lang // language of the registered command menu
 	for {
+		if l := i18n.Current(); l != menuLang {
+			_ = b.call(ctx, token, "setMyCommands", map[string]any{"commands": commands()}, nil)
+			menuLang = l
+		}
 		var updates []update
 		err := b.call(ctx, token, "getUpdates", map[string]any{
 			"offset": offset, "timeout": 50, "allowed_updates": []string{"message", "callback_query"},
@@ -463,8 +471,8 @@ func (b *Bot) unknownChat(ctx context.Context, token string, allowed int64, m *t
 	if allowed != 0 {
 		return
 	}
-	text := fmt.Sprintf("Это бот srvmon. Chat id этого чата: <code>%d</code>.\n"+
-		"Откройте в панели раздел «алерты» → telegram-бот и нажмите «использовать этот чат».", m.Chat.ID)
+	text := i18n.T("This is the srvmon bot. The chat id of this chat: <code>%d</code>.\n"+
+		"In the panel open “alerts” → telegram bot and press “use this chat”.", m.Chat.ID)
 	_ = b.send(ctx, token, m.Chat.ID, text, nil)
 }
 
@@ -536,7 +544,7 @@ func (b *Bot) Test(ctx context.Context) error {
 	if token == "" || chat == 0 {
 		return ErrNotConfigured
 	}
-	return b.send(ctx, token, chat, "✅ <b>srvmon</b>: тестовое сообщение. Уведомления будут приходить сюда.", nil)
+	return b.send(ctx, token, chat, "✅ "+i18n.T("<b>srvmon</b>: a test message. Notifications will arrive here."), nil)
 }
 
 func (b *Bot) send(ctx context.Context, token string, chat int64, text string, kb [][]button) error {
@@ -629,7 +637,7 @@ func (b *Bot) call(ctx context.Context, token, method string, params any, out an
 		if errors.As(err, &ue) {
 			err = ue.Err
 		}
-		return fmt.Errorf("telegram %s: нет связи с Bot API (%v)", method, err)
+		return i18n.Errorf("telegram %s: no connection to the Bot API (%v)", method, err)
 	}
 	defer resp.Body.Close()
 	var res struct {

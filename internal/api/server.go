@@ -20,6 +20,7 @@ import (
 	"github.com/askidmobile/srvmon/internal/alerts"
 	"github.com/askidmobile/srvmon/internal/auth"
 	"github.com/askidmobile/srvmon/internal/config"
+	"github.com/askidmobile/srvmon/internal/i18n"
 	"github.com/askidmobile/srvmon/internal/metrics"
 	"github.com/askidmobile/srvmon/internal/secret"
 	"github.com/askidmobile/srvmon/internal/store"
@@ -112,6 +113,11 @@ func New(o Options) *Server {
 		notify:          o.Notify,
 		onActionPending: o.OnActionPending,
 	}
+	// The interface language is one setting for the whole installation:
+	// Telegram, alerts and the agent use it too.
+	if v, err := o.Store.GetSetting(context.Background(), i18n.SettingKey); err == nil {
+		i18n.Set(v)
+	}
 	srv.alerts = alerts.New(o.Store, srv.latest, o.Log)
 	bot, err := telegram.New(context.Background(), telegram.Options{
 		Store: o.Store, Secrets: o.Secrets, Engine: srv.alerts, Latest: srv.latest, Log: o.Log, API: o.TelegramAPI,
@@ -162,6 +168,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/auth/totp", s.handleTOTP)
 	mux.HandleFunc("POST /api/auth/logout", s.handleLogout)
 	mux.HandleFunc("GET /api/auth/me", s.handleMe)
+	mux.Handle("PUT /api/settings/lang", s.requireSession(http.HandlerFunc(s.handleSetLang)))
 
 	mux.HandleFunc("POST /api/ingest", s.handleIngest)
 

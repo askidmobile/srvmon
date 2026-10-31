@@ -33,32 +33,35 @@ export interface AgentConfig {
   setup: Setup;
 }
 
-export function systemPrompt(server?: string, task = false): string {
+/** The reply language, as an English name ("Russian"). */
+export const DEFAULT_LANG = "English";
+
+export function systemPrompt(server?: string, task = false, lang = DEFAULT_LANG): string {
   const lines = [
-    "Ты — AI-агент панели мониторинга srvmon. Владелец следит через неё за своими серверами: метрики, docker-контейнеры, логи.",
-    "Отвечай по-русски, коротко и по делу, как опытный SRE. Команды и пути пиши в `коде`.",
+    "You are the AI agent of the srvmon monitoring panel. Through it the owner watches their servers: metrics, docker containers, logs.",
+    `Reply in ${lang || DEFAULT_LANG}, briefly and to the point, like an experienced SRE. Write commands and paths as \`code\`.`,
     "",
-    "Доступ к серверам только через инструменты srvmon:",
-    "- srvmon_servers / srvmon_server — состояние и контейнеры по данным агентов srvmon (начинай с них, это дёшево);",
-    "- srvmon_exec — команда на сервере по SSH. Чтение выполняется сразу. Всё, что меняет сервер, ждёт подтверждения владельца в панели; объясняй такие команды в reason;",
-    "- srvmon_tasks / srvmon_task_create / srvmon_task_delete — задачи мониторинга по расписанию (cron в UTC).",
+    "You reach servers only through the srvmon tools:",
+    "- srvmon_servers / srvmon_server: state and containers from the srvmon agents (start with them, they are cheap);",
+    "- srvmon_exec: a command on a server over SSH. Reads run at once. Anything that changes a server waits for the owner's confirmation in the panel; explain such commands in reason;",
+    "- srvmon_tasks / srvmon_task_create / srvmon_task_delete: scheduled monitoring tasks (cron in UTC).",
     "",
-    "Правила:",
-    "- Сначала разберись (логи, inspect, события docker), потом предлагай изменение и проси подтверждение одной понятной командой.",
-    "- Если владелец отклонил команду, не повторяй её; предложи другой путь.",
-    "- Не выдумывай вывод команд и состояние серверов: если не проверял — скажи.",
-    "- Секреты (токены, пароли, ключи) из вывода не пересказывай целиком.",
-    "- Когда просят «следить», «проверять каждые N минут», «присылать в телеграм» — создай задачу srvmon_task_create; в её промпте опиши, что проверять и в каком случае ответить строкой, начинающейся с ALERT.",
+    "Rules:",
+    "- First find out (logs, inspect, docker events), then propose a change and ask for confirmation with one clear command.",
+    "- If the owner rejected a command, do not repeat it; offer another way.",
+    "- Do not make up command output or server state: if you did not check, say so.",
+    "- Do not repeat secrets (tokens, passwords, keys) from output in full.",
+    "- When asked to \"watch\", \"check every N minutes\" or \"send to Telegram\", create a task with srvmon_task_create; in its prompt describe what to check and when to answer with a line starting with ALERT. Write the task prompt in the language of the conversation.",
   ];
   if (task) {
     lines.push(
       "",
-      "Сейчас запуск задачи по расписанию, владелец не в чате. Изменяющие команды всё равно ждут его подтверждения; не жди их без нужды.",
-      "Итог: 1–5 строк. Если нужно внимание владельца — первая строка начинается с ALERT.",
+      "This is a scheduled task run, the owner is not in the chat. Changing commands still wait for their confirmation; do not wait for them without need.",
+      "Outcome: 1–5 lines. If the owner's attention is needed, the first line starts with ALERT.",
     );
   }
   if (server) {
-    lines.push("", `Контекст чата: сервер «${server}». Если вопрос не уточняет сервер, речь о нём.`);
+    lines.push("", `Chat context: server "${server}". If a question does not name a server, it is about this one.`);
   }
   return lines.join("\n");
 }
@@ -83,6 +86,7 @@ interface Entry {
   session: AgentSession;
   server?: string;
   model: string; // requested model id ("" = default)
+  lang: string; // reply language the session was opened with
   gen: number; // setup generation the session was opened with
   busy: boolean;
   used: number;
@@ -101,7 +105,7 @@ export class Agents {
   private async create(sessionManager: SessionManager, prompt: string, modelId: string, chatId?: number, taskId?: number) {
     const cwd = this.cfg.dataDir;
     const model = this.cfg.setup.resolve(modelId);
-    if (!model) throw new Error("модель не настроена: откройте настройки → AI");
+    if (!model) throw new Error("model not configured: open settings → AI");
     const { session } = await createAgentSession({
       cwd,
       agentDir: join(this.cfg.dataDir, "pi"),
@@ -120,19 +124,19 @@ export class Agents {
     return session;
   }
 
-  private async chat(id: number, server: string | undefined, model: string): Promise<Entry> {
+  private async chat(id: number, server: string | undefined, model: string, lang: string): Promise<Entry> {
     const cur = this.chats.get(id);
     const gen = this.cfg.setup.generation;
-    if (cur && cur.server === server && cur.model === model && cur.gen === gen) return cur;
+    if (cur && cur.server === server && cur.model === model && cur.lang === lang && cur.gen === gen) return cur;
     if (cur) {
-      // Server, model or settings changed: reopen (the history stays on disk).
+      // Server, model, language or settings changed: reopen (the history stays on disk).
       cur.session.dispose();
       this.chats.delete(id);
     }
     const dir = this.chatDir(id);
     mkdirSync(dir, { recursive: true });
-    const session = await this.create(SessionManager.continueRecent(this.cfg.dataDir, dir), systemPrompt(server), model, id);
-    const e: Entry = { session, server, model, gen, busy: false, used: Date.now() };
+    const session = await this.create(SessionManager.continueRecent(this.cfg.dataDir, dir), systemPrompt(server, false, lang), model, id);
+    const e: Entry = { session, server, model, lang, gen, busy: false, used: Date.now() };
     this.chats.set(id, e);
     this.evict(id);
     return e;
@@ -153,9 +157,17 @@ export class Agents {
   }
 
   /** Runs one chat turn. Returns false when the chat is busy. */
-  async runChat(id: number, text: string, server: string | undefined, model: string, emit: (e: Event) => void, signal: AbortSignal) {
+  async runChat(
+    id: number,
+    text: string,
+    server: string | undefined,
+    model: string,
+    emit: (e: Event) => void,
+    signal: AbortSignal,
+    lang = DEFAULT_LANG,
+  ) {
     if (this.isBusy(id)) return false;
-    const e = await this.chat(id, server, model);
+    const e = await this.chat(id, server, model, lang);
     if (e.busy) return false;
     e.busy = true;
     e.used = Date.now();
@@ -169,8 +181,8 @@ export class Agents {
   }
 
   /** Runs a scheduled task in a throwaway session. */
-  async runTask(taskId: number, text: string, emit: (e: Event) => void, signal: AbortSignal) {
-    const session = await this.create(SessionManager.inMemory(this.cfg.dataDir), systemPrompt(undefined, true), "", undefined, taskId);
+  async runTask(taskId: number, text: string, emit: (e: Event) => void, signal: AbortSignal, lang = DEFAULT_LANG) {
+    const session = await this.create(SessionManager.inMemory(this.cfg.dataDir), systemPrompt(undefined, true, lang), "", undefined, taskId);
     try {
       await drive(session, text, emit, signal);
     } finally {
@@ -223,7 +235,7 @@ export async function drive(session: AgentSession, text: string, emit: (e: Event
         break;
       case "message_end": {
         const m = ev.message as { role?: string; stopReason?: string; errorMessage?: string };
-        if (m.role === "assistant" && m.stopReason === "error") lastError = m.errorMessage || "ошибка модели";
+        if (m.role === "assistant" && m.stopReason === "error") lastError = m.errorMessage || "model error";
         else if (m.role === "assistant") lastError = "";
         break;
       }
@@ -235,11 +247,11 @@ export async function drive(session: AgentSession, text: string, emit: (e: Event
     // Stopped while the session was being created: abort events are not
     // replayed to the listener above, so do not start the prompt at all.
     if (signal.aborted) {
-      emit({ t: "error", msg: "остановлено" });
+      emit({ t: "error", msg: "stopped" });
       return;
     }
     await session.prompt(text);
-    if (signal.aborted) emit({ t: "error", msg: "остановлено" });
+    if (signal.aborted) emit({ t: "error", msg: "stopped" });
     else if (lastError) emit({ t: "error", msg: lastError });
     else emit({ t: "done", text: session.getLastAssistantText() ?? "" });
   } catch (err) {

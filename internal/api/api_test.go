@@ -16,6 +16,7 @@ import (
 
 	"github.com/askidmobile/srvmon/internal/auth"
 	"github.com/askidmobile/srvmon/internal/config"
+	"github.com/askidmobile/srvmon/internal/i18n"
 	"github.com/askidmobile/srvmon/internal/protocol"
 	"github.com/askidmobile/srvmon/internal/store"
 )
@@ -211,5 +212,53 @@ func TestConcurrentGuessesCannotBypassLimit(t *testing.T) {
 	}
 	if count[http.StatusUnauthorized] != 5 || count[http.StatusTooManyRequests] != n-5 {
 		t.Fatalf("status counts = %v, want 5×401 and %d×429", count, n-5)
+	}
+}
+
+func TestLanguageSetting(t *testing.T) {
+	e := newEnv(t)
+	defer i18n.Set(string(i18n.Default))
+	me := func() string {
+		r := e.get(t, "/api/auth/me")
+		defer r.Body.Close()
+		var v struct{ Lang string }
+		_ = json.NewDecoder(r.Body).Decode(&v)
+		return v.Lang
+	}
+	if l := me(); l != "en" {
+		t.Fatalf("default lang = %q", l)
+	}
+	put := func(lang string) int {
+		b, _ := json.Marshal(map[string]string{"lang": lang})
+		req, _ := http.NewRequest(http.MethodPut, e.ts.URL+"/api/settings/lang", bytes.NewReader(b))
+		req.Header.Set("Content-Type", "application/json")
+		r, err := e.client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		r.Body.Close()
+		return r.StatusCode
+	}
+	if c := put("ru"); c != http.StatusUnauthorized {
+		t.Fatalf("set lang without a session: %d", c)
+	}
+	e.login(t)
+	if c := put("xx"); c != http.StatusBadRequest {
+		t.Fatalf("unknown lang: %d", c)
+	}
+	if c := put("ru"); c != http.StatusOK {
+		t.Fatalf("set lang: %d", c)
+	}
+	if l := me(); l != "ru" || i18n.Current() != i18n.RU {
+		t.Fatalf("lang after set = %q / %s", l, i18n.Current())
+	}
+	if v, _ := e.st.GetSetting(context.Background(), i18n.SettingKey); v != "ru" {
+		t.Fatalf("stored lang = %q", v)
+	}
+	// A restart picks the stored language up.
+	i18n.Set("en")
+	New(Options{Store: e.st})
+	if i18n.Current() != i18n.RU {
+		t.Fatalf("lang after restart = %s", i18n.Current())
 	}
 }

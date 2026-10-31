@@ -10,6 +10,7 @@ import (
 	"golang.org/x/crypto/ssh"
 
 	"github.com/askidmobile/srvmon/internal/auth"
+	"github.com/askidmobile/srvmon/internal/i18n"
 	"github.com/askidmobile/srvmon/internal/sshgw"
 )
 
@@ -36,11 +37,11 @@ type loginAuth struct {
 func (l loginAuth) forgotten() string {
 	switch l.method {
 	case "key":
-		return "ваш ключ и пароль sudo удалены из памяти, в бд и логи не записаны"
+		return i18n.T("your key and sudo password are wiped from memory, never written to the db or logs")
 	case "panel_key":
-		return "пароль sudo (если был) удалён из памяти, в бд и логи не записан"
+		return i18n.T("the sudo password (if any) is wiped from memory, never written to the db or logs")
 	}
-	return "пароль удалён из памяти, в бд и логи не записан"
+	return i18n.T("the password is wiped from memory, never written to the db or logs")
 }
 
 // loginFor validates the login part of an onboarding request and returns
