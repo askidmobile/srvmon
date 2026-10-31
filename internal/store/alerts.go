@@ -81,7 +81,9 @@ const migrationAlerts = `CREATE TABLE alert_rules (
 		started_at  INTEGER NOT NULL,
 		acked_at    INTEGER,
 		resolved_at INTEGER,
-		notified    INTEGER NOT NULL DEFAULT 0
+		notified    INTEGER NOT NULL DEFAULT 0,
+		-- 1: the recovery of a notified alert still has to be sent.
+		resolve_pending INTEGER NOT NULL DEFAULT 0
 	);
 	CREATE INDEX alerts_state ON alerts (state);
 	CREATE INDEX alerts_started ON alerts (started_at);
@@ -269,6 +271,24 @@ func (s *Store) RecentAlerts(ctx context.Context, limit int) ([]Alert, error) {
 func (s *Store) UnnotifiedEvents(ctx context.Context, since time.Time) ([]Alert, error) {
 	return s.queryAlerts(ctx, `WHERE state = 'event' AND notified = 0 AND channel = 'tg' AND started_at >= ?
 		ORDER BY started_at, id LIMIT 20`, since.Unix())
+}
+
+// PendingResolutions returns alerts resolved since t whose recovery message
+// was not delivered yet, oldest first.
+func (s *Store) PendingResolutions(ctx context.Context, since time.Time) ([]Alert, error) {
+	return s.queryAlerts(ctx, `WHERE state = 'resolved' AND resolve_pending = 1 AND resolved_at >= ?
+		ORDER BY resolved_at, id LIMIT 20`, since.Unix())
+}
+
+// SetResolvePending marks whether the recovery message of an alert is still
+// to be sent.
+func (s *Store) SetResolvePending(ctx context.Context, id int64, pending bool) error {
+	v := 0
+	if pending {
+		v = 1
+	}
+	_, err := s.db.ExecContext(ctx, `UPDATE alerts SET resolve_pending = ? WHERE id = ?`, v, id)
+	return err
 }
 
 // GetAlert returns one alert or ErrNotFound.

@@ -262,6 +262,11 @@ func (e *Engine) Evaluate(ctx context.Context) error {
 				ts := now.UTC()
 				a.State, a.ResolvedAt = store.AlertResolved, &ts
 				if a.Notified {
+					// Kept until delivered: quiet hours or a full queue
+					// only delay the recovery message.
+					if err := e.st.SetResolvePending(ctx, a.ID, true); err != nil {
+						return err
+					}
 					e.notify(ctx, a, true)
 				}
 			}
@@ -275,6 +280,13 @@ func (e *Engine) Evaluate(ctx context.Context) error {
 	}
 	for _, a := range events {
 		e.notify(ctx, a, false)
+	}
+	resolved, err := e.st.PendingResolutions(ctx, now.Add(-eventRetry))
+	if err != nil {
+		return err
+	}
+	for _, a := range resolved {
+		e.notify(ctx, a, true)
 	}
 	return nil
 }
@@ -489,7 +501,12 @@ func (e *Engine) notify(ctx context.Context, a store.Alert, resolved bool) {
 			return
 		}
 	}
-	if e.notifier.Notify(Notification{Alert: a, Resolved: resolved}) && !resolved {
+	if !e.notifier.Notify(Notification{Alert: a, Resolved: resolved}) {
+		return
+	}
+	if resolved {
+		_ = e.st.SetResolvePending(ctx, a.ID, false)
+	} else {
 		_ = e.st.MarkNotified(ctx, a.ID)
 	}
 }

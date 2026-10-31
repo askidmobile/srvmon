@@ -528,3 +528,28 @@ func TestStaleDataResetsPendingTimer(t *testing.T) {
 		}
 	}
 }
+
+func TestResolutionDeferredByQuietHours(t *testing.T) {
+	te := newTestEnv(t)
+	ctx := context.Background()
+	now := te.now.UTC()
+	h := host(1)
+	h.Disks[0].Used = 99
+	te.push(protocol.Report{Host: h})
+	te.eval(t)
+	if got := te.n.list(); len(got) != 1 || got[0].Resolved {
+		t.Fatalf("firing: %+v", got)
+	}
+	_ = SaveQuiet(ctx, te.st, Quiet{From: now.Add(-time.Hour).Format("15:04"), To: now.Add(time.Hour).Format("15:04"), TZ: "UTC"})
+	te.push(protocol.Report{Host: host(1)})
+	te.eval(t)
+	if len(te.open(t)) != 0 || len(te.n.list()) != 1 {
+		t.Fatalf("recovery during quiet hours: open=%d sent=%d", len(te.open(t)), len(te.n.list()))
+	}
+	_ = SaveQuiet(ctx, te.st, Quiet{})
+	te.eval(t)
+	te.eval(t)
+	if got := te.n.list(); len(got) != 2 || !got[1].Resolved {
+		t.Fatalf("after quiet hours: %+v", got)
+	}
+}
