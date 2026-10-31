@@ -1,110 +1,138 @@
 # srvmon
 
-Личная панель мониторинга серверов: метрики и docker-контейнеры, SSH-терминал в браузере, AI-агент, алерты в Telegram. Вход по паролю + TOTP.
+**English** · [Русский](README.ru.md) · [中文](README.zh-CN.md)
 
-- Архитектура: [docs/architecture.md](docs/architecture.md)
-- Макеты: [docs/design](docs/design)
-- Требования к серверу мониторинга: [docs/server-requirements.md](docs/server-requirements.md)
+Self-hosted monitoring panel for your own servers: host metrics and docker containers, an SSH terminal in the browser, an AI agent that works on your servers with your approval, and Telegram alerts. Sign-in is a password plus a TOTP code (Google Authenticator and compatible apps), protected by fail2ban.
 
-## Что уже есть (этап 1: каркас и CI/CD)
+The interface is a dark TUI-style dashboard (btop-like) with a green accent. The UI language is currently Russian.
 
-| Часть | Где | Что умеет |
+- Architecture: [docs/architecture.md](docs/architecture.md)
+- Mockups: [docs/design](docs/design)
+- Monitoring server requirements: [docs/server-requirements.md](docs/server-requirements.md)
+- Telegram bot where `api.telegram.org` is blocked (e.g. Russia): [docs/telegram-proxy.md](docs/telegram-proxy.md)
+
+## Features
+
+- **Metrics and containers.** A small Go agent (`srvmon-agent`) on each server reads CPU, RAM, swap, load, disks, network and uptime from `/proc`, containers through the docker socket (read-only), and pushes them to the panel. It buffers for an hour if the panel is unreachable. Metrics are stored in VictoriaMetrics.
+- **Server screen.** Per-core CPU, memory, disks, network, processes, containers with status/health/restarts, and syslog + docker logs, all live while the screen is open.
+- **Onboarding wizard.** Add a server, verify its SSH host key, log in once with a password or your own key. srvmon creates a `srvmon` user with its own ed25519 key, installs the agent and can disable password auth. The one-time password or key is never stored.
+- **Web terminal.** xterm.js ↔ WebSocket ↔ SSH client inside `srvmon-server` ↔ sshd. Tabs, resize, `docker exec` into a container. Private keys never leave the monitoring server; they are encrypted at rest (XChaCha20-Poly1305).
+- **AI agent.** Built on the [pi](https://pi.dev) SDK, any provider (DeepSeek, Anthropic, OpenAI, OpenRouter, Google, Ollama, any OpenAI- or Anthropic-compatible endpoint). Read-only commands run immediately; anything that changes a server waits for your explicit approval. The policy is enforced by `srvmon-server`, not by the model. Scheduled tasks (cron) report to Telegram.
+- **Alerts and Telegram.** Agent offline, container down/unhealthy, restart loops, CPU, disk, upcoming hosting payments, fail2ban bans, login attempts. Quiet hours, ack and silence. The bot answers `/status`, `/server`, `/alerts`, `/ack`, `/bills`, `/ask`.
+- **Security.** Password (argon2id) + TOTP or backup code, no username. Rate limiting, an audit log and fail2ban jails for the panel and sshd.
+
+## Components
+
+| Part | Where | What it does |
 | --- | --- | --- |
-| `srvmon-server` | `cmd/server`, `internal/` | вход пароль (argon2id) → TOTP или резервный код, сессии в SQLite, rate limit + лог для fail2ban, `POST /api/ingest` → VictoriaMetrics, `GET /api/servers`, встроенный фронт |
-| `srvmon-agent` | `cmd/agent`, `internal/agent` | CPU, RAM, swap, load, диски, сеть, uptime из `/proc`, контейнеры через docker.sock (ro), буфер на час при потере связи |
-| Веб | `web/` | React + Vite + Tailwind 4, компоненты в стиле shadcn/ui в TUI-теме: экран входа и обзор серверов |
-| Деплой | `deploy/` | Dockerfile'ы (distroless, amd64 + arm64), compose: Caddy + server + VictoriaMetrics, fail2ban jail, compose для агента |
-| CI/CD | `.github/workflows/` | `ci.yml` проверки, `release.yml` образы в GHCR, `deploy.yml` выкатка по SSH с откатом |
+| `srvmon-server` | `cmd/server`, `internal/` | API, auth, SQLite store, alerts, Telegram bot, SSH gateway, embedded web UI |
+| `srvmon-agent` | `cmd/agent`, `internal/agent` | Host and container metrics, push to the server |
+| `srvmon-ai` | `ai/` | AI agent (pi SDK) with srvmon tools only, no SSH keys of its own |
+| Web | `web/` | React + Vite + Tailwind 4, shadcn-style components, xterm.js |
+| Deploy | `deploy/` | Distroless images (amd64 + arm64), compose: Caddy or external proxy, server, VictoriaMetrics, fail2ban |
+| CI/CD | `.github/workflows/` | `ci.yml` checks, `release.yml` images to GHCR, `deploy.yml` SSH deploy with rollback |
 
-## Локальная разработка
+## Quick start (manual install)
+
+Requirements: a Debian/Ubuntu host with a public IP, a domain pointing to it, ports 80/443 (or your own reverse proxy). See [docs/server-requirements.md](docs/server-requirements.md).
 
 ```bash
-make test                 # go test -race
-make dev-server           # API на :8080, данные в ./data, cookie без Secure
-SRVMON_DATA_DIR=./data go run ./cmd/server init      # пароль + QR для Authenticator
-SRVMON_DATA_DIR=./data go run ./cmd/server add-server -name local -group dev
-make dev-web              # Vite на :5173, проксирует /api на :8080
-SRVMON_URL=http://127.0.0.1:8080 SRVMON_TOKEN=a_... go run ./cmd/agent
+git clone https://github.com/askidmobile/srvmon.git
+cd srvmon
+sudo bash deploy/install-host.sh            # installs docker if missing, creates /opt/srvmon
+sudo cp -r deploy/docker-compose.yml deploy/Caddyfile deploy/remote-deploy.sh \
+  deploy/install-host.sh deploy/fail2ban deploy/nginx /opt/srvmon/
+sudo nano /opt/srvmon/.env                  # set SRVMON_DOMAIN=mon.example.com
+cd /opt/srvmon && sudo bash remote-deploy.sh latest
+sudo docker compose exec -it server /srvmon-server init   # password + QR code for the authenticator app
 ```
 
-Без `SRVMON_VM_URL` метрики не пишутся в VictoriaMetrics, но последний снимок виден в обзоре.
+Open `https://<your domain>`, enter the password, then the TOTP code. The monitoring host itself appears in the panel automatically. Add other servers with `+ server` in the panel.
 
-## Деплой
+If the host already runs nginx (or another proxy) on 80/443, set `SRVMON_PROXY=external` in `.env`: Caddy is not started, srvmon listens on `127.0.0.1:8088` (`SRVMON_HTTP_BIND`), and you include [deploy/nginx/srvmon.conf](deploy/nginx/srvmon.conf) in your nginx.
 
-1. Подготовить сервер мониторинга (Debian/Ubuntu): скопировать `deploy/` и выполнить `sudo bash deploy/install-host.sh`. Скрипт ставит docker (если его нет) и создаёт `/opt/srvmon`. apt он не трогает: fail2ban работает контейнером в compose srvmon и ставится сам при деплое.
-2. Направить домен на сервер.
-3. В GitHub: Settings → Environments → `production`:
-   - secrets: `DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_SSH_KEY` (приватный ключ для деплоя), `DEPLOY_KNOWN_HOSTS` (вывод `ssh-keyscan <host>`), опционально `DEPLOY_PORT`, `GHCR_PULL_TOKEN`;
-   - variables: `SRVMON_DOMAIN` (или задать его в `/opt/srvmon/.env` на сервере), опционально `DEPLOY_PATH` (по умолчанию `/opt/srvmon`).
-4. Каждый push в `main`: CI → Release (образы `ghcr.io/askidmobile/srvmon-server|agent`, теги `sha-xxxxxxx` и `latest`) → Deploy (`docker compose pull && up -d`, ждёт healthcheck, при провале откатывает на прошлый тег). Пока `DEPLOY_HOST` не задан, Deploy пропускается. Ручной деплой нужного тега: Actions → Deploy → Run workflow.
-5. Если на сервере уже есть свой nginx (или другой прокси) на 80/443: в GitHub variables задать `SRVMON_PROXY=external`. Тогда Caddy не запускается, srvmon слушает `127.0.0.1:8088` (`SRVMON_HTTP_BIND`), а в nginx подключается шаблон `deploy/nginx/srvmon.conf` с сертификатом от вашего certbot. Цепочку бана fail2ban (`INPUT` в этом режиме, `DOCKER-USER` с Caddy) Deploy выставляет сам.
-6. После первого деплоя один раз: `cd /opt/srvmon && docker compose exec -it server /srvmon-server init`.
+Back up the `/data` volume together with `/data/master.key`: without the master key the stored SSH keys cannot be decrypted.
 
-### Агент на сервере
+## Continuous deployment from your fork
 
-Сам сервер мониторинга появляется в панели автоматически: в его compose есть агент, `srvmon-server` при старте регистрирует хост под именем `SRVMON_SELF_NAME` (Deploy подставляет hostname) и кладёт токен в свой том.
+1. Prepare the host as above (`install-host.sh`) and point the domain at it.
+2. In GitHub: Settings → Environments → `production`:
+   - secrets: `DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_SSH_KEY` (private deploy key), `DEPLOY_KNOWN_HOSTS` (output of `ssh-keyscan <host>`), optional `DEPLOY_PORT`, `GHCR_PULL_TOKEN`, `AI_API_KEY`;
+   - variables: `SRVMON_DOMAIN`, optional `SRVMON_PROXY`, `SRVMON_HTTP_BIND`, `DEPLOY_PATH` (default `/opt/srvmon`).
+   - Restrict the environment to the `main` branch (Deployment branches).
+3. Every push to `main`: CI → Release (images `ghcr.io/<owner>/srvmon-server|agent|ai`, tags `sha-xxxxxxx` and `latest`) → Deploy (`docker compose pull && up -d`, waits for the healthcheck, rolls back to the previous tag on failure). Deploy is skipped until `DEPLOY_HOST` is set. Manual deploy of a tag: Actions → Deploy → Run workflow.
+4. After the first deploy, once: `cd /opt/srvmon && docker compose exec -it server /srvmon-server init`.
 
-Остальные серверы добавляются мастером в панели (`+ сервер`, `#/add`):
+In a fork, change the `ghcr.io/askidmobile/...` image names in `deploy/docker-compose.yml` and `internal/config/config.go` (or set `SRVMON_AGENT_IMAGE`) to your own, or keep using the upstream images. If your agent image on GHCR is private, set `SRVMON_AGENT_REGISTRY_USER` and `SRVMON_AGENT_REGISTRY_TOKEN` (PAT with `read:packages`) in `.env` so the wizard can pull it.
 
-1. Имя, `host:port`, проект, группа, теги, описание; провайдер, тариф, стоимость, период, дата следующей оплаты (можно пропустить).
-2. «Проверить host key»: srvmon подключается к sshd без входа и показывает fingerprint. Сверьте его на сервере (`ssh-keygen -lf /etc/ssh/ssh_host_ecdsa_key.pub`) и подтвердите; дальше принимается только этот ключ.
-3. Пользователь (root или с sudo) и разовый способ входа:
-   - **пароль**;
-   - **мой ключ**: свой приватный ключ (например `~/.ssh/id_ed25519`, не `.pub`), используется один раз и не сохраняется;
-   - **ключ панели**: панель показывает свой публичный ключ и команду, которую нужно выполнить на сервере, чтобы добавить его в `authorized_keys` этого пользователя. После установки ключ остаётся только у `srvmon`.
+## Adding servers
 
-   Для входа по ключу под не-root можно указать пароль sudo, если sudo его спрашивает.
+The add wizard (`+ server`, `#/add`):
 
-   Дальше srvmon создаёт пользователя `srvmon` (группа docker, опционально sudo без пароля), кладёт ключ в `authorized_keys`, проверяет вход по ключу, запускает контейнер `srvmon-agent` с токеном в `/etc/srvmon/agent.token` (0600) и по желанию выключает `PasswordAuthentication`. Пароли и ключи для входа не пишутся ни в БД, ни в логи. При ошибке до проверки ключа карточка сервера удаляется.
+1. Name, `host:port`, project, group, tags, description; optionally provider, plan, cost and next payment date.
+2. "Check host key": srvmon connects to sshd without logging in and shows the fingerprint. Compare it on the server (`ssh-keygen -lf /etc/ssh/ssh_host_ecdsa_key.pub`) and confirm; only this key is accepted afterwards.
+3. User (root or with sudo) and a one-time login method: **password**, **my key** (your private key, used once and not saved), or **panel key** (the panel shows its public key and a command to add it to `authorized_keys`).
+4. srvmon creates the `srvmon` user (docker group, optional passwordless sudo), installs its key, verifies key login, starts the `srvmon-agent` container with a token in `/etc/srvmon/agent.token` (0600) and optionally disables `PasswordAuthentication`.
 
-Приватные ключи хранятся в SQLite зашифрованными (XChaCha20-Poly1305) мастер-ключом `/data/master.key` (`SRVMON_MASTER_KEY_FILE`). Его нужно бэкапить вместе с БД: без него ключи не расшифровать.
-
-Уже заведённому серверу (например, самому серверу мониторинга) ssh-доступ подключается кнопкой `+ ssh` в обзоре: тот же мастер без паспорта, агент по умолчанию не переустанавливается.
-
-Образы в GHCR приватные, как и репозиторий. Чтобы мастер мог поставить агента, либо сделайте пакет `srvmon-agent` публичным (в нём нет секретов), либо задайте в `/opt/srvmon/.env` `SRVMON_AGENT_REGISTRY_USER` и `SRVMON_AGENT_REGISTRY_TOKEN` (PAT с `read:packages`): токен используется для одного `docker pull` и сразу разлогинивается. Без этого мастер добавит сервер и ключ, а про агента напишет предупреждение.
-
-Вручную, без мастера:
+Manually, without the wizard:
 
 ```bash
 docker compose exec server /srvmon-server add-server -name shop-db -group prod -tags db,public
-# на целевом сервере, с deploy/agent/docker-compose.yml:
+# on the target server, with deploy/agent/docker-compose.yml:
 SRVMON_URL=https://mon.example.com SRVMON_TOKEN=a_... docker compose up -d
 ```
 
+## Telegram alerts
 
-### Алерты и Telegram
+1. Create a bot with [@BotFather](https://t.me/BotFather) (`/newbot`) and copy its token.
+2. In the panel: alerts → telegram bot → paste the token → save.
+3. Send `/start` to the bot, then click "use this chat" in the panel. For a group, add the bot and send `/start@your_bot` there.
+4. "Send test".
 
-Экран `[5] алерты` (`#/alerts`): активные алерты с кнопками ack и «тишина 1ч», правила, Telegram-бот, тихие часы и история за 90 дней. Правила по умолчанию: агент молчит > 2 мин (crit), контейнер упал или unhealthy 1 мин (crit), рестартов > 2 за час, CPU > 90% 5 мин, диск > 85%, оплата через ≤ 3 дня, плюс события: бан fail2ban, подбор пароля к панели, вход в панель.
+If the monitoring server cannot reach `api.telegram.org` (Russian hosting, corporate networks), run a tiny Cloudflare Worker proxy and set `SRVMON_TELEGRAM_API`: see [docs/telegram-proxy.md](docs/telegram-proxy.md).
 
-Бот:
+## AI agent
 
-1. В Telegram откройте [@BotFather](https://t.me/BotFather), отправьте `/newbot`, задайте имя и username (должен заканчиваться на `bot`). BotFather пришлёт токен вида `123456789:AA…`.
-2. В панели: алерты → telegram-бот → вставьте токен → «сохранить». Панель проверит токен и подключится.
-3. Напишите своему боту `/start`. В панели появится «боту написал …» — нажмите «использовать этот чат». Для группы добавьте бота в группу и напишите там `/start@имя_бота`.
-4. «Отправить тест». Дальше бот отвечает только этому чату: `/status`, `/server <имя>`, `/alerts`, `/ack <id>`, `/bills`, `/ask <вопрос>`.
+Enable it in the panel: settings → AI agent. Pick a provider (any from the pi catalog or a custom OpenAI/Anthropic-compatible URL), paste an API key (stored encrypted, never returned to the browser), load and select models, then "save and apply". Until something is saved in the panel, `srvmon-ai` uses `SRVMON_AI_PROVIDER`, `SRVMON_AI_MODEL` and `SRVMON_AI_API_KEY` from `.env`.
 
-Баны fail2ban сервера мониторинга приходят алертами сами: контейнер `fail2ban` пишет их через action `srvmon-notify`. Если `api.telegram.org` с сервера недоступен, задайте в `.env` `SRVMON_TELEGRAM_API` с адресом прокси Bot API.
+The agent can list servers and containers, run commands through the SSH gateway and run scheduled tasks. Commands that change a server show up as a confirmation card in the panel and in Telegram and run only after you approve them.
 
-### Веб-терминал
+## Local development
 
-`[3] терминал` (`#/term`, `#/term/<id>`): xterm.js ↔ WebSocket `/api/servers/<id>/terminal` ↔ SSH-клиент в `srvmon-server` ↔ sshd сервера. Вкладки, resize, shell в запущенный контейнер (`docker exec`), переподключение. Приватный ключ не покидает сервер мониторинга; WebSocket проверяет сессию и Origin, открытие и закрытие сессий пишутся в аудит, при истечении сессии панели терминал закрывается.
+```bash
+make test                 # go test -race
+make dev-server           # API on :8080, data in ./data, cookies without Secure
+SRVMON_DATA_DIR=./data go run ./cmd/server init      # password + QR for the authenticator
+SRVMON_DATA_DIR=./data go run ./cmd/server add-server -name local -group dev
+make dev-web              # Vite on :5173, proxies /api to :8080
+SRVMON_URL=http://127.0.0.1:8080 SRVMON_TOKEN=a_... go run ./cmd/agent
+cd ai && npm ci && npm test   # AI agent tests with a fake model
+```
 
-### AI-агент
+Without `SRVMON_VM_URL` metrics are not written to VictoriaMetrics, but the latest snapshot is visible in the overview.
 
-Контейнер `srvmon-ai` (pi SDK, `ai/`) с инструментами srvmon: список серверов и контейнеров, команды на серверах через SSH-шлюз, задачи по расписанию. Панель агента — справа в `[3] терминал` (F9 показывает и прячет её) и отдельный раздел `[4] агент` (`#/agent`, `#/agent/<id>`) с журналом подтверждений.
+## Contributing and security
 
-- Команды только для чтения (`docker ps/logs/inspect`, `df`, `journalctl`, `systemctl status`, `cat | grep` …) выполняются сразу. Всё, что меняет сервер, появляется карточкой «⚠ подтвердите» и выполняется только после «✓ выполнить» (ждёт до 15 минут). Решает srvmon-server (`internal/aiagent/policy.go`), а не модель; у контейнера агента нет SSH-ключей.
-- Задачи: «каждые 15 минут проверяй рестарты контейнеров, если > 2 за час — в телеграм» → задача с cron `*/15 * * * *` (UTC). Ответ, начинающийся с `ALERT`, или ошибка уходят в Telegram, когда подключён бот. Там же бот присылает команды агента на подтверждение с кнопками «выполнить» / «отклонить», а `/ask <вопрос>` спрашивает агента прямо из Telegram.
+- How to contribute: [CONTRIBUTING.md](CONTRIBUTING.md)
+- Reporting vulnerabilities: [SECURITY.md](SECURITY.md). Please do not open public issues for security problems.
 
-Включение — в панели, `[6] настройки` → «AI-агент» (`#/settings`):
+## License
 
-1. Провайдер: любой из каталога pi (DeepSeek, Anthropic, OpenAI, OpenRouter, Google, Mistral, xAI, Groq, …) или «свой» — OpenAI- или Anthropic-совместимый адрес (Ollama, vLLM, LiteLLM, корпоративный шлюз). У провайдера из каталога можно задать свой адрес API (прокси).
-2. Ключ API. Он хранится на сервере зашифрованным мастер-ключом, отдельно для каждого провайдера, и в браузер не возвращается.
-3. «Загрузить список у провайдера» показывает модели, доступные по этому ключу. Отметьте модели, которые можно выбирать в чате, и звёздочкой — модель по умолчанию. Id модели можно ввести и вручную.
-4. «Сохранить и применить» — srvmon-ai переключается сразу, без перезапуска. «Проверить связь» отправляет модели короткий запрос.
+Licensed under either of [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE) at your option.
 
-Пока в панели ничего не сохранено, `srvmon-ai` берёт настройки из переменных `SRVMON_AI_PROVIDER`, `SRVMON_AI_MODEL`, `SRVMON_AI_API_KEY` (секрет `AI_API_KEY` в окружении `production`, если он задан). После первого сохранения в панели они не используются.
+Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in the work by you, as defined in the Apache-2.0 license, shall be dual licensed as above, without any additional terms or conditions.
 
-Токен между `server` и `ai` (`SRVMON_AI_TOKEN`) генерируется при деплое. Tool API агента слушает `:8081` только внутри compose-сети и не проксируется наружу.
+<a id="donate"></a>
 
-Локально: `cd ai && npm ci && npm test` (тест с фейковой моделью pi), запуск — `SRVMON_AI_TOKEN=... SRVMON_TOOLS_URL=http://127.0.0.1:8081 SRVMON_AI_DATA=./data npm start` и `srvmon-server` с `SRVMON_AI_URL=http://127.0.0.1:8090 SRVMON_AI_TOKEN=...`.
+## Support the project
+
+If srvmon is useful to you, you can support its development. Donations pay for test servers and further work on the project.
+
+Address for **USDT on the TON network**:
+
+```text
+UQAqmiUAf-kCo7pw1HM4KDrf4r8XCAsDDolODnZJnAydZ37O
+```
+
+> [!WARNING]
+> Send only **USDT** and only on the **TON network**. TON coins, other tokens and transfers from other networks (TRC-20, ERC-20, BEP-20) sent to this address are not credited and may be lost.
