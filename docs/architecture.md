@@ -125,7 +125,7 @@ flowchart LR
 
 Первичная настройка: `srvmon-server init` в консоли сервера спрашивает пароль и печатает QR-код для Authenticator.
 
-Перебор: rate limit в приложении + fail2ban на хосте (jail `srvmon-auth`: 5 ошибок за 10 мин → бан 1 ч, повторный → 24 ч; плюс стандартный `sshd`).
+Перебор: rate limit в приложении + fail2ban контейнером в compose srvmon (network host, баны в firewall хоста; jail `srvmon-auth`: 5 ошибок за 10 мин → бан 1 ч, повторный → 24 ч; плюс `sshd` хоста, если есть `/var/log/auth.log`). apt на хосте для этого не нужен.
 
 ## Репозиторий, CI/CD и деплой
 

@@ -31,13 +31,13 @@ SRVMON_URL=http://127.0.0.1:8080 SRVMON_TOKEN=a_... go run ./cmd/agent
 
 ## Деплой
 
-1. Подготовить сервер мониторинга (Debian/Ubuntu): скопировать `deploy/` и выполнить `sudo bash deploy/install-host.sh`. Скрипт ставит docker, fail2ban с jail `srvmon-auth` и создаёт `/opt/srvmon`.
+1. Подготовить сервер мониторинга (Debian/Ubuntu): скопировать `deploy/` и выполнить `sudo bash deploy/install-host.sh`. Скрипт ставит docker (если его нет) и создаёт `/opt/srvmon`. apt он не трогает: fail2ban работает контейнером в compose srvmon и ставится сам при деплое.
 2. Направить домен на сервер.
 3. В GitHub: Settings → Environments → `production`:
    - secrets: `DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_SSH_KEY` (приватный ключ для деплоя), `DEPLOY_KNOWN_HOSTS` (вывод `ssh-keyscan <host>`), опционально `DEPLOY_PORT`, `GHCR_PULL_TOKEN`;
    - variables: `SRVMON_DOMAIN` (или задать его в `/opt/srvmon/.env` на сервере), опционально `DEPLOY_PATH` (по умолчанию `/opt/srvmon`).
 4. Каждый push в `main`: CI → Release (образы `ghcr.io/askidmobile/srvmon-server|agent`, теги `sha-xxxxxxx` и `latest`) → Deploy (`docker compose pull && up -d`, ждёт healthcheck, при провале откатывает на прошлый тег). Пока `DEPLOY_HOST` не задан, Deploy пропускается. Ручной деплой нужного тега: Actions → Deploy → Run workflow.
-5. Если на сервере уже есть свой nginx (или другой прокси) на 80/443: в GitHub variables задать `SRVMON_PROXY=external`. Тогда Caddy не запускается, srvmon слушает `127.0.0.1:8088` (`SRVMON_HTTP_BIND`), а в nginx подключается шаблон `deploy/nginx/srvmon.conf` с сертификатом от вашего certbot. `install-host.sh` в этом режиме переводит бан fail2ban в цепочку `INPUT`, поэтому после смены `SRVMON_PROXY` его нужно запустить ещё раз (`sudo bash /opt/srvmon/install-host.sh`); Deploy напомнит предупреждением, если цепочка не совпадает.
+5. Если на сервере уже есть свой nginx (или другой прокси) на 80/443: в GitHub variables задать `SRVMON_PROXY=external`. Тогда Caddy не запускается, srvmon слушает `127.0.0.1:8088` (`SRVMON_HTTP_BIND`), а в nginx подключается шаблон `deploy/nginx/srvmon.conf` с сертификатом от вашего certbot. Цепочку бана fail2ban (`INPUT` в этом режиме, `DOCKER-USER` с Caddy) Deploy выставляет сам.
 6. После первого деплоя один раз: `cd /opt/srvmon && docker compose exec -it server /srvmon-server init`.
 
 ### Агент на сервере
@@ -83,7 +83,7 @@ SRVMON_URL=https://mon.example.com SRVMON_TOKEN=a_... docker compose up -d
 3. Напишите своему боту `/start`. В панели появится «боту написал …» — нажмите «использовать этот чат». Для группы добавьте бота в группу и напишите там `/start@имя_бота`.
 4. «Отправить тест». Дальше бот отвечает только этому чату: `/status`, `/server <имя>`, `/alerts`, `/ack <id>`, `/bills`, `/ask <вопрос>`.
 
-Чтобы баны fail2ban сервера мониторинга приходили алертами, после обновления один раз выполните `sudo bash /opt/srvmon/install-host.sh`: он ставит action `srvmon-notify` (Deploy предупредит, если его нет). Если `api.telegram.org` с сервера недоступен, задайте в `.env` `SRVMON_TELEGRAM_API` с адресом прокси Bot API.
+Баны fail2ban сервера мониторинга приходят алертами сами: контейнер `fail2ban` пишет их через action `srvmon-notify`. Если `api.telegram.org` с сервера недоступен, задайте в `.env` `SRVMON_TELEGRAM_API` с адресом прокси Bot API.
 
 ### Веб-терминал
 
