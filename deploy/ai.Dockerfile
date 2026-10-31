@@ -2,7 +2,11 @@
 # srvmon-ai: the AI agent (pi SDK) with srvmon tools only. Talks to
 # srvmon-server over the compose network; no ports are published.
 
-FROM node:22-alpine AS build
+# The build stage runs on the runner's native platform: npm ci under QEMU
+# (arm64 on an amd64 runner) can hang for hours. node_modules here are pure JS
+# (no os/cpu-specific packages, install scripts disabled), so the result is
+# copied into the target-platform runtime stage unchanged.
+FROM --platform=$BUILDPLATFORM node:22-alpine AS build
 WORKDIR /src/ai
 COPY ai/package.json ai/package-lock.json ./
 RUN npm ci --ignore-scripts --no-audit --no-fund

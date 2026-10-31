@@ -24,6 +24,7 @@ jobs:
   image:
     needs: ci
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     strategy:
       matrix:
         image: [server, agent, ai]
