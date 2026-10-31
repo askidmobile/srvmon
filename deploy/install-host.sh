@@ -28,5 +28,5 @@ if [[ "$DEPLOY_USER" != root ]]; then
   usermod -aG docker "$DEPLOY_USER"
 fi
 
-echo "Done. Edit $DEPLOY_PATH/.env (SRVMON_DOMAIN, ACME_EMAIL), then let CI deploy."
+echo "Done. Edit $DEPLOY_PATH/.env (SRVMON_DOMAIN), then let CI deploy."
 echo "After the first deploy: cd $DEPLOY_PATH && docker compose exec -it server /srvmon-server init"

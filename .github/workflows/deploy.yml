@@ -6,7 +6,7 @@ name: Deploy
 #   secrets: DEPLOY_HOST, DEPLOY_USER, DEPLOY_SSH_KEY, DEPLOY_KNOWN_HOSTS
 #            DEPLOY_PORT (optional, default 22)
 #            GHCR_PULL_TOKEN (optional PAT with read:packages; default GITHUB_TOKEN)
-#   vars:    DEPLOY_PATH (default /opt/srvmon), SRVMON_DOMAIN, ACME_EMAIL
+#   vars:    DEPLOY_PATH (default /opt/srvmon), SRVMON_DOMAIN (or set it in .env on the host)
 # While DEPLOY_HOST is not set the job is skipped with a notice.
 on:
   workflow_run:
@@ -104,12 +104,11 @@ jobs:
           GHCR_TOKEN: ${{ secrets.GHCR_PULL_TOKEN || secrets.GITHUB_TOKEN }}
           GHCR_USER: ${{ github.actor }}
           SRVMON_DOMAIN: ${{ vars.SRVMON_DOMAIN }}
-          ACME_EMAIL: ${{ vars.ACME_EMAIL }}
         run: |
           # shellcheck disable=SC2029 # expand locally on purpose
           printf '%s' "$GHCR_TOKEN" | ssh deploy "docker login ghcr.io -u '$GHCR_USER' --password-stdin"
           # shellcheck disable=SC2029
-          ssh deploy "cd '$DEPLOY_PATH' && SRVMON_DOMAIN='$SRVMON_DOMAIN' ACME_EMAIL='$ACME_EMAIL' bash remote-deploy.sh '$TAG'"
+          ssh deploy "cd '$DEPLOY_PATH' && SRVMON_DOMAIN='$SRVMON_DOMAIN' bash remote-deploy.sh '$TAG'"
 
       - name: logout registry
         if: always() && steps.cfg.outputs.enabled == 'true'

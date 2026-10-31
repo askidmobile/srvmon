@@ -20,9 +20,13 @@ set_env() {
 }
 set_tag() { set_env SRVMON_TAG "$1"; }
 
-# Optional values passed from GitHub (vars.SRVMON_DOMAIN, vars.ACME_EMAIL).
-[[ -n "${SRVMON_DOMAIN:-}" ]] && set_env SRVMON_DOMAIN "$SRVMON_DOMAIN"
-[[ -n "${ACME_EMAIL:-}" ]] && set_env ACME_EMAIL "$ACME_EMAIL"
+# Optional value passed from GitHub (vars.SRVMON_DOMAIN). Store it in .env
+# and drop it from the environment: an exported (even empty) variable would
+# override .env for every compose call.
+if [[ -n "${SRVMON_DOMAIN:-}" ]]; then
+  set_env SRVMON_DOMAIN "$SRVMON_DOMAIN"
+fi
+unset SRVMON_DOMAIN
 if grep -q '^SRVMON_DOMAIN=mon.example.com' .env; then
   echo "set SRVMON_DOMAIN in $(pwd)/.env or in the GitHub variable SRVMON_DOMAIN"
   exit 1
@@ -33,19 +37,29 @@ wait_healthy() {
   for _ in $(seq 1 30); do
     id="$(docker compose ps -q server)"
     status="$(docker inspect -f '{{.State.Health.Status}}' "$id" 2>/dev/null || echo starting)"
-    [[ "$status" == "healthy" ]] && return 0
+    if [[ "$status" == "healthy" ]]; then
+      # Caddy must be up too, otherwise the panel is unreachable.
+      id="$(docker compose ps -q caddy)"
+      [[ "$(docker inspect -f '{{.State.Running}}' "$id" 2>/dev/null)" == "true" ]] && return 0
+      status="healthy, caddy not running"
+    fi
     sleep 3
   done
-  echo "server health: $status"
+  echo "health: $status"
   return 1
 }
 
 PREV="$(grep '^SRVMON_TAG=' .env | cut -d= -f2 || true)"
 echo "deploy: ${PREV:-none} -> $TAG"
 
-# Log directory for fail2ban, writable by the distroless nonroot user.
-mkdir -p /var/log/srvmon 2>/dev/null || sudo mkdir -p /var/log/srvmon
-chown 65532:65532 /var/log/srvmon 2>/dev/null || sudo chown 65532:65532 /var/log/srvmon
+# Log directory for fail2ban, owned by the distroless nonroot user.
+# install-host.sh prepares it; only fix it here when needed and possible.
+if [[ "$(stat -c %u:%g /var/log/srvmon 2>/dev/null)" != "65532:65532" ]]; then
+  if ! { mkdir -p /var/log/srvmon && chown 65532:65532 /var/log/srvmon; } 2>/dev/null &&
+     ! sudo -n sh -c 'mkdir -p /var/log/srvmon && chown 65532:65532 /var/log/srvmon' 2>/dev/null; then
+    echo "warning: /var/log/srvmon is not owned by 65532; run install-host.sh as root (fail2ban log will not be written)"
+  fi
+fi
 
 set_tag "$TAG"
 # Any failure here (pull, `up` erroring on an unhealthy dependency, or the

@@ -1,7 +1,4 @@
-{
-	email {$ACME_EMAIL}
-}
-
+# No ACME email: Let's Encrypt does not require one.
 {$SRVMON_DOMAIN} {
 	encode zstd gzip
 
