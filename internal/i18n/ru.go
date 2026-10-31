@@ -220,4 +220,6 @@ var ru = map[string]string{
 	"ssh: %w":          "ssh: %w",
 	"the new agent has not reported yet: check docker logs srvmon-agent on the server": "новый агент ещё не прислал данные: проверьте docker logs srvmon-agent на сервере",
 	"the new agent reports version %s instead of %s":                                   "новый агент сообщает версию %s вместо %s",
+	"%s; restoring the previous agent failed: %s":                                      "%s; вернуть прежний агент не удалось: %s",
+	"%s; the previous agent is restored":                                               "%s; прежний агент восстановлен",
 }

@@ -143,11 +143,11 @@ func (s *Server) updateAgent(id int64, ip string, auto bool) {
 		fail(i18n.Errorf("ssh: %w", err))
 		return
 	}
+	defer client.Close()
 	err = sshgw.AgentUpdate(ctx, client, sshgw.AgentInstall{
 		Image: image, URL: s.cfg.PublicOrigin,
 		RegistryUser: s.cfg.AgentRegistryUser, RegistryToken: s.cfg.AgentRegistryToken,
 	})
-	client.Close()
 	event := "agent_update"
 	if auto {
 		event = "agent_autoupdate"
@@ -157,15 +157,26 @@ func (s *Server) updateAgent(id int64, ip string, auto bool) {
 		fail(err)
 		return
 	}
+	// The previous container is kept until the new agent reports the
+	// panel's version; otherwise it is put back.
 	if s.agentVersionKnown() {
 		if v, ok := s.waitAgentVersion(ctx, id, started); !ok {
+			var why error
 			if v == "" {
-				fail(errors.New(i18n.T("the new agent has not reported yet: check docker logs srvmon-agent on the server")))
+				why = errors.New(i18n.T("the new agent has not reported yet: check docker logs srvmon-agent on the server"))
 			} else {
-				fail(errors.New(i18n.T("the new agent reports version %s instead of %s", short(v), short(s.version))))
+				why = errors.New(i18n.T("the new agent reports version %s instead of %s", short(v), short(s.version)))
+			}
+			if rerr := sshgw.AgentRollback(ctx, client); rerr != nil {
+				fail(i18n.Errorf("%s; restoring the previous agent failed: %s", why.Error(), rerr.Error()))
+			} else {
+				fail(i18n.Errorf("%s; the previous agent is restored", why.Error()))
 			}
 			return
 		}
+	}
+	if err := sshgw.AgentCommit(ctx, client); err != nil {
+		s.log.Warn("agent update: removing the previous container", "server", access.Name, "err", err)
 	}
 	s.log.Info("agent updated", "server", access.Name, "image", image, "auto", auto)
 	s.updates.set(id, agentUpdateView{State: "ok", Image: image, At: s.now()})

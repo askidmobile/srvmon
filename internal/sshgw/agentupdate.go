@@ -14,7 +14,9 @@ import (
 // installed with a.Image, keeping its token file and URL. It runs as the
 // panel's SSH user, which is in the docker group (or has passwordless sudo).
 // a.Token is not used: the token stays in /etc/srvmon/agent.token.
-// On a failed start the previous container is put back.
+// On a failed start the previous container is put back. Otherwise the
+// previous container stays, stopped, as srvmon-agent-old until the caller
+// confirms the new agent with AgentCommit or reverts with AgentRollback.
 func AgentUpdate(ctx context.Context, c *ssh.Client, a AgentInstall) error {
 	_, errOut, err := Run(ctx, c, "sh -s", strings.NewReader(agentUpdateScript(a)))
 	if err == nil {
@@ -35,16 +37,46 @@ func AgentUpdate(ctx context.Context, c *ssh.Client, a AgentInstall) error {
 	return i18n.Errorf("agent update: %s", firstLine(errOut, err))
 }
 
+// AgentCommit removes the previous agent kept by AgentUpdate.
+func AgentCommit(ctx context.Context, c *ssh.Client) error {
+	_, errOut, err := Run(ctx, c, "sh -s", strings.NewReader(dockerAccess+"$D rm -f srvmon-agent-old >/dev/null 2>&1 || true\n"))
+	if err != nil {
+		return i18n.Errorf("agent update: %s", firstLine(errOut, err))
+	}
+	return nil
+}
+
+// AgentRollback puts back the previous agent kept by AgentUpdate.
+func AgentRollback(ctx context.Context, c *ssh.Client) error {
+	_, errOut, err := Run(ctx, c, "sh -s", strings.NewReader(dockerAccess+agentRestoreScript))
+	if err != nil {
+		return i18n.Errorf("agent update: %s", firstLine(errOut, err))
+	}
+	return nil
+}
+
+// dockerAccess sets $D to a docker command the SSH user may run.
+const dockerAccess = `set -e
+if docker info >/dev/null 2>&1; then D=docker
+elif sudo -n docker info >/dev/null 2>&1; then D="sudo -n docker"
+else echo srvmon:no-docker-access >&2; exit 3; fi
+`
+
+// agentRestoreScript replaces srvmon-agent with srvmon-agent-old.
+const agentRestoreScript = `$D inspect srvmon-agent-old >/dev/null 2>&1 || { echo "no previous agent to restore" >&2; exit 6; }
+$D rm -f srvmon-agent >/dev/null 2>&1 || true
+$D rename srvmon-agent-old srvmon-agent
+$D start srvmon-agent >/dev/null
+`
+
 // agentUpdateScript must start the container with the same flags as
 // agentScript.
 func agentUpdateScript(a AgentInstall) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "set -e\nIMG=%s\nDEFURL=%s\nRU=%s\nRT=%s\n",
+	b.WriteString(dockerAccess)
+	fmt.Fprintf(&b, "IMG=%s\nDEFURL=%s\nRU=%s\nRT=%s\n",
 		shq(a.Image), shq(a.URL), shq(a.RegistryUser), shq(a.RegistryToken))
-	b.WriteString(`if docker info >/dev/null 2>&1; then D=docker
-elif sudo -n docker info >/dev/null 2>&1; then D="sudo -n docker"
-else echo srvmon:no-docker-access >&2; exit 3; fi
-$D inspect srvmon-agent >/dev/null 2>&1 || { echo srvmon:no-agent >&2; exit 3; }
+	b.WriteString(`$D inspect srvmon-agent >/dev/null 2>&1 || { echo srvmon:no-agent >&2; exit 3; }
 ENVS=$($D inspect -f '{{range .Config.Env}}{{println .}}{{end}}' srvmon-agent)
 printf '%s\n' "$ENVS" | grep -qx 'SRVMON_TOKEN_FILE=/etc/srvmon/agent.token' || {
   echo srvmon:not-panel >&2; exit 3; }
@@ -66,12 +98,9 @@ if $D run -d --name srvmon-agent --restart unless-stopped \
   -v /proc:/host/proc:ro -v /:/host:ro,rslave \
   -v /var/run/docker.sock:/var/run/docker.sock:ro \
   "$IMG" >/dev/null; then
-  $D rm -f srvmon-agent-old >/dev/null 2>&1 || true
+  :
 else
-  $D rm -f srvmon-agent >/dev/null 2>&1 || true
-  $D rename srvmon-agent-old srvmon-agent
-  $D start srvmon-agent >/dev/null 2>&1 || true
-  echo srvmon:run-failed >&2; exit 5
+` + agentRestoreScript + `  echo srvmon:run-failed >&2; exit 5
 fi
 `)
 	return b.String()

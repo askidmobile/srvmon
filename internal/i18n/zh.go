@@ -220,4 +220,6 @@ var zh = map[string]string{
 	"ssh: %w":          "ssh: %w",
 	"the new agent has not reported yet: check docker logs srvmon-agent on the server": "新代理尚未上报数据：请在服务器上查看 docker logs srvmon-agent",
 	"the new agent reports version %s instead of %s":                                   "新代理上报的版本是 %s，而不是 %s",
+	"%s; restoring the previous agent failed: %s":                                      "%s；恢复旧代理失败：%s",
+	"%s; the previous agent is restored":                                               "%s；已恢复旧代理",
 }
