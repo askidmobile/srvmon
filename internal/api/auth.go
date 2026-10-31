@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/askidmobile/srvmon/internal/alerts"
 	"github.com/askidmobile/srvmon/internal/auth"
 	"github.com/askidmobile/srvmon/internal/store"
 )
@@ -49,6 +50,12 @@ func (s *Server) authFailure(ctx context.Context, ip, stage string) {
 	s.authLogMu.Unlock()
 	if err := s.store.Audit(ctx, ip, "auth_failure", stage); err != nil {
 		s.log.Error("audit", "err", err)
+	}
+	// The failure that fills the limiter is reported once: further attempts
+	// are rejected before they get here.
+	if blocked, wait := s.limiter.Blocked(ip); blocked {
+		s.alerts.Event(ctx, store.KindBruteforce, 0, "", ip, fmt.Sprintf(
+			"подбор пароля к панели с %s: вход заблокирован на %s", ip, alerts.FormatDuration(wait)))
 	}
 }
 
@@ -198,6 +205,7 @@ func (s *Server) handleTOTP(w http.ResponseWriter, r *http.Request) {
 	}
 	s.limiter.Reset(ip)
 	_ = s.store.Audit(r.Context(), ip, "login", method)
+	s.alerts.Event(r.Context(), store.KindLogin, 0, "", ip, loginText(ip, method, r.UserAgent()))
 	s.log.Info("login", "ip", ip, "method", method)
 	s.clearCookie(w, cookiePending, "/api/auth")
 	s.setCookie(w, cookieSession, token, "/", s.cfg.SessionTTL)
@@ -265,4 +273,20 @@ func (s *Server) requireSession(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), ctxSession, true)))
 	})
+}
+
+// loginText describes a successful login for the login event.
+func loginText(ip, method, ua string) string {
+	via := "код из приложения"
+	if method != "totp" {
+		via = "резервный код"
+	}
+	if r := []rune(ua); len(r) > 80 {
+		ua = string(r[:80]) + "…"
+	}
+	text := fmt.Sprintf("вход в панель с %s (%s)", ip, via)
+	if ua != "" {
+		text += ", " + ua
+	}
+	return text
 }

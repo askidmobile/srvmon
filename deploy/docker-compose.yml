@@ -45,6 +45,10 @@ services:
       SRVMON_AGENT_IMAGE: ghcr.io/askidmobile/srvmon-agent:${SRVMON_TAG:-latest}
       SRVMON_AGENT_REGISTRY_USER: ${SRVMON_AGENT_REGISTRY_USER:-}
       SRVMON_AGENT_REGISTRY_TOKEN: ${SRVMON_AGENT_REGISTRY_TOKEN:-}
+      # Bans of the host fail2ban (action srvmon-notify, see install-host.sh).
+      SRVMON_FAIL2BAN_EVENTS: /var/log/srvmon/fail2ban-events.log
+      # Bot API base URL, e.g. a proxy if api.telegram.org is unreachable.
+      SRVMON_TELEGRAM_API: ${SRVMON_TELEGRAM_API:-}
     volumes:
       - srvmon-data:/data
       # fail2ban on the host reads this file (jail srvmon-auth).

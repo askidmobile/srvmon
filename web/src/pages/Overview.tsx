@@ -4,7 +4,7 @@ import { Hotkey, Shell } from "@/components/Shell";
 import { Button } from "@/components/ui/button";
 import { Panel } from "@/components/ui/panel";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { api, type ServerView } from "@/lib/api";
+import { api, type AlertSummary, type ServerView } from "@/lib/api";
 import { href, navigate, type Route } from "@/lib/router";
 import { cn, formatBytes, formatUptime } from "@/lib/utils";
 
@@ -103,6 +103,52 @@ function Row({ s, onDelete }: { s: ServerView; onDelete: (s: ServerView) => void
   );
 }
 
+function AlertsPanel() {
+  const [sum, setSum] = useState<AlertSummary | null>(null);
+  useEffect(() => {
+    let alive = true;
+    const load = () =>
+      api
+        .alertSummary()
+        .then((s) => alive && setSum(s))
+        .catch(() => undefined);
+    load();
+    const t = setInterval(load, 15000);
+    return () => {
+      alive = false;
+      clearInterval(t);
+    };
+  }, []);
+  if (!sum) return null;
+  const sev = { crit: "text-crit", warn: "text-warn", info: "text-tx" } as const;
+  return (
+    <Panel title="алерты" right={`${sum.open} активных · ${sum.last24h} за 24ч`}>
+      {sum.latest.length === 0 ? (
+        <div className="text-primary">✓ активных алертов нет</div>
+      ) : (
+        <div className="flex flex-col gap-0.5">
+          {sum.latest.map((a) => (
+            <div key={a.id} className="truncate">
+              <span className="text-muted-foreground">
+                {new Date(a.started_at).toLocaleTimeString("ru", { hour: "2-digit", minute: "2-digit" })}
+              </span>{" "}
+              <span className={sev[a.severity]}>{a.severity.toUpperCase()}</span>{" "}
+              <span className="text-hi">{a.server_name || "панель"}</span> — {a.message}
+              {a.state === "acked" && <span className="text-primary"> ✓</span>}
+              {a.notified && <span className="text-muted-foreground"> → tg</span>}
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="mt-2.5">
+        <Button size="sm" variant="outline" asChild>
+          <a href={href.alerts()}>все алерты и правила →</a>
+        </Button>
+      </div>
+    </Panel>
+  );
+}
+
 export function Overview({ route, version, onLogout }: { route: Route; version: string; onLogout: () => void }) {
   const [servers, setServers] = useState<ServerView[] | null>(null);
   const [error, setError] = useState("");
@@ -160,6 +206,7 @@ export function Overview({ route, version, onLogout }: { route: Route; version: 
           <Hotkey k="↑↓">выбор</Hotkey>
           <Hotkey k="enter">экран сервера</Hotkey>
           <Hotkey k="3">терминал</Hotkey>
+          <Hotkey k="5">алерты</Hotkey>
         </>
       }
       footerNote="обновление 5с"
@@ -206,6 +253,8 @@ export function Overview({ route, version, onLogout }: { route: Route; version: 
           </ScrollArea>
         )}
       </Panel>
+
+      <AlertsPanel />
     </Shell>
   );
 }

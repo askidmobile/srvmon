@@ -3,6 +3,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -15,11 +16,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/askidmobile/srvmon/internal/alerts"
 	"github.com/askidmobile/srvmon/internal/auth"
 	"github.com/askidmobile/srvmon/internal/config"
 	"github.com/askidmobile/srvmon/internal/metrics"
 	"github.com/askidmobile/srvmon/internal/secret"
 	"github.com/askidmobile/srvmon/internal/store"
+	"github.com/askidmobile/srvmon/internal/telegram"
 )
 
 // Server wires dependencies for the HTTP handlers.
@@ -39,6 +42,8 @@ type Server struct {
 	jobs      *jobs
 	setupKeys *setupKeys
 	csp       string
+	alerts    *alerts.Engine
+	bot       *telegram.Bot // nil when its settings cannot be loaded
 
 	totpMu  sync.Mutex    // serializes TOTP replay check-and-set
 	hashSem chan struct{} // caps concurrent argon2id verifications
@@ -56,6 +61,9 @@ type Options struct {
 	Web     fs.FS           // built frontend (contents of web/dist)
 	Version string
 	Secrets *secret.Box // seals SSH private keys; nil disables the add wizard
+	// TelegramAPI overrides the Bot API base URL (tests, or a proxy where
+	// api.telegram.org is blocked).
+	TelegramAPI string
 }
 
 // New builds the server.
@@ -83,6 +91,16 @@ func New(o Options) *Server {
 		now:       time.Now,
 		hashSem:   make(chan struct{}, 2),
 	}
+	srv.alerts = alerts.New(o.Store, srv.latest, o.Log)
+	bot, err := telegram.New(context.Background(), telegram.Options{
+		Store: o.Store, Secrets: o.Secrets, Engine: srv.alerts, Latest: srv.latest, Log: o.Log, API: o.TelegramAPI,
+	})
+	if err != nil {
+		o.Log.Error("telegram: load settings", "err", err)
+	} else {
+		srv.bot = bot
+		srv.alerts.SetNotifier(bot)
+	}
 	// 'self' covers same-origin WebSocket in current browsers; older Safari
 	// needs the wss:// origin spelled out.
 	connect := "'self'"
@@ -97,6 +115,21 @@ func New(o Options) *Server {
 		connect + "; frame-ancestors 'none'"
 	return srv
 }
+
+// Start runs the background work: alert evaluation, the Telegram bot and,
+// when fail2banEvents is set, following fail2ban bans of the host.
+func (s *Server) Start(ctx context.Context, fail2banEvents, hostName string) {
+	go s.alerts.Run(ctx)
+	if s.bot != nil {
+		go s.bot.Run(ctx)
+	}
+	if fail2banEvents != "" {
+		go s.alerts.TailFail2ban(ctx, fail2banEvents, hostName)
+	}
+}
+
+// Bot returns the Telegram bot (nil if it failed to load).
+func (s *Server) Bot() *telegram.Bot { return s.bot }
 
 // Handler returns the root HTTP handler.
 func (s *Server) Handler() http.Handler {
@@ -122,6 +155,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/servers/{id}", s.requireSession(http.HandlerFunc(s.handleServer)))
 	mux.Handle("PATCH /api/servers/{id}", s.requireSession(http.HandlerFunc(s.handleServerCard)))
 	mux.Handle("GET /api/servers/{id}/history", s.requireSession(http.HandlerFunc(s.handleHistory)))
+	s.alertRoutes(mux)
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "not_found")
 	})
