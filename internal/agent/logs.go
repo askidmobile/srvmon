@@ -29,8 +29,24 @@ var (
 	warnRe = regexp.MustCompile(`(?i)\b(warn|warning|timeout|timed out|denied|refused|invalid user|retry|deprecated)\b`)
 )
 
-// logLevel classifies a free-form log line; "" means info and is dropped.
+// levelRe finds an explicit level in structured lines: logfmt
+// (level=warning, lvl=info) and JSON ("level":"error").
+var levelRe = regexp.MustCompile(`(?i)(?:^|[\s{,])"?(?:level|lvl|severity)"?\s*[=:]\s*"?([a-z]+)`)
+
+// logLevel classifies a log line; "" means info and is dropped. An explicit
+// level wins over words in the message, so dockerd's
+// level=warning msg="... failed ..." stays a warning.
 func logLevel(msg string) string {
+	if m := levelRe.FindStringSubmatch(msg); m != nil {
+		switch strings.ToLower(m[1]) {
+		case "emerg", "alert", "panic", "fatal", "crit", "critical", "err", "error":
+			return "ERR"
+		case "warn", "warning":
+			return "WARN"
+		case "info", "notice", "debug", "trace":
+			return ""
+		}
+	}
 	switch {
 	case errRe.MatchString(msg):
 		return "ERR"

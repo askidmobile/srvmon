@@ -11,7 +11,7 @@ services:
     pid: host          # host processes (server screen, stage 2)
     read_only: true
     security_opt:
-      - no-new-privileges:true
+      - no-new-privileges=true
     environment:
       SRVMON_URL: ${SRVMON_URL:?set SRVMON_URL}
       SRVMON_TOKEN: ${SRVMON_TOKEN:?set SRVMON_TOKEN}

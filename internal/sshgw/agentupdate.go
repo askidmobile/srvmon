@@ -102,7 +102,7 @@ $D rm -f srvmon-agent-old >/dev/null 2>&1 || true
 $D rename srvmon-agent srvmon-agent-old
 $D stop srvmon-agent-old >/dev/null 2>&1 || true
 if $D run -d --name srvmon-agent --restart unless-stopped \
-  --network host --pid host --read-only --security-opt no-new-privileges:true \
+  --network host --pid host --read-only --security-opt no-new-privileges=true \
   -e SRVMON_URL="$URL" -e SRVMON_TOKEN_FILE=/etc/srvmon/agent.token \
   -v /etc/srvmon/agent.token:/etc/srvmon/agent.token:ro \
   -v /proc:/host/proc:ro -v /:/host:ro,rslave \
