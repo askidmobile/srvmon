@@ -150,9 +150,17 @@ func dial(ctx context.Context, addr string, cfg *ssh.ClientConfig) (*ssh.Client,
 }
 
 // Run executes cmd with optional stdin and returns stdout and stderr.
+// Cancelling ctx closes c.
 func Run(ctx context.Context, c *ssh.Client, cmd string, stdin io.Reader) (string, string, error) {
+	// Cancellation closes the whole connection: a server that stops
+	// answering channel requests would otherwise block NewSession forever.
+	stop := context.AfterFunc(ctx, func() { c.Close() })
+	defer stop()
 	sess, err := c.NewSession()
 	if err != nil {
+		if ctx.Err() != nil {
+			err = ctx.Err()
+		}
 		return "", "", err
 	}
 	defer sess.Close()
@@ -160,8 +168,6 @@ func Run(ctx context.Context, c *ssh.Client, cmd string, stdin io.Reader) (strin
 	sess.Stdout = &out
 	sess.Stderr = &errb
 	sess.Stdin = stdin
-	stop := context.AfterFunc(ctx, func() { sess.Close() })
-	defer stop()
 	err = sess.Run(cmd)
 	if ctx.Err() != nil {
 		err = ctx.Err()

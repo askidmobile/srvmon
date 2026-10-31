@@ -44,6 +44,7 @@ const ERRORS: Record<string, string> = {
   busy: "уже идёт несколько установок, подождите",
   no_master_key: "на сервере мониторинга нет мастер-ключа",
   not_found: "сервер не найден",
+  onboarding: "для этого сервера уже идёт установка",
 };
 
 function errText(e: unknown): string {
@@ -215,7 +216,10 @@ export function AddServer({ attachId, onLogout }: { attachId?: number; onLogout:
       tags: existing.tags,
       description: existing.description,
     });
-    if (existing.host) setHostPort(existing.port && existing.port !== 22 ? `${existing.host}:${existing.port}` : existing.host);
+    if (existing.host) {
+      const h = existing.host.includes(":") ? `[${existing.host}]` : existing.host; // IPv6 literal
+      setHostPort(existing.port && existing.port !== 22 ? `${h}:${existing.port}` : h);
+    }
     setInstallAgent(!existing.last_seen);
   }, [existing]);
 

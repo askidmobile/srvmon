@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -220,5 +221,18 @@ func TestExistingServerKeepsAddressOnFailure(t *testing.T) {
 	list, _ := e.st.ListServers(ctx)
 	if len(list) != 1 || list[0].Host != "10.0.0.1" || list[0].Port != 22 {
 		t.Fatalf("existing card must keep its address and stay: %+v", list)
+	}
+}
+
+func TestJobsOneActivePerServer(t *testing.T) {
+	js := &jobs{m: map[string]*job{}}
+	if _, err := js.add(&job{serverID: 5}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := js.add(&job{serverID: 5}); !errors.Is(err, errServerBusy) {
+		t.Fatalf("second job for the same server: %v", err)
+	}
+	if _, err := js.add(&job{serverID: 6}); err != nil {
+		t.Fatalf("other server: %v", err)
 	}
 }

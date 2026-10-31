@@ -211,16 +211,23 @@ func (js *jobs) add(j *job) (string, error) {
 	js.mu.Lock()
 	defer js.mu.Unlock()
 	running := 0
+	sameServer := false
 	for k, old := range js.m {
 		old.mu.Lock()
 		expired := old.done && time.Since(old.finished) > jobRetention
 		if !old.done {
 			running++
+			sameServer = sameServer || old.serverID == j.serverID
 		}
 		old.mu.Unlock()
 		if expired {
 			delete(js.m, k)
 		}
+	}
+	// Checked under the same lock as the insert: two requests for one
+	// server must not both start (they would revoke each other's tokens).
+	if sameServer {
+		return "", errServerBusy
 	}
 	if running >= onboardRunLimit {
 		return "", errTooManyJobs
@@ -229,7 +236,10 @@ func (js *jobs) add(j *job) (string, error) {
 	return id, nil
 }
 
-var errTooManyJobs = errors.New("too many onboarding jobs")
+var (
+	errTooManyJobs = errors.New("too many onboarding jobs")
+	errServerBusy  = errors.New("server is being onboarded")
+)
 
 // active reports whether an unfinished onboarding job targets the server.
 func (js *jobs) active(serverID int64) bool {
@@ -313,9 +323,6 @@ func (s *Server) handleOnboard(w http.ResponseWriter, r *http.Request) {
 	} else if !ok {
 		writeError(w, http.StatusNotFound, "not_found")
 		return
-	} else if s.jobs.active(id) {
-		writeError(w, http.StatusConflict, "onboarding")
-		return
 	}
 
 	jctx, cancel := context.WithTimeout(context.Background(), onboardTimeout)
@@ -328,6 +335,10 @@ func (s *Server) handleOnboard(w http.ResponseWriter, r *http.Request) {
 		}
 		if errors.Is(err, errTooManyJobs) {
 			writeError(w, http.StatusTooManyRequests, "busy")
+			return
+		}
+		if errors.Is(err, errServerBusy) {
+			writeError(w, http.StatusConflict, "onboarding")
 			return
 		}
 		writeError(w, http.StatusInternalServerError, "internal")
