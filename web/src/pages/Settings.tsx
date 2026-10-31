@@ -1,4 +1,4 @@
-import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Hotkey, Shell } from "@/components/Shell";
 import { Button } from "@/components/ui/button";
@@ -135,16 +135,25 @@ function AIPanel() {
     }
   };
 
+  // The endpoint the form points at now: a model list that comes back after
+  // the provider or address changed belongs to another endpoint.
+  const endpoint = `${provider}|${baseUrl.trim()}|${isCustom ? api : ""}`;
+  const endpointRef = useRef(endpoint);
+  endpointRef.current = endpoint;
+
   const loadModels = async () => {
+    const asked = endpoint;
     setBusy("models");
     setMsg(null);
     try {
       const r = await agentApi.models({ provider, base_url: baseUrl.trim(), api: isCustom ? api : "", api_key: key.trim() || undefined });
-      setList(r.models);
-      setListInfo({ live: r.live, error: r.error });
-      setOnlyLive(r.live);
+      if (endpointRef.current === asked) {
+        setList(r.models);
+        setListInfo({ live: r.live, error: r.error });
+        setOnlyLive(r.live);
+      }
     } catch (e) {
-      setMsg({ ok: false, text: errText(e, "не удалось получить список моделей") });
+      if (endpointRef.current === asked) setMsg({ ok: false, text: errText(e, "не удалось получить список моделей") });
     }
     setBusy("");
   };
