@@ -63,8 +63,9 @@ const NEW_DEFAULTS: Record<string, Pick<Rule, "threshold" | "duration_sec">> = {
 
 const sevCls: Record<Severity, string> = { crit: "text-crit", warn: "text-warn", info: "text-tx" };
 
-// 300 → "5м", 5400 → "1ч30м".
-export function fmtDuration(sec: number): string {
+// 300 → "5м", 5400 → "1ч30м". Display keeps two units; full keeps all
+// (for the editor, so saving does not shorten the value).
+export function fmtDuration(sec: number, full = false): string {
   if (sec <= 0) return "─";
   const parts: string[] = [];
   for (const [n, u] of [
@@ -78,7 +79,7 @@ export function fmtDuration(sec: number): string {
       sec %= n;
     }
   }
-  return parts.slice(0, 2).join("");
+  return (full ? parts : parts.slice(0, 2)).join("");
 }
 
 // "1ч30м", "90s", "5m", "10" (minutes) → seconds; null when unreadable.
@@ -190,7 +191,7 @@ function RuleEditor({
 }) {
   const [r, setR] = useState(rule);
   const [thr, setThr] = useState(String(rule.threshold));
-  const [dur, setDur] = useState(rule.duration_sec ? fmtDuration(rule.duration_sec) : "");
+  const [dur, setDur] = useState(rule.duration_sec ? fmtDuration(rule.duration_sec, true) : "");
   const [err, setErr] = useState("");
   const k = KINDS[r.kind];
 
@@ -198,7 +199,7 @@ function RuleEditor({
     const d = NEW_DEFAULTS[kind];
     setR({ ...r, kind, ...d });
     setThr(String(d.threshold));
-    setDur(d.duration_sec ? fmtDuration(d.duration_sec) : "");
+    setDur(d.duration_sec ? fmtDuration(d.duration_sec, true) : "");
   };
 
   const save = async () => {

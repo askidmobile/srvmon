@@ -455,3 +455,15 @@ func TestQuietHoursDelayNotRecordedLoss(t *testing.T) {
 		t.Fatalf("after quiet hours: %+v", got)
 	}
 }
+
+func TestBufferedReportsAreNotEvaluated(t *testing.T) {
+	te := newTestEnv(t)
+	h := host(1)
+	h.Disks[0].Used = 99
+	// An old report from the agent's buffer, received just now.
+	te.push(protocol.Report{Timestamp: time.Now().Add(-10 * time.Minute), Host: h})
+	te.eval(t)
+	if len(te.open(t)) != 0 {
+		t.Fatal("alert fired from a buffered report")
+	}
+}

@@ -251,8 +251,11 @@ func (e *Engine) Evaluate(ctx context.Context) error {
 // needed is missing or stale, so open alerts keep their state.
 func (e *Engine) check(r store.Rule, srv store.Server, now time.Time) ([]cond, bool) {
 	snap, hasSnap := e.latest.Get(srv.ID)
-	fresh := hasSnap && now.Sub(snap.Received) < staleAfter
 	rep := snap.Report
+	// Both received and collected recently: after an outage the agent first
+	// uploads its buffer, oldest reports first, which must not fire or
+	// resolve anything. (Agents are expected to keep NTP time.)
+	fresh := hasSnap && now.Sub(snap.Received) < staleAfter && now.Sub(rep.Timestamp) < staleAfter
 	switch r.Kind {
 	case store.KindAgentSilent:
 		last := time.Time{}
