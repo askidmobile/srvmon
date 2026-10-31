@@ -457,7 +457,11 @@ export function AgentPanel({
   }, []);
 
   useEffect(() => {
-    if (chatId && chatId === created.current) return;
+    if (chatId && chatId === created.current) {
+      // Only the first render after send() created it: later visits load it.
+      created.current = undefined;
+      return;
+    }
     setLive(null);
     if (!chatId) {
       setChat(null);

@@ -96,6 +96,9 @@ func TestClassify(t *testing.T) {
 		"find / -exec rm {} ;",
 		"sort -o /etc/passwd x",
 		"sort -no /etc/passwd x",
+		"find . -* sh -c 'touch marker' ?",
+		"ls /var/log/*.log",
+		"cat /etc/[a-z]*",
 		"journalctl --cursor-file=/home/srvmon/.ssh/authorized_keys",
 		"journalctl --cursor-file /tmp/x",
 		"journalctl --vacuum-time=1d -n5",
@@ -170,6 +173,8 @@ func TestSchedule(t *testing.T) {
 		{"0 12 29 2 *", time.Date(2028, 2, 29, 12, 0, 0, 0, time.UTC)},
 		{"0 0 * * 7", time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)}, // 7 = Sunday
 		{"@every 30m", base.Add(30 * time.Minute)},
+		{"*/5 * * * *", time.Date(2026, 10, 31, 8, 10, 0, 0, time.UTC)},
+		{"0,55 * * * *", time.Date(2026, 10, 31, 8, 55, 0, 0, time.UTC)},
 	}
 	for _, c := range cases {
 		s, err := ParseSchedule(c.expr)
@@ -180,7 +185,8 @@ func TestSchedule(t *testing.T) {
 			t.Errorf("%s: next %v, want %v", c.expr, got, c.want)
 		}
 	}
-	for _, bad := range []string{"* * * * *", "*/2 * * * *", "@every 1m", "61 * * * *", "* * *", "a b c d e", "5-1 * * * *", "*/0 * * * *", "0 0 31 2 *", "0 0 30 2 *"} {
+	for _, bad := range []string{"* * * * *", "*/2 * * * *", "@every 1m", "61 * * * *", "* * *", "a b c d e", "5-1 * * * *", "*/0 * * * *", "0 0 31 2 *", "0 0 30 2 *",
+		"0-11 * * * *", "0,58 * * * *", "*/4 * * * *", "0,3,30 * * * *"} {
 		if _, err := ParseSchedule(bad); err == nil {
 			t.Errorf("%q: want error", bad)
 		}

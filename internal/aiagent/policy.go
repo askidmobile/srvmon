@@ -15,8 +15,8 @@ import (
 //
 // Accepted: a pipeline (single |) of allowlisted programs with plain or
 // quoted arguments. Rejected outright: ; & || && redirections, command
-// substitution, variables, subshells, env assignments, paths to binaries,
-// sudo and anything not on the list.
+// substitution, variables, subshells, unquoted globs, env assignments, paths
+// to binaries, sudo and anything not on the list.
 func Classify(cmd string) (readOnly bool, reason string) {
 	segs, err := splitPipeline(cmd)
 	if err != nil {
@@ -90,6 +90,10 @@ func splitPipeline(cmd string) ([][]string, error) {
 			return nil, fmt.Errorf("спецсимвол %q", string(c))
 		case c < 0x20 || c == 0x7f:
 			return nil, fmt.Errorf("управляющий символ")
+		case c == '*' || c == '?' || c == '[':
+			// The remote shell would expand it into names nobody checked
+			// (a file named -exec turns into a find action).
+			return nil, fmt.Errorf("шаблон имён без кавычек")
 		default:
 			cur.WriteByte(c)
 			inWord = true

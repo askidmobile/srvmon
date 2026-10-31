@@ -92,9 +92,9 @@ export function createApp(cfg: AgentConfig & { token: string }, status: () => St
       if (!text) return json(res, 400, { error: "bad_text" });
       if (chat) {
         const id = Number(chat[1]);
-        return stream(req, res, (emit, signal) => agents.runChat(id, text, body.server || undefined, emit, signal));
+        return await stream(req, res, (emit, signal) => agents.runChat(id, text, body.server || undefined, emit, signal));
       }
-      return stream(req, res, async (emit, signal) => {
+      return await stream(req, res, async (emit, signal) => {
         await agents.runTask(body.task_id ?? 0, text, emit, signal);
         return true;
       });

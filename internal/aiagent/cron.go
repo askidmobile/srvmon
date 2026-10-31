@@ -69,15 +69,23 @@ func ParseSchedule(expr string) (*Schedule, error) {
 			return nil, fmt.Errorf("%s: %w", st.name, err)
 		}
 	}
-	// A run every minute is too frequent for an LLM task.
-	n := 0
-	for _, m := range s.min {
-		if m {
-			n++
+	// A run every minute is too frequent for an LLM task: selected minutes
+	// must be at least 5 apart, also across the hour (59 → 0).
+	var mins []int
+	for m, ok := range s.min {
+		if ok {
+			mins = append(mins, m)
 		}
 	}
-	if n > 12 {
-		return nil, fmt.Errorf("минуты: не чаще раза в 5 минут")
+	for i, m := range mins {
+		next := mins[(i+1)%len(mins)]
+		gap := next - m
+		if gap <= 0 {
+			gap += 60
+		}
+		if gap < 5 {
+			return nil, fmt.Errorf("минуты: не чаще раза в 5 минут")
+		}
 	}
 	// e.g. "0 0 31 2 *": valid fields, but the date never comes.
 	if s.Next(time.Now()).IsZero() {
