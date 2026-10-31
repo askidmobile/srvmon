@@ -21,6 +21,15 @@ apt-get install -y -qq fail2ban
 
 install -m 0644 "$HERE/fail2ban/filter.d/srvmon-auth.conf" /etc/fail2ban/filter.d/srvmon-auth.conf
 install -m 0644 "$HERE/fail2ban/jail.d/srvmon.conf" /etc/fail2ban/jail.d/srvmon.conf
+# With a host reverse proxy (SRVMON_PROXY=external) traffic to 80/443 goes
+# through INPUT, not DOCKER-USER, so the ban has to land there.
+ENV_FILE="$DEPLOY_PATH/.env"
+[[ -f "$ENV_FILE" ]] || ENV_FILE="$HERE/.env.example"
+if grep -q '^SRVMON_PROXY=external' "$ENV_FILE"; then
+  printf '[srvmon-auth]\nchain = INPUT\n' > /etc/fail2ban/jail.d/srvmon.local
+else
+  rm -f /etc/fail2ban/jail.d/srvmon.local
+fi
 mkdir -p /var/log/srvmon && touch /var/log/srvmon/auth.log
 chown -R 65532:65532 /var/log/srvmon
 systemctl enable --now fail2ban
