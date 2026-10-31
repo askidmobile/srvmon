@@ -1,16 +1,19 @@
 name: CI
 
+# Runs on PRs, and as the first job of Release for every push to main or a
+# v* tag (workflow_call), so images are only published from green commits.
 on:
   pull_request:
-  push:
-    branches: [main]
+  workflow_call:
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # github.workflow is the caller's name under workflow_call, so a Release
+  # run never cancels or is cancelled by a PR run.
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   go:

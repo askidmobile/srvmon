@@ -31,12 +31,16 @@ func NewWriter(url string) *Writer {
 	return &Writer{base: strings.TrimRight(url, "/"), client: &http.Client{Timeout: 10 * time.Second}}
 }
 
-// Write converts and writes one report.
-func (w *Writer) Write(ctx context.Context, server string, r protocol.Report) error {
-	if w == nil {
+// Write converts reports of one server and writes them in a single request,
+// so a catch-up batch costs one round trip to VictoriaMetrics.
+func (w *Writer) Write(ctx context.Context, server string, reports ...protocol.Report) error {
+	if w == nil || len(reports) == 0 {
 		return nil
 	}
-	body := Encode(server, r)
+	var body []byte
+	for _, r := range reports {
+		body = append(body, Encode(server, r)...)
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, w.base+"/api/v1/import/prometheus", bytes.NewReader(body))
 	if err != nil {
 		return err

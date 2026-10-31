@@ -47,13 +47,11 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "bad_json")
 		return
 	}
-	for _, rep := range reports {
-		if err := s.vm.Write(r.Context(), name, rep); err != nil {
-			// Tell the agent to retry: it keeps the batch in its buffer.
-			s.log.Warn("victoriametrics write", "server", name, "err", err)
-			writeError(w, http.StatusBadGateway, "storage_unavailable")
-			return
-		}
+	if err := s.vm.Write(r.Context(), name, reports...); err != nil {
+		// Tell the agent to retry: it keeps the batch in its buffer.
+		s.log.Warn("victoriametrics write", "server", name, "err", err)
+		writeError(w, http.StatusBadGateway, "storage_unavailable")
+		return
 	}
 	if n := len(reports); n > 0 {
 		s.latest.Put(serverID, reports[n-1])

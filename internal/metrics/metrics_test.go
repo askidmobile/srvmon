@@ -1,6 +1,10 @@
 package metrics
 
 import (
+	"context"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -28,5 +32,27 @@ func TestEncode(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in:\n%s", want, out)
 		}
+	}
+}
+
+func TestWriteBatchIsOneRequest(t *testing.T) {
+	var calls int
+	var body string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		b, _ := io.ReadAll(r.Body)
+		body = string(b)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer ts.Close()
+	reports := make([]protocol.Report, 50)
+	for i := range reports {
+		reports[i].Timestamp = time.UnixMilli(int64(1700000000000 + i))
+	}
+	if err := NewWriter(ts.URL).Write(context.Background(), "s", reports...); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 1 || strings.Count(body, "srvmon_cpu_percent") != 50 {
+		t.Fatalf("calls=%d, cpu lines=%d", calls, strings.Count(body, "srvmon_cpu_percent"))
 	}
 }
