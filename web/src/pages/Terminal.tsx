@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { AppHeader } from "@/components/AppHeader";
+import { Hotkey, Shell } from "@/components/Shell";
 import { Button } from "@/components/ui/button";
 import { Panel } from "@/components/ui/panel";
 import { type TermStatus, XTerm } from "@/components/XTerm";
 import { api, type ServerView } from "@/lib/api";
+import { href, type Route } from "@/lib/router";
 import { cn } from "@/lib/utils";
 
 interface Tab {
@@ -16,7 +17,17 @@ interface Tab {
 
 let nextKey = 1;
 
-export function TerminalPage({ serverId, onLogout }: { serverId?: number; onLogout: () => void }) {
+export function TerminalPage({
+  serverId,
+  route,
+  version,
+  onLogout,
+}: {
+  serverId?: number;
+  route: Route;
+  version: string;
+  onLogout: () => void;
+}) {
   const [servers, setServers] = useState<ServerView[] | null>(null);
   const [tabs, setTabs] = useState<Tab[]>([]);
   const [active, setActive] = useState(0);
@@ -85,9 +96,35 @@ export function TerminalPage({ serverId, onLogout }: { serverId?: number; onLogo
   };
 
   return (
-    <div className="flex h-screen flex-col">
-      <AppHeader active="term" />
-      <main className="flex min-h-0 flex-1 flex-col p-4 sm:p-5">
+    <Shell
+      route={route}
+      version={version}
+      onLogout={onLogout}
+      footer={
+        cur && curServer ? (
+          <>
+            <span>
+              ssh ed25519 · {curServer.host}:{curServer.port || 22}
+            </span>
+            {size[cur.key] && <span>{size[cur.key]}</span>}
+            <span>через srvmon-gateway</span>
+            <span>{cur.status === "open" ? "подключено" : cur.status === "closed" ? "закрыто" : "подключение…"}</span>
+            {cur.status === "closed" && (
+              <button type="button" className="text-primary" onClick={() => open(cur.serverId, cur.container)}>
+                ⟳ переподключить
+              </button>
+            )}
+          </>
+        ) : (
+          <>
+            <Hotkey k="esc">к сессии</Hotkey>
+            <span className="text-muted-foreground">нет открытых сессий</span>
+          </>
+        )
+      }
+      footerNote="приватный ключ не покидает сервер мониторинга"
+    >
+      <div className="flex min-h-0 flex-1 flex-col">
         <div className="flex items-end gap-1">
           <div className="flex min-w-0 flex-1 items-end gap-1 overflow-x-auto [scrollbar-width:thin]">
             {tabs.map((t, i) => (
@@ -126,7 +163,10 @@ export function TerminalPage({ serverId, onLogout }: { serverId?: number; onLogo
         </div>
 
         <div
-          className={cn("relative min-h-[420px] flex-1 border bg-field", tabs.length ? "border-primary" : "border-border")}
+          className={cn(
+            "relative min-h-[420px] flex-1 border bg-field",
+            tabs.length ? "border-primary" : "border-border",
+          )}
         >
           {tabs.map((t) => (
             <div key={t.key} className={cn("absolute inset-0 p-2", t.key !== active && "invisible")}>
@@ -147,7 +187,7 @@ export function TerminalPage({ serverId, onLogout }: { serverId?: number; onLogo
                 {servers && withSSH.length === 0 && (
                   <div className="text-muted-foreground">
                     нет серверов с ssh-доступом. Добавьте сервер через{" "}
-                    <a className="text-primary" href="#/add">
+                    <a className="text-primary" href={href.add()}>
                       мастер
                     </a>
                     .
@@ -190,7 +230,7 @@ export function TerminalPage({ serverId, onLogout }: { serverId?: number; onLogo
                     {withoutSSH.map((s, i) => (
                       <span key={s.id}>
                         {i > 0 && ", "}
-                        <a className="text-primary" href={`#/add/${s.id}`}>
+                        <a className="text-primary" href={href.add(s.id)}>
                           {s.name}
                         </a>
                       </span>
@@ -209,30 +249,7 @@ export function TerminalPage({ serverId, onLogout }: { serverId?: number; onLogo
             </div>
           )}
         </div>
-
-        <div className="flex flex-wrap gap-x-4 gap-y-1 pt-1.5 text-muted-foreground">
-          {cur && curServer ? (
-            <>
-              <span>
-                ssh ed25519 · {curServer.host}:{curServer.port || 22}
-              </span>
-              {size[cur.key] && <span>{size[cur.key]}</span>}
-              <span>через srvmon-gateway</span>
-              <span>
-                {cur.status === "open" ? "подключено" : cur.status === "closed" ? "закрыто" : "подключение…"}
-              </span>
-              {cur.status === "closed" && (
-                <button type="button" className="text-primary" onClick={() => open(cur.serverId, cur.container)}>
-                  ⟳ переподключить
-                </button>
-              )}
-            </>
-          ) : (
-            <span>нет открытых сессий</span>
-          )}
-          <span className="ml-auto">приватный ключ не покидает сервер мониторинга</span>
-        </div>
-      </main>
-    </div>
+      </div>
+    </Shell>
   );
 }

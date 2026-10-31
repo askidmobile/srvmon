@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -30,29 +31,60 @@ func NewDocker(sock string) *Docker {
 }
 
 type dockerContainer struct {
-	ID     string   `json:"Id"`
-	Names  []string `json:"Names"`
-	Image  string   `json:"Image"`
-	State  string   `json:"State"`
-	Status string   `json:"Status"`
+	ID     string            `json:"Id"`
+	Names  []string          `json:"Names"`
+	Image  string            `json:"Image"`
+	State  string            `json:"State"`
+	Status string            `json:"Status"`
+	Labels map[string]string `json:"Labels"`
+	Ports  []dockerPort      `json:"Ports"`
+}
+
+type dockerPort struct {
+	PrivatePort int    `json:"PrivatePort"`
+	PublicPort  int    `json:"PublicPort"`
+	Type        string `json:"Type"`
+}
+
+// formatPorts renders published ports as "8080→80/tcp" and exposed ones as
+// "6379/tcp", without the IPv4/IPv6 duplicates.
+func formatPorts(ps []dockerPort) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, p := range ps {
+		s := fmt.Sprintf("%d/%s", p.PrivatePort, p.Type)
+		if p.PublicPort != 0 {
+			s = fmt.Sprintf("%d→%d/%s", p.PublicPort, p.PrivatePort, p.Type)
+		}
+		if !seen[s] {
+			seen[s] = true
+			out = append(out, s)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+func (d *Docker) getJSON(ctx context.Context, path string, v any) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://docker"+path, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := d.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("docker %s: %s", path, resp.Status)
+	}
+	return json.NewDecoder(resp.Body).Decode(v)
 }
 
 // Containers returns all containers (running and stopped).
 func (d *Docker) Containers(ctx context.Context) ([]protocol.Container, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://docker/containers/json?all=1", nil)
-	if err != nil {
-		return nil, err
-	}
-	resp, err := d.client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("docker: %s", resp.Status)
-	}
 	var list []dockerContainer
-	if err := json.NewDecoder(resp.Body).Decode(&list); err != nil {
+	if err := d.getJSON(ctx, "/containers/json?all=1", &list); err != nil {
 		return nil, err
 	}
 	out := make([]protocol.Container, 0, len(list))
@@ -65,12 +97,14 @@ func (d *Docker) Containers(ctx context.Context) ([]protocol.Container, error) {
 			name = strings.TrimPrefix(c.Names[0], "/")
 		}
 		out = append(out, protocol.Container{
-			ID:     c.ID,
-			Name:   name,
-			Image:  c.Image,
-			State:  c.State,
-			Status: c.Status,
-			Health: healthFromStatus(c.Status),
+			ID:      c.ID,
+			Name:    name,
+			Image:   c.Image,
+			State:   c.State,
+			Status:  c.Status,
+			Health:  healthFromStatus(c.Status),
+			Ports:   formatPorts(c.Ports),
+			Compose: c.Labels["com.docker.compose.project"],
 		})
 	}
 	return out, nil

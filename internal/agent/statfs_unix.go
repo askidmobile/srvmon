@@ -2,7 +2,10 @@
 
 package agent
 
-import "syscall"
+import (
+	"os"
+	"syscall"
+)
 
 func statfs(path string) (total, used uint64, err error) {
 	var st syscall.Statfs_t
@@ -13,4 +16,11 @@ func statfs(path string) (total, used uint64, err error) {
 	total = st.Blocks * bsize
 	free := st.Bfree * bsize
 	return total, total - free, nil
+}
+
+func inode(fi os.FileInfo) uint64 {
+	if st, ok := fi.Sys().(*syscall.Stat_t); ok {
+		return uint64(st.Ino) //nolint:unconvert // width differs per OS
+	}
+	return 0
 }

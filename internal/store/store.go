@@ -320,43 +320,101 @@ func (s *Store) TokenLastSeen(ctx context.Context, tokenHash string) (time.Time,
 	return time.Unix(ts.Int64, 0), nil
 }
 
+const serverCols = `s.id, s.name, s.description, s.project, s.grp, s.tags, s.host, s.port,
+	s.provider, s.plan, s.cost, s.currency, s.next_payment, s.period, s.panel_url, s.ssh_user,
+	s.ssh_key_enc IS NOT NULL, s.created_at,
+	(SELECT MAX(last_seen_at) FROM agent_tokens t WHERE t.server_id = s.id)`
+
+type scanner interface{ Scan(dest ...any) error }
+
+func scanServer(row scanner) (Server, error) {
+	var srv Server
+	var tags string
+	var created int64
+	var lastSeen sql.NullInt64
+	var cost sql.NullFloat64
+	if err := row.Scan(&srv.ID, &srv.Name, &srv.Description, &srv.Project, &srv.Group, &tags, &srv.Host, &srv.Port,
+		&srv.Provider, &srv.Plan, &cost, &srv.Currency, &srv.NextPayment, &srv.Period, &srv.PanelURL, &srv.SSHUser,
+		&srv.HasSSH, &created, &lastSeen); err != nil {
+		return srv, err
+	}
+	_ = json.Unmarshal([]byte(tags), &srv.Tags)
+	if srv.Tags == nil {
+		srv.Tags = []string{}
+	}
+	srv.CreatedAt = time.Unix(created, 0).UTC()
+	if cost.Valid {
+		c := cost.Float64
+		srv.Cost = &c
+	}
+	if lastSeen.Valid {
+		t := time.Unix(lastSeen.Int64, 0).UTC()
+		srv.LastSeen = &t
+	}
+	return srv, nil
+}
+
 // ListServers returns all servers ordered by group and name, with the most
 // recent agent push time.
 func (s *Store) ListServers(ctx context.Context) ([]Server, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT s.id, s.name, s.description, s.project, s.grp, s.tags, s.host, s.port,
-		s.provider, s.plan, s.cost, s.currency, s.next_payment, s.period, s.panel_url, s.ssh_user,
-		s.ssh_key_enc IS NOT NULL, s.created_at,
-		(SELECT MAX(last_seen_at) FROM agent_tokens t WHERE t.server_id = s.id)
-		FROM servers s ORDER BY s.grp, s.name`)
+	rows, err := s.db.QueryContext(ctx, `SELECT `+serverCols+` FROM servers s ORDER BY s.grp, s.name`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	out := []Server{}
 	for rows.Next() {
-		var srv Server
-		var tags string
-		var created int64
-		var lastSeen sql.NullInt64
-		var cost sql.NullFloat64
-		if err := rows.Scan(&srv.ID, &srv.Name, &srv.Description, &srv.Project, &srv.Group, &tags, &srv.Host, &srv.Port,
-			&srv.Provider, &srv.Plan, &cost, &srv.Currency, &srv.NextPayment, &srv.Period, &srv.PanelURL, &srv.SSHUser,
-			&srv.HasSSH, &created, &lastSeen); err != nil {
+		srv, err := scanServer(rows)
+		if err != nil {
 			return nil, err
-		}
-		_ = json.Unmarshal([]byte(tags), &srv.Tags)
-		srv.CreatedAt = time.Unix(created, 0).UTC()
-		if cost.Valid {
-			c := cost.Float64
-			srv.Cost = &c
-		}
-		if lastSeen.Valid {
-			t := time.Unix(lastSeen.Int64, 0).UTC()
-			srv.LastSeen = &t
 		}
 		out = append(out, srv)
 	}
 	return out, rows.Err()
+}
+
+// GetServer returns one server or ErrNotFound.
+func (s *Store) GetServer(ctx context.Context, id int64) (Server, error) {
+	srv, err := scanServer(s.db.QueryRowContext(ctx, `SELECT `+serverCols+` FROM servers s WHERE s.id = ?`, id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return srv, ErrNotFound
+	}
+	return srv, err
+}
+
+// ServerCard is the editable part of a server ("passport"). The name is not
+// editable here: it labels the server's time series.
+type ServerCard struct {
+	Description string   `json:"description"`
+	Project     string   `json:"project"`
+	Group       string   `json:"group"`
+	Tags        []string `json:"tags"`
+	Provider    string   `json:"provider"`
+	Plan        string   `json:"plan"`
+	Cost        *float64 `json:"cost"`
+	Currency    string   `json:"currency"`
+	NextPayment string   `json:"next_payment"`
+	Period      string   `json:"period"`
+	PanelURL    string   `json:"panel_url"`
+}
+
+// UpdateServerCard replaces the passport fields of a server.
+func (s *Store) UpdateServerCard(ctx context.Context, id int64, c ServerCard) error {
+	if c.Tags == nil {
+		c.Tags = []string{}
+	}
+	tags, _ := json.Marshal(c.Tags)
+	res, err := s.db.ExecContext(ctx, `UPDATE servers SET description = ?, project = ?, grp = ?, tags = ?,
+		provider = ?, plan = ?, cost = ?, currency = ?, next_payment = ?, period = ?, panel_url = ? WHERE id = ?`,
+		c.Description, c.Project, c.Group, string(tags), c.Provider, c.Plan, c.Cost, c.Currency, c.NextPayment,
+		c.Period, c.PanelURL, id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // AddAgentToken stores the hash of a new agent token for a server.

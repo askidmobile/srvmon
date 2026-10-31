@@ -13,6 +13,7 @@ export default defineConfig({
       "/healthz": "http://127.0.0.1:8080",
     },
   },
-  // assetsInlineLimit 0: no data: URIs, the CSP allows fonts only from self.
+  // assetsInlineLimit 0: small font subsets would otherwise become data: URIs,
+  // which the CSP (font-src 'self') blocks.
   build: { outDir: "dist", emptyOutDir: true, sourcemap: false, assetsInlineLimit: 0 },
 });

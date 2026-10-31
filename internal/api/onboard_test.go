@@ -12,19 +12,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/askidmobile/srvmon/internal/auth"
 	"github.com/askidmobile/srvmon/internal/secret"
 	"github.com/askidmobile/srvmon/internal/sshgw"
 	"github.com/askidmobile/srvmon/internal/store"
 )
 
-func (e *env) login(t *testing.T) {
+// loginSSH logs in and gives the server a master key for SSH secrets.
+func (e *env) loginSSH(t *testing.T) {
 	t.Helper()
-	e.post(t, "/api/auth/password", map[string]string{"password": "hunter2"})
-	code, _ := auth.TOTPCode(e.secret, auth.TOTPStep(time.Now()))
-	if r := e.post(t, "/api/auth/totp", map[string]string{"code": code}); r.StatusCode != http.StatusOK {
-		t.Fatalf("login: %d", r.StatusCode)
-	}
+	e.login(t)
 	key := make([]byte, 32)
 	rand.Read(key)
 	e.srv.secrets, _ = secret.New(key)
@@ -67,7 +63,7 @@ func TestStage3RoutesRequireSession(t *testing.T) {
 
 func TestOnboardValidation(t *testing.T) {
 	e := newEnv(t)
-	e.login(t)
+	e.loginSSH(t)
 	key, _ := sshgw.GenerateKey("")
 	valid := func() onboardReq {
 		return onboardReq{
@@ -113,7 +109,7 @@ func TestOnboardValidation(t *testing.T) {
 
 func TestOnboardFailureRollsBack(t *testing.T) {
 	e := newEnv(t)
-	e.login(t)
+	e.loginSSH(t)
 	key, _ := sshgw.GenerateKey("")
 	req := onboardReq{
 		// Port 1 on localhost: connection refused right away.
@@ -154,7 +150,7 @@ func TestOnboardFailureRollsBack(t *testing.T) {
 
 func TestTerminalChecks(t *testing.T) {
 	e := newEnv(t)
-	e.login(t)
+	e.loginSSH(t)
 	id, _ := e.st.CreateServer(context.Background(), store.Server{Name: "nokey"})
 
 	get := func(path, origin string) int {
@@ -196,7 +192,7 @@ func TestCardNormalize(t *testing.T) {
 
 func TestExistingServerKeepsAddressOnFailure(t *testing.T) {
 	e := newEnv(t)
-	e.login(t)
+	e.loginSSH(t)
 	ctx := context.Background()
 	id, _ := e.st.CreateServer(ctx, store.Server{Name: "old", Host: "10.0.0.1", Port: 22})
 	key, _ := sshgw.GenerateKey("")
@@ -231,7 +227,7 @@ func TestJobsOneActivePerServer(t *testing.T) {
 
 func TestDeleteRefusedDuringOnboarding(t *testing.T) {
 	e := newEnv(t)
-	e.login(t)
+	e.loginSSH(t)
 	id, _ := e.st.CreateServer(context.Background(), store.Server{Name: "busy"})
 	if _, err := e.srv.jobs.add(&job{serverID: id, cancel: func() {}}); err != nil {
 		t.Fatal(err)

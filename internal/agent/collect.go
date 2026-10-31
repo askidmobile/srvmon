@@ -102,6 +102,9 @@ func (c *Collector) mem(h *protocol.HostMetrics) error {
 	h.MemAvailable = m["MemAvailable"]
 	h.SwapTotal = m["SwapTotal"]
 	h.SwapFree = m["SwapFree"]
+	h.MemFree = m["MemFree"]
+	h.MemCached = m["Cached"] + m["SReclaimable"]
+	h.MemBuffers = m["Buffers"]
 	return nil
 }
 

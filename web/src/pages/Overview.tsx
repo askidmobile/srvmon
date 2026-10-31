@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 
+import { Hotkey, Shell } from "@/components/Shell";
 import { Button } from "@/components/ui/button";
 import { Panel } from "@/components/ui/panel";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { api, type ServerView } from "@/lib/api";
+import { href, navigate, type Route } from "@/lib/router";
 import { cn, formatBytes, formatUptime } from "@/lib/utils";
 
 function level(p: number) {
@@ -33,10 +35,24 @@ function Row({ s, onDelete }: { s: ServerView; onDelete: (s: ServerView) => void
   const running = containers.filter((c) => c.state === "running").length;
   const bad = containers.filter((c) => c.state !== "running" || c.health === "unhealthy").length;
   return (
-    <tr className="border-t border-border/60 hover:bg-secondary/60">
+    <tr
+      className="cursor-pointer border-t border-border/60 hover:bg-secondary/60 focus-visible:bg-secondary"
+      tabIndex={0}
+      onClick={() => navigate(href.server(s.id))}
+      onKeyDown={(e) => {
+        const row = e.currentTarget;
+        if (e.key === "Enter") navigate(href.server(s.id));
+        else if (e.key === "ArrowDown") (row.nextElementSibling as HTMLElement | null)?.focus();
+        else if (e.key === "ArrowUp") (row.previousElementSibling as HTMLElement | null)?.focus();
+        else return;
+        e.preventDefault();
+      }}
+    >
       <td className="py-1.5 pr-4">
         <span className={s.online ? "text-primary" : "text-crit"}>{s.online ? "●" : "○"}</span>{" "}
-        <span className="text-hi">{s.name}</span>
+        <a href={href.server(s.id)} className="text-hi hover:text-primary" onClick={(e) => e.stopPropagation()}>
+          {s.name}
+        </a>
         {s.description && <div className="text-xs text-muted-foreground">{s.description}</div>}
       </td>
       <td className="pr-4 text-muted-foreground">{s.group || "—"}</td>
@@ -61,16 +77,20 @@ function Row({ s, onDelete }: { s: ServerView; onDelete: (s: ServerView) => void
         {s.cost != null ? `${s.cost} ${s.currency}` : "—"}
         {s.next_payment && <div className="text-xs">до {s.next_payment}</div>}
       </td>
-      <td className="whitespace-nowrap pl-2 text-right">
+      <td
+        className="whitespace-nowrap pl-2 text-right"
+        onClick={(e) => e.stopPropagation()}
+        onKeyDown={(e) => e.stopPropagation()}
+      >
         {s.has_ssh ? (
           <Button size="sm" variant="outline" asChild>
-            <a href={`#/term/${s.id}`} title="терминал">
+            <a href={href.terminal(s.id)} title="терминал">
               &gt;_
             </a>
           </Button>
         ) : (
           <Button size="sm" variant="ghost" asChild>
-            <a href={`#/add/${s.id}`} title="подключить ssh-доступ">
+            <a href={href.add(s.id)} title="подключить ssh-доступ">
               + ssh
             </a>
           </Button>
@@ -83,7 +103,7 @@ function Row({ s, onDelete }: { s: ServerView; onDelete: (s: ServerView) => void
   );
 }
 
-export function Overview({ version, onLogout }: { version: string; onLogout: () => void }) {
+export function Overview({ route, version, onLogout }: { route: Route; version: string; onLogout: () => void }) {
   const [servers, setServers] = useState<ServerView[] | null>(null);
   const [error, setError] = useState("");
   const [group, setGroup] = useState("все");
@@ -119,35 +139,31 @@ export function Overview({ version, onLogout }: { version: string; onLogout: () 
   const online = (servers ?? []).filter((s) => s.online).length;
 
   return (
-    <div className="mx-auto flex min-h-screen max-w-[1600px] flex-col gap-5 p-4 sm:p-6">
-      <header className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <span className="font-bold text-primary">srvmon</span>
-          <span className="text-muted-foreground">
-            серверов {servers?.length ?? 0} · онлайн <span className="text-primary">{online}</span>
-          </span>
-        </div>
-        <div className="flex items-center gap-3">
+    <Shell
+      route={route}
+      version={version}
+      onLogout={onLogout}
+      status={
+        <>
           {error && <span className="text-crit">{error}</span>}
-          <span className="text-xs text-muted-foreground">v{version}</span>
-          <Button asChild>
-            <a href="#/add">+ сервер</a>
+          <span>
+            <span className={online === (servers?.length ?? 0) ? "text-primary" : "text-warn"}>●</span> {online}/
+            {servers?.length ?? 0} up
+          </span>
+          <Button size="sm" asChild>
+            <a href={href.add()}>+ сервер</a>
           </Button>
-          <Button variant="outline" asChild>
-            <a href="#/term">&gt;_ терминал</a>
-          </Button>
-          <Button
-            variant="outline"
-            onClick={async () => {
-              await api.logout().catch(() => undefined);
-              onLogout();
-            }}
-          >
-            выйти
-          </Button>
-        </div>
-      </header>
-
+        </>
+      }
+      footer={
+        <>
+          <Hotkey k="↑↓">выбор</Hotkey>
+          <Hotkey k="enter">экран сервера</Hotkey>
+          <Hotkey k="3">терминал</Hotkey>
+        </>
+      }
+      footerNote="обновление 5с"
+    >
       <nav className="flex flex-wrap gap-2" aria-label="группы">
         {groups.map((g) => (
           <Button key={g} size="sm" variant={g === group ? "default" : "outline"} onClick={() => setGroup(g)}>
@@ -160,7 +176,7 @@ export function Overview({ version, onLogout }: { version: string; onLogout: () 
         {servers && servers.length === 0 ? (
           <div className="py-6 text-muted-foreground">
             серверов пока нет.{" "}
-            <a className="text-primary" href="#/add">
+            <a className="text-primary" href={href.add()}>
               Добавьте первый
             </a>
             : мастер сгенерирует ssh-ключ, пропишет его по паролю и поставит агента.
@@ -190,6 +206,6 @@ export function Overview({ version, onLogout }: { version: string; onLogout: () 
           </ScrollArea>
         )}
       </Panel>
-    </div>
+    </Shell>
   );
 }

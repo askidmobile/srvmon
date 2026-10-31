@@ -53,10 +53,8 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, "storage_unavailable")
 		return
 	}
-	if n := len(reports); n > 0 {
-		s.latest.Put(serverID, reports[n-1])
-	}
-	writeJSON(w, http.StatusOK, protocol.IngestResponse{})
+	s.latest.Put(serverID, reports...)
+	writeJSON(w, http.StatusOK, protocol.IngestResponse{Detail: s.latest.Watching(serverID)})
 }
 
 type serverView struct {

@@ -91,16 +91,11 @@ func (c *cardInput) normalize() string {
 			return "field_too_long"
 		}
 	}
-	switch c.Period {
-	case "", "month", "year", "hour":
-	default:
+	if !validPeriod(c.Period) {
 		return "bad_period"
 	}
-	if c.PanelURL != "" {
-		u, err := url.Parse(c.PanelURL)
-		if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" {
-			return "bad_url"
-		}
+	if !validPanelURL(c.PanelURL) {
+		return "bad_url"
 	}
 	c.Currency = strings.ToUpper(c.Currency)
 	tags := make([]string, 0, len(c.Tags))
@@ -137,6 +132,24 @@ func (c cardInput) server() store.Server {
 		Host: c.Host, Port: c.Port, Provider: c.Provider, Plan: c.Plan, Cost: c.Cost, Currency: c.Currency,
 		NextPayment: c.NextPayment, Period: c.Period, PanelURL: c.PanelURL,
 	}
+}
+
+func validPeriod(p string) bool {
+	switch p {
+	case "", "month", "year", "hour":
+		return true
+	}
+	return false
+}
+
+// validPanelURL allows an empty value or an absolute http(s) URL (the link
+// is rendered as href, so javascript: and friends must not get through).
+func validPanelURL(s string) bool {
+	if s == "" {
+		return true
+	}
+	u, err := url.Parse(s)
+	return err == nil && (u.Scheme == "https" || u.Scheme == "http") && u.Host != "" && len(s) <= maxFieldLen
 }
 
 // --- probe: show the host key before any password is sent ---
@@ -563,7 +576,7 @@ func (s *Server) handleDeleteServer(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal")
 		return
 	}
-	s.latest.Delete(id)
+	s.latest.Forget(id)
 	_ = s.store.Audit(r.Context(), s.clientIP(r), "server_delete", strconv.FormatInt(id, 10))
 	writeJSON(w, http.StatusOK, map[string]bool{"deleted": true})
 }

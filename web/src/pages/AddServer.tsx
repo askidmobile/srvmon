@@ -1,18 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { AppHeader } from "@/components/AppHeader";
+import { Hotkey, Shell } from "@/components/Shell";
 import { Button } from "@/components/ui/button";
 import { Panel } from "@/components/ui/panel";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import {
-  api,
-  ApiError,
-  type OnboardLine,
-  type ProbeResult,
-  type ServerCard,
-  type ServerView,
-} from "@/lib/api";
-import { navigate } from "@/lib/router";
+import { api, ApiError, type OnboardLine, type ProbeResult, type NewServerCard, type ServerView } from "@/lib/api";
+import { href, navigate, type Route } from "@/lib/router";
 import { cn } from "@/lib/utils";
 
 const fieldCls =
@@ -143,7 +136,7 @@ const MARK: Record<OnboardLine["state"], { c: string; m: string }> = {
   info: { c: "text-muted-foreground", m: "·" },
 };
 
-function emptyCard(): ServerCard {
+function emptyCard(): NewServerCard {
   return {
     name: "",
     host: "",
@@ -174,9 +167,19 @@ function splitHostPort(v: string): { host: string; port: number } {
 
 type Phase = "form" | "running" | "done" | "failed";
 
-export function AddServer({ attachId, onLogout }: { attachId?: number; onLogout: () => void }) {
+export function AddServer({
+  attachId,
+  route,
+  version,
+  onLogout,
+}: {
+  attachId?: number;
+  route: Route;
+  version: string;
+  onLogout: () => void;
+}) {
   const [servers, setServers] = useState<ServerView[]>([]);
-  const [card, setCard] = useState<ServerCard>(emptyCard);
+  const [card, setCard] = useState<NewServerCard>(emptyCard);
   const [hostPort, setHostPort] = useState("");
   const [costText, setCostText] = useState("");
   const [user, setUser] = useState("root");
@@ -231,7 +234,7 @@ export function AddServer({ attachId, onLogout }: { attachId?: number; onLogout:
     [servers],
   );
 
-  const set = <K extends keyof ServerCard>(k: K, v: ServerCard[K]) => setCard((c) => ({ ...c, [k]: v }));
+  const set = <K extends keyof NewServerCard>(k: K, v: NewServerCard[K]) => setCard((c) => ({ ...c, [k]: v }));
   const locked = phase !== "form";
 
   // Any change of address invalidates the confirmed host key.
@@ -342,9 +345,19 @@ export function AddServer({ attachId, onLogout }: { attachId?: number; onLogout:
   const steps = ["1 описание", "2 оплата", "3 доступ", "4 ключ и агент"];
 
   return (
-    <div className="flex min-h-screen flex-col">
-      <AppHeader active="add" />
-      <form onSubmit={submit} className="mx-auto flex w-full max-w-[1320px] flex-1 flex-col gap-7 p-4 sm:p-5">
+    <Shell
+      route={route}
+      version={version}
+      onLogout={onLogout}
+      footer={
+        <>
+          <Hotkey k="tab">поле</Hotkey>
+          <Hotkey k="⏎">далее</Hotkey>
+        </>
+      }
+      footerNote="агент получает свой токен для push-метрик · ssh-ключ хранится зашифрованным"
+    >
+      <form onSubmit={submit} className="mx-auto flex w-full max-w-[1320px] flex-1 flex-col gap-7">
         <div className="flex flex-wrap items-baseline gap-x-4 gap-y-2">
           <h1 className="text-xl font-bold text-hi">
             {existing ? `+ ssh-доступ: ${existing.name}` : "+ новый сервер"}
@@ -629,7 +642,7 @@ export function AddServer({ attachId, onLogout }: { attachId?: number; onLogout:
           <div className="mt-3.5 flex flex-wrap gap-3">
             {phase === "form" && (
               <>
-                <Button type="button" variant="outline" onClick={() => navigate("/")}>
+                <Button type="button" variant="outline" onClick={() => navigate(href.overview())}>
                   ← назад
                 </Button>
                 <Button type="button" variant="outline" onClick={doProbe} disabled={probing || !hostPort}>
@@ -659,18 +672,18 @@ export function AddServer({ attachId, onLogout }: { attachId?: number; onLogout:
                   ← исправить и повторить
                 </Button>
                 <span className="flex-1" />
-                <Button type="button" variant="outline" onClick={() => navigate("/")}>
+                <Button type="button" variant="outline" onClick={() => navigate(href.overview())}>
                   к обзору
                 </Button>
               </>
             )}
             {phase === "done" && (
               <>
-                <Button type="button" variant="outline" onClick={() => navigate("/")}>
+                <Button type="button" variant="outline" onClick={() => navigate(href.overview())}>
                   к обзору
                 </Button>
                 <span className="flex-1" />
-                <Button type="button" onClick={() => navigate(`/term/${serverId}`)}>
+                <Button type="button" onClick={() => navigate(href.terminal(serverId))}>
                   открыть терминал →
                 </Button>
               </>
@@ -678,18 +691,6 @@ export function AddServer({ attachId, onLogout }: { attachId?: number; onLogout:
           </div>
         </Panel>
       </form>
-
-      <footer className="flex flex-wrap gap-x-4 gap-y-1 border-t border-border px-4 py-1.5 sm:px-5">
-        <span>
-          <span className="bg-primary px-1 text-primary-foreground">tab</span> поле
-        </span>
-        <span>
-          <span className="bg-primary px-1 text-primary-foreground">⏎</span> далее
-        </span>
-        <span className="ml-auto text-muted-foreground">
-          агент получает свой токен для push-метрик · ssh-ключ хранится зашифрованным
-        </span>
-      </footer>
-    </div>
+    </Shell>
   );
 }

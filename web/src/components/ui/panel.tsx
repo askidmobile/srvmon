@@ -30,7 +30,10 @@ export function Panel({
         </h2>
       )}
       {right && (
-        <div className="absolute -top-2.5 right-3 bg-background px-1.5 text-xs leading-5 text-muted-foreground">
+        <div
+          className="absolute -top-2.5 right-3 max-w-[calc(100%-8rem)] truncate bg-background px-1.5 text-xs leading-5 text-muted-foreground"
+          title={typeof right === "string" ? right : undefined}
+        >
           {right}
         </div>
       )}
