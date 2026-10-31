@@ -541,4 +541,16 @@ func TestAISettings(t *testing.T) {
 	if v.KeySet || len(v.Keys) != 0 {
 		t.Fatalf("removed key %+v", v)
 	}
+
+	// The largest allowed model list fits the request.
+	many := make([]string, 500)
+	for i := range many {
+		many[i] = fmt.Sprintf("%s-%03d", strings.Repeat("m", 190), i)
+	}
+	resp = a.do(t, "PUT", "/api/agent/settings", map[string]any{"provider": "openai", "model": many[0], "models": many})
+	json.NewDecoder(resp.Body).Decode(&v)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || len(v.Models) != 500 {
+		t.Fatalf("many models: %d, %d models", resp.StatusCode, len(v.Models))
+	}
 }

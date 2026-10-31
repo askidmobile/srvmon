@@ -287,12 +287,17 @@ func (in *aiSettingsInput) validate() string {
 	return ""
 }
 
+// aiSettingsBodyLimit fits the largest allowed model list (500 ids of up to
+// 200 bytes, JSON-escaped) with room for the other fields. srvmon-ai accepts
+// the same size on /v1/config.
+const aiSettingsBodyLimit = 256 << 10
+
 func (s *Server) handleAISaveSettings(w http.ResponseWriter, r *http.Request) {
 	if !s.agentEnabled(w) {
 		return
 	}
 	var in aiSettingsInput
-	if err := readJSON(r, &in); err != nil {
+	if err := readJSONLimit(r, &in, aiSettingsBodyLimit); err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request")
 		return
 	}

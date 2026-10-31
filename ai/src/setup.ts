@@ -67,10 +67,35 @@ export class Setup {
 
   constructor(private rt: ModelRuntime) {}
 
+  /** The last setup that applied cleanly; restored when a new one fails. */
+  private last: AIConfig | undefined;
+  /** Built-in providers as pi ships them, saved before we override them. */
+  private originals = new Map<string, { baseUrl: string; catalog: readonly AnyModel[] }>();
+
   async apply(cfg: AIConfig): Promise<void> {
     const provider = (cfg.provider || "").trim();
     const modelId = (cfg.model || "").trim();
+    // Check what can be checked before touching the runtime, so a bad setup
+    // leaves the working one in place.
     if (!provider || !modelId) throw new Error("provider и model обязательны");
+    if (provider === CUSTOM) {
+      if (!(cfg.base_url ?? "").trim()) throw new Error("для своего провайдера нужен URL");
+    } else if (!this.rt.getProvider(provider)) {
+      throw new Error(`провайдер ${provider} неизвестен`);
+    }
+    try {
+      await this.applyNow(cfg, provider, modelId);
+      this.last = cfg;
+    } catch (err) {
+      const prev = this.last;
+      if (prev) {
+        await this.applyNow(prev, prev.provider.trim(), prev.model.trim()).catch(() => undefined);
+      }
+      throw err;
+    }
+  }
+
+  private async applyNow(cfg: AIConfig, provider: string, modelId: string): Promise<void> {
     const thinking = thinkingLevels.includes(cfg.thinking as Thinking) ? (cfg.thinking as Thinking) : "low";
     const allowed = [...new Set([modelId, ...(cfg.models ?? [])].map((m) => m.trim()).filter(Boolean))];
     const key = (cfg.api_key ?? "").trim();
@@ -85,7 +110,6 @@ export class Setup {
     let error: string | undefined;
     if (provider === CUSTOM) {
       const api = customAPIs.includes(cfg.api ?? "") ? cfg.api : "openai-completions";
-      if (!baseUrl) throw new Error("для своего провайдера нужен URL");
       this.rt.registerProvider(CUSTOM, {
         name: "Свой провайдер",
         baseUrl,
@@ -96,8 +120,12 @@ export class Setup {
       });
       this.overridden.add(CUSTOM);
     } else {
-      if (!this.rt.getProvider(provider)) throw new Error(`провайдер ${provider} неизвестен`);
+      const p = this.rt.getProvider(provider);
+      if (!p) throw new Error(`провайдер ${provider} неизвестен`);
       const catalog = this.rt.getModels(provider);
+      if (!this.originals.has(provider)) {
+        this.originals.set(provider, { baseUrl: p.baseUrl ?? catalog[0]?.baseUrl ?? "", catalog });
+      }
       const missing = allowed.filter((id) => !catalog.some((m) => m.id === id));
       if (baseUrl || missing.length) {
         // Registering models replaces the catalog: keep it and add ours.
@@ -158,13 +186,14 @@ export class Setup {
     if (provider !== CUSTOM) {
       const p = this.rt.getProvider(provider);
       if (!p) return { models: [], live: false, error: `провайдер ${provider} неизвестен` };
-      const catalog = this.rt.getModels(provider);
+      // While we override the provider, the runtime holds our address and
+      // models: list against pi's own ones.
+      const orig = this.overridden.has(provider) ? this.originals.get(provider) : undefined;
+      const catalog = orig?.catalog ?? this.rt.getModels(provider);
       for (const m of catalog) {
         out.set(m.id, { id: m.id, name: m.name, catalog: true, live: false, reasoning: m.reasoning, context: m.contextWindow });
       }
-      // A base URL registered by us is not the provider's own.
-      const own = this.overridden.has(provider) ? undefined : p.baseUrl;
-      base ||= own ?? catalog[0]?.baseUrl ?? "";
+      base ||= orig?.baseUrl ?? p.baseUrl ?? catalog[0]?.baseUrl ?? "";
       api ||= catalog[0]?.api ?? "";
     }
     const key = req.api_key || this.currentKey(provider);

@@ -147,6 +147,18 @@ test("settings: custom provider, live model list, chat model override", async ()
     const test = await (await post("/v1/test", {})).json();
     assert.equal(test.ok, true, JSON.stringify(test));
 
+    // A rejected setup leaves the working one in place.
+    const bad = await post("/v1/config", { provider: "no-such-provider", model: "x" });
+    assert.equal(bad.status, 400);
+    assert.equal((await run()).text, "ответ small");
+
+    // With deepseek behind a proxy, an empty address lists the real one.
+    await post("/v1/config", { provider: "deepseek", base_url: `${providerUrl}/v1`, model: "small", api_key: "sk-x" });
+    const before = seen.length;
+    await (await post("/v1/models", { provider: "deepseek", api_key: "sk-x" })).json();
+    assert.equal(seen.length, before, "listing must not hit the old proxy");
+    assert.ok(setup.resolve()?.baseUrl.startsWith(providerUrl));
+
     // A known provider with an unknown (newer) model id keeps working.
     const st2 = await (await post("/v1/config", { provider: "deepseek", model: "deepseek-v9", api_key: "sk-x" })).json();
     assert.equal(st2.ready, true, JSON.stringify(st2));

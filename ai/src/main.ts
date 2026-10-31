@@ -101,7 +101,8 @@ export function createApp(cfg: AgentConfig) {
         case "GET /v1/providers":
           return json(res, 200, setup.providers());
         case "POST /v1/config": {
-          const body = (await readBody(req)) as AIConfig;
+          // Same limit as srvmon's settings body: up to 500 model ids.
+          const body = (await readBody(req, 256 << 10)) as AIConfig;
           try {
             await setup.apply(body);
           } catch (err) {
