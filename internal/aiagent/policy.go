@@ -102,11 +102,11 @@ func splitPipeline(cmd string) ([][]string, error) {
 
 // anyArgs: programs that only read whatever their arguments are.
 var anyArgs = set("cat", "head", "tail", "grep", "egrep", "fgrep", "zgrep", "zcat", "ls", "df", "du", "free",
-	"uptime", "uname", "hostname", "whoami", "id", "ps", "pgrep", "wc", "cut", "tr", "date", "stat", "file",
-	"which", "lscpu", "lsblk", "lsmem", "nproc", "vmstat", "iostat", "mpstat", "w", "who", "last", "ss",
+	"uptime", "uname", "whoami", "id", "ps", "pgrep", "wc", "cut", "tr", "stat",
+	"which", "lscpu", "lsblk", "lsmem", "nproc", "vmstat", "iostat", "mpstat", "w", "who", "last",
 	"netstat", "jq", "md5sum", "sha256sum", "getent", "lsof", "ping", "dig", "nslookup", "host", "findmnt",
 	"lsb_release", "basename", "dirname", "realpath", "readlink", "column", "nl", "rev", "true", "echo",
-	"printf", "tac", "diff", "cmp", "sha1sum", "base64", "blkid", "lspci", "lsusb", "sensors", "arch")
+	"printf", "tac", "diff", "cmp", "sha1sum", "base64", "blkid", "lspci", "lsusb", "arch")
 
 func set(xs ...string) map[string]bool {
 	m := make(map[string]bool, len(xs))
@@ -152,8 +152,30 @@ func checkProgram(words []string) string {
 	}
 	switch prog {
 	case "sort":
-		if a := hasArg(words, "-o", "--output"); a != "" {
-			return "sort пишет в файл"
+		// Allowlist: sort also takes -o FILE and --compress-program=PROG.
+		return checkSort(words)
+	case "date":
+		return checkDate(words)
+	case "hostname":
+		for _, w := range words[1:] {
+			if !hostnameFlags[w] {
+				return "hostname " + w + " меняет имя хоста"
+			}
+		}
+		return ""
+	case "ss":
+		if a := hasArg(words, "-K", "-D", "--kill", "--diag"); a != "" {
+			return "ss " + a
+		}
+		return ""
+	case "sensors":
+		if a := hasArg(words, "-s", "--set"); a != "" {
+			return "sensors " + a + " меняет пороги"
+		}
+		return ""
+	case "file":
+		if a := hasArg(words, "-C", "--compile"); a != "" {
+			return "file " + a + " пишет файл"
 		}
 		return ""
 	case "uniq":
@@ -298,4 +320,71 @@ func checkDocker(words []string) string {
 		return ""
 	}
 	return "docker " + sub + " без подкоманды"
+}
+
+var hostnameFlags = set("-s", "-f", "-d", "-i", "-I", "-A", "-a", "-y", "--short", "--fqdn", "--long", "--domain",
+	"--ip-address", "--all-ip-addresses", "--all-fqdns", "--alias", "--nis")
+
+// sortShort: flags without a value; k and t take one (attached or next word).
+const sortShort = "bdfgiMhnRrVcCusmz"
+
+var sortLong = set("--ignore-leading-blanks", "--dictionary-order", "--ignore-case", "--general-numeric-sort",
+	"--ignore-nonprinting", "--month-sort", "--human-numeric-sort", "--numeric-sort", "--random-sort",
+	"--reverse", "--version-sort", "--check", "--merge", "--stable", "--unique", "--zero-terminated")
+
+func checkSort(words []string) string {
+	for i := 1; i < len(words); i++ {
+		w := words[i]
+		switch {
+		case w == "--":
+			return ""
+		case w == "-" || !strings.HasPrefix(w, "-"):
+			// An input file: sort only reads it.
+		case strings.HasPrefix(w, "--"):
+			name, _, hasVal := strings.Cut(w, "=")
+			if name == "--key" || name == "--field-separator" || name == "--check" {
+				if !hasVal && name != "--check" {
+					i++
+				}
+				continue
+			}
+			if hasVal || !sortLong[name] {
+				return "sort " + name + " нет в списке безопасных опций"
+			}
+		default:
+			for j := 1; j < len(w); j++ {
+				c := w[j]
+				if c == 'k' || c == 't' {
+					if j == len(w)-1 {
+						i++
+					}
+					break
+				}
+				if strings.IndexByte(sortShort, c) < 0 {
+					return "sort -" + string(c) + " нет в списке безопасных опций"
+				}
+			}
+		}
+	}
+	return ""
+}
+
+// checkDate allows printing dates; date -s and date MMDDhhmm set the clock.
+func checkDate(words []string) string {
+	for i := 1; i < len(words); i++ {
+		w := words[i]
+		switch {
+		case w == "-s" || w == "--set" || strings.HasPrefix(w, "--set="):
+			return "date " + w + " ставит время"
+		case w == "-d" || w == "--date" || w == "-r" || w == "--reference" || w == "-f" || w == "--file":
+			i++
+		case strings.HasPrefix(w, "+") || strings.HasPrefix(w, "-"):
+			if len(w) > 1 && w[0] == '-' && w[1] != '-' && strings.ContainsRune(w[1:], 's') {
+				return "date " + w + " ставит время"
+			}
+		default:
+			return "date " + w + " ставит время"
+		}
+	}
+	return ""
 }
