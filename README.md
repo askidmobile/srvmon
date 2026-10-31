@@ -42,6 +42,8 @@ SRVMON_URL=http://127.0.0.1:8080 SRVMON_TOKEN=a_... go run ./cmd/agent
 
 ### Агент на сервере
 
+Сам сервер мониторинга появляется в панели автоматически: в его compose есть агент, `srvmon-server` при старте регистрирует хост под именем `SRVMON_SELF_NAME` (Deploy подставляет hostname) и кладёт токен в свой том. Остальные серверы добавляются так:
+
 ```bash
 docker compose exec server /srvmon-server add-server -name shop-db -group prod -tags db,public
 # на целевом сервере, с deploy/agent/docker-compose.yml:
