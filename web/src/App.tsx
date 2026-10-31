@@ -8,6 +8,7 @@ import { AlertsPage } from "@/pages/Alerts";
 import { Login } from "@/pages/Login";
 import { Overview } from "@/pages/Overview";
 import { ServerScreen } from "@/pages/Server";
+import { SettingsPage } from "@/pages/Settings";
 
 // xterm.js is heavy: load the terminal page on demand.
 const TerminalPage = lazy(() => import("@/pages/Terminal").then((m) => ({ default: m.TerminalPage })));
@@ -30,7 +31,7 @@ export function App() {
   useEffect(refresh, [refresh]);
   const logout = useCallback(() => setMe((m) => (m ? { ...m, authenticated: false } : m)), []);
 
-  // Global hotkeys from the mockup: [1] overview, [3] terminal, [4] agent, [5] alerts.
+  // Global hotkeys from the mockup: [1] overview, [3] terminal, [4] agent, [5] alerts, [6] settings.
   useEffect(() => {
     const on = (e: KeyboardEvent) => {
       if (typingIn(e) || e.ctrlKey || e.metaKey || e.altKey) return;
@@ -38,6 +39,7 @@ export function App() {
       else if (e.key === "3") navigate(href.terminal(route.name === "server" ? route.id : undefined));
       else if (e.key === "4") navigate(href.agent(route.name === "server" ? route.id : undefined));
       else if (e.key === "5") navigate(href.alerts());
+      else if (e.key === "6") navigate(href.settings());
     };
     window.addEventListener("keydown", on);
     return () => window.removeEventListener("keydown", on);
@@ -61,6 +63,8 @@ export function App() {
       return <AgentPage key={route.id ?? 0} serverId={route.id} route={route} version={me.version} onLogout={logout} />;
     case "alerts":
       return <AlertsPage route={route} version={me.version} onLogout={logout} />;
+    case "settings":
+      return <SettingsPage route={route} version={me.version} onLogout={logout} />;
     case "terminal":
       return (
         <Suspense fallback={<p className="p-6 text-muted-foreground">загрузка терминала…</p>}>

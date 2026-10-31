@@ -6,7 +6,7 @@ name: Deploy
 #   secrets: DEPLOY_HOST, DEPLOY_USER, DEPLOY_SSH_KEY, DEPLOY_KNOWN_HOSTS
 #            DEPLOY_PORT (optional, default 22)
 #            GHCR_PULL_TOKEN (optional PAT with read:packages; default GITHUB_TOKEN)
-#            AI_API_KEY (optional, AI agent provider key, e.g. DeepSeek or Anthropic)
+#            AI_API_KEY (optional fallback; the AI agent is set up in the panel)
 #   vars:    DEPLOY_PATH (default /opt/srvmon), SRVMON_DOMAIN (or set it in .env on the host)
 #            SRVMON_PROXY (caddy | external), SRVMON_HTTP_BIND (default 127.0.0.1:8088)
 #            SRVMON_AI_PROVIDER (default deepseek), SRVMON_AI_MODEL (default deepseek-v4-pro)
@@ -107,7 +107,7 @@ jobs:
           AI_API_KEY: ${{ secrets.AI_API_KEY }}
         run: |
           if [ -z "$AI_API_KEY" ]; then
-            echo "::notice::AI_API_KEY is not set: the AI agent stays off until it is (or SRVMON_AI_API_KEY in .env)."
+            echo "::notice::AI_API_KEY is not set: configure the AI agent in the panel (settings → AI)."
             exit 0
           fi
           # Through stdin, so the key never appears in a command line.

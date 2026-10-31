@@ -14,6 +14,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -168,6 +169,10 @@ func TestAgentRoutesRequireSession(t *testing.T) {
 	e := newEnv(t)
 	for _, c := range []struct{ method, path string }{
 		{"GET", "/api/agent/status"},
+		{"GET", "/api/agent/settings"},
+		{"PUT", "/api/agent/settings"},
+		{"POST", "/api/agent/models"},
+		{"POST", "/api/agent/test"},
 		{"GET", "/api/agent/chats"},
 		{"POST", "/api/agent/chats"},
 		{"POST", "/api/agent/chats/1/run"},
@@ -347,6 +352,16 @@ func fakeAI(t *testing.T) *httptest.Server {
 		switch {
 		case r.URL.Path == "/v1/status":
 			json.NewEncoder(w).Encode(aiagent.Status{Ready: true, Provider: "deepseek", Model: "deepseek-v4-pro"})
+		case r.URL.Path == "/v1/config":
+			var cfg aiagent.Config
+			json.NewDecoder(r.Body).Decode(&cfg)
+			lastAIConfig.Store(&cfg)
+			json.NewEncoder(w).Encode(aiagent.Status{Ready: cfg.APIKey != "", Provider: cfg.Provider, Model: cfg.Model})
+		case r.URL.Path == "/v1/models":
+			var req aiagent.ModelsRequest
+			json.NewDecoder(r.Body).Decode(&req)
+			json.NewEncoder(w).Encode(aiagent.ModelList{Live: req.APIKey != "", Error: req.APIKey,
+				Models: []aiagent.ModelInfo{{ID: "m-1", Live: true}, {ID: "m-2", Catalog: true}}})
 		case strings.HasSuffix(r.URL.Path, "/run"):
 			var req aiagent.RunRequest
 			json.NewDecoder(r.Body).Decode(&req)
@@ -417,5 +432,125 @@ func TestAgentDisabled(t *testing.T) {
 	e.postJSON(t, "/api/agent/chats", map[string]any{}, &chat)
 	if code := e.postJSON(t, fmt.Sprintf("/api/agent/chats/%d/run", chat.ID), map[string]string{"text": "hi"}, nil); code != http.StatusServiceUnavailable {
 		t.Fatalf("%d", code)
+	}
+}
+
+var lastAIConfig atomic.Pointer[aiagent.Config]
+
+func TestAISettings(t *testing.T) {
+	ai := fakeAI(t)
+	a := newAgentEnv(t, ai.URL)
+	get := func() aiSettingsView {
+		t.Helper()
+		resp := a.do(t, "GET", "/api/agent/settings", nil)
+		defer resp.Body.Close()
+		var v aiSettingsView
+		json.NewDecoder(resp.Body).Decode(&v)
+		return v
+	}
+	// Nothing saved: what srvmon-ai runs with now.
+	if v := get(); v.Saved || v.Provider != "deepseek" || v.KeySet {
+		t.Fatalf("initial %+v", v)
+	}
+	// srvmon-ai at start: nothing saved yet.
+	if code := a.tool(t, "GET", "/tools/ai-config", nil, nil); code != 204 {
+		t.Fatalf("ai-config %d", code)
+	}
+
+	bad := []map[string]any{
+		{"provider": "Deep Seek", "model": "x"},
+		{"provider": "custom", "model": "x", "api": "openai-completions"},
+		{"provider": "custom", "model": "x", "base_url": "ftp://x", "api": "openai-completions"},
+		{"provider": "custom", "model": "x", "base_url": "http://x/v1", "api": "grpc"},
+		{"provider": "openai", "model": ""},
+		{"provider": "openai", "model": "x", "thinking": "max"},
+		{"provider": "openai", "model": "x", "api_key": "a b"},
+	}
+	for _, b := range bad {
+		resp := a.do(t, "PUT", "/api/agent/settings", b)
+		resp.Body.Close()
+		if resp.StatusCode != 400 {
+			t.Errorf("%v: %d", b, resp.StatusCode)
+		}
+	}
+
+	key := "sk-1234567890abcdef"
+	resp := a.do(t, "PUT", "/api/agent/settings", map[string]any{
+		"provider": "openai", "base_url": "https://proxy.example/v1/", "model": "gpt-x", "models": []string{"gpt-y", "gpt-x"},
+		"thinking": "high", "api_key": key,
+	})
+	var v aiSettingsView
+	json.NewDecoder(resp.Body).Decode(&v)
+	resp.Body.Close()
+	if resp.StatusCode != 200 || !v.Saved || !v.KeySet || v.KeyHint != "…cdef" || v.Status == nil || !v.Status.Ready {
+		t.Fatalf("save: %d %+v", resp.StatusCode, v)
+	}
+	if strings.Contains(fmt.Sprint(v), key) {
+		t.Fatal("key leaked to the browser")
+	}
+	cfg := lastAIConfig.Load()
+	if cfg == nil || cfg.APIKey != key || cfg.BaseURL != "https://proxy.example/v1" || cfg.Thinking != "high" ||
+		strings.Join(cfg.Models, ",") != "gpt-x,gpt-y" {
+		t.Fatalf("pushed %+v", cfg)
+	}
+	// The key is sealed in the database.
+	if raw, _ := a.st.GetSetting(context.Background(), settingAIKeyPre+"openai"); raw == "" || strings.Contains(raw, key) {
+		t.Fatalf("stored key %q", raw)
+	}
+	// srvmon-ai restarting gets the same setup.
+	var got aiagent.Config
+	if code := a.tool(t, "GET", "/tools/ai-config", nil, &got); code != 200 || got.APIKey != key || got.Model != "gpt-x" {
+		t.Fatalf("ai-config %d %+v", code, got)
+	}
+
+	// Saving without api_key keeps it; models listing uses the stored key.
+	resp = a.do(t, "PUT", "/api/agent/settings", map[string]any{"provider": "openai", "model": "gpt-y", "models": []string{"gpt-x"}})
+	resp.Body.Close()
+	if cfg := lastAIConfig.Load(); cfg.APIKey != key || cfg.Model != "gpt-y" {
+		t.Fatalf("kept key: %+v", cfg)
+	}
+	resp = a.do(t, "POST", "/api/agent/models", map[string]any{"provider": "openai"})
+	var list aiagent.ModelList
+	json.NewDecoder(resp.Body).Decode(&list)
+	resp.Body.Close()
+	if !list.Live || list.Error != key || len(list.Models) != 2 {
+		t.Fatalf("models %+v", list)
+	}
+
+	// A chat may switch only to a picked model.
+	var chat chatView
+	a.postJSON(t, "/api/agent/chats", map[string]any{}, &chat)
+	for model, want := range map[string]int{"gpt-x": 200, "other": 400, "": 200} {
+		resp := a.do(t, "PUT", fmt.Sprintf("/api/agent/chats/%d/model", chat.ID), map[string]string{"model": model})
+		resp.Body.Close()
+		if resp.StatusCode != want {
+			t.Errorf("model %q: %d", model, resp.StatusCode)
+		}
+	}
+
+	// Another provider has no key; switching back finds the first one again.
+	resp = a.do(t, "PUT", "/api/agent/settings", map[string]any{"provider": "anthropic", "model": "claude-x"})
+	json.NewDecoder(resp.Body).Decode(&v)
+	resp.Body.Close()
+	if v.KeySet || strings.Join(v.Keys, ",") != "openai" {
+		t.Fatalf("anthropic %+v", v)
+	}
+	resp = a.do(t, "PUT", "/api/agent/settings", map[string]any{"provider": "openai", "model": "gpt-x", "api_key": ""})
+	json.NewDecoder(resp.Body).Decode(&v)
+	resp.Body.Close()
+	if v.KeySet || len(v.Keys) != 0 {
+		t.Fatalf("removed key %+v", v)
+	}
+
+	// The largest allowed model list fits the request.
+	many := make([]string, 500)
+	for i := range many {
+		many[i] = fmt.Sprintf("%s-%03d", strings.Repeat("m", 190), i)
+	}
+	resp = a.do(t, "PUT", "/api/agent/settings", map[string]any{"provider": "openai", "model": many[0], "models": many})
+	json.NewDecoder(resp.Body).Decode(&v)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || len(v.Models) != 500 {
+		t.Fatalf("many models: %d, %d models", resp.StatusCode, len(v.Models))
 	}
 }

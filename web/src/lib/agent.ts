@@ -9,6 +9,70 @@ export interface AgentStatus {
   model?: string;
   error?: string;
   pending?: number;
+  models?: string[]; // picked in settings; a chat may switch between them
+}
+
+export interface AIStatus {
+  ready: boolean;
+  provider: string;
+  model: string;
+  error?: string;
+}
+
+export interface AISettings {
+  saved: boolean;
+  provider: string;
+  base_url?: string;
+  api?: string;
+  model: string;
+  thinking: string;
+  models: string[];
+  updated_at?: string;
+  key_set: boolean;
+  key_hint?: string;
+  keys: string[];
+  status?: AIStatus;
+  error?: string;
+}
+
+export interface AISettingsInput {
+  provider: string;
+  base_url: string;
+  api: string;
+  model: string;
+  thinking: string;
+  models: string[];
+  api_key?: string; // absent: keep, "": remove
+}
+
+export interface AIProvider {
+  id: string;
+  name: string;
+  base_url?: string;
+  models: number;
+}
+
+export interface AIModel {
+  id: string;
+  name?: string;
+  catalog: boolean;
+  live: boolean;
+  reasoning?: boolean;
+  context?: number;
+}
+
+export interface AIModelList {
+  models: AIModel[];
+  live: boolean;
+  error?: string;
+}
+
+export interface AITest {
+  ok: boolean;
+  model?: string;
+  text?: string;
+  ms?: number;
+  error?: string;
 }
 
 export interface AgentChat {
@@ -16,6 +80,7 @@ export interface AgentChat {
   server_id?: number;
   server?: string;
   title: string;
+  model: string; // "" = default
   created_at: string;
   updated_at: string;
   running: boolean;
@@ -112,6 +177,13 @@ export const agentApi = {
   updateTask: (id: number, t: TaskInput) => req<AgentTask>("PATCH", `/api/agent/tasks/${id}`, t),
   deleteTask: (id: number) => req<unknown>("DELETE", `/api/agent/tasks/${id}`),
   runTask: (id: number) => req<unknown>("POST", `/api/agent/tasks/${id}/run`),
+  setChatModel: (id: number, model: string) => req<AgentChat>("PUT", `/api/agent/chats/${id}/model`, { model }),
+  settings: () => req<AISettings>("GET", "/api/agent/settings"),
+  saveSettings: (s: AISettingsInput) => req<AISettings>("PUT", "/api/agent/settings", s),
+  providers: () => req<AIProvider[]>("GET", "/api/agent/providers"),
+  models: (s: Pick<AISettingsInput, "provider" | "base_url" | "api" | "api_key">) =>
+    req<AIModelList>("POST", "/api/agent/models", s),
+  test: (model?: string) => req<AITest>("POST", "/api/agent/test", { model: model ?? "" }),
 };
 
 /** Sends a message and calls onEvent for each streamed event. */

@@ -49,6 +49,71 @@ type RunRequest struct {
 	// TaskID marks a scheduled run: srvmon-ai uses a throwaway session and
 	// passes the id back on tool calls so confirmations name the task.
 	TaskID int64 `json:"task_id,omitempty"`
+	// Model overrides the default model for this run (a model id of the
+	// configured provider).
+	Model string `json:"model,omitempty"`
+}
+
+// Config is the model setup srvmon-ai runs with. srvmon keeps it (the key
+// sealed) and hands it over on every change and when srvmon-ai starts.
+type Config struct {
+	// Provider is a pi provider id (deepseek, anthropic, openai, ...) or
+	// "custom" for an OpenAI- or Anthropic-compatible endpoint.
+	Provider string `json:"provider"`
+	// BaseURL overrides the provider's API address; required for custom.
+	BaseURL string `json:"base_url,omitempty"`
+	// API is the wire protocol of a custom provider.
+	API      string `json:"api,omitempty"`
+	APIKey   string `json:"api_key,omitempty"`
+	Model    string `json:"model"`
+	Thinking string `json:"thinking,omitempty"`
+	// Models are the ids the owner picked from the provider's list; a chat
+	// may switch to any of them.
+	Models []string `json:"models,omitempty"`
+}
+
+// ProviderInfo is one provider srvmon-ai knows.
+type ProviderInfo struct {
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	BaseURL string `json:"base_url,omitempty"`
+	Models  int    `json:"models"`
+}
+
+// ModelsRequest asks srvmon-ai for the models of a provider.
+type ModelsRequest struct {
+	Provider string `json:"provider"`
+	BaseURL  string `json:"base_url,omitempty"`
+	API      string `json:"api,omitempty"`
+	APIKey   string `json:"api_key,omitempty"`
+}
+
+// ModelInfo is one model of a provider: from pi's catalog, from the
+// provider's own list (Live), or both.
+type ModelInfo struct {
+	ID        string `json:"id"`
+	Name      string `json:"name,omitempty"`
+	Catalog   bool   `json:"catalog"`
+	Live      bool   `json:"live"`
+	Reasoning bool   `json:"reasoning,omitempty"`
+	Context   int    `json:"context,omitempty"`
+}
+
+// ModelList is the answer to ModelsRequest. Error explains why the live
+// list is missing (no key, network); the catalog part is still there.
+type ModelList struct {
+	Models []ModelInfo `json:"models"`
+	Live   bool        `json:"live"`
+	Error  string      `json:"error,omitempty"`
+}
+
+// TestResult is a one-line test request to the configured model.
+type TestResult struct {
+	OK    bool   `json:"ok"`
+	Model string `json:"model,omitempty"`
+	Text  string `json:"text,omitempty"`
+	MS    int64  `json:"ms,omitempty"`
+	Error string `json:"error,omitempty"`
 }
 
 // Client talks to the srvmon-ai container. Both directions authenticate
@@ -169,6 +234,49 @@ func (c *Client) Run(ctx context.Context, chatID int64, req RunRequest, fn func(
 		return errors.New("srvmon-ai оборвал ответ")
 	}
 	return nil
+}
+
+func (c *Client) call(ctx context.Context, timeout time.Duration, method, path string, body, out any) error {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	resp, err := c.do(ctx, method, path, body)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if out == nil {
+		return nil
+	}
+	return json.NewDecoder(io.LimitReader(resp.Body, 8<<20)).Decode(out)
+}
+
+// Configure applies a model setup; the answer is the new status.
+func (c *Client) Configure(ctx context.Context, cfg Config) (Status, error) {
+	var st Status
+	err := c.call(ctx, 15*time.Second, http.MethodPost, "/v1/config", cfg, &st)
+	return st, err
+}
+
+// Providers lists the providers srvmon-ai can use.
+func (c *Client) Providers(ctx context.Context) ([]ProviderInfo, error) {
+	var out []ProviderInfo
+	err := c.call(ctx, 10*time.Second, http.MethodGet, "/v1/providers", nil, &out)
+	return out, err
+}
+
+// Models lists the models of a provider, asking the provider itself when
+// a key is known.
+func (c *Client) Models(ctx context.Context, req ModelsRequest) (ModelList, error) {
+	var out ModelList
+	err := c.call(ctx, 30*time.Second, http.MethodPost, "/v1/models", req, &out)
+	return out, err
+}
+
+// Test sends a tiny request to the model (model "" = the default one).
+func (c *Client) Test(ctx context.Context, model string) (TestResult, error) {
+	var out TestResult
+	err := c.call(ctx, 60*time.Second, http.MethodPost, "/v1/test", map[string]string{"model": model}, &out)
+	return out, err
 }
 
 // ForgetChat drops the model-side history of a chat.

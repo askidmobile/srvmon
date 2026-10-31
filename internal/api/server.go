@@ -33,6 +33,9 @@ type Server struct {
 	log       *slog.Logger
 	authLog   io.Writer
 	authLogMu sync.Mutex
+	// aiSaveMu orders AI settings saves with their push to srvmon-ai, so the
+	// last saved setup is the one srvmon-ai runs.
+	aiSaveMu  sync.Mutex
 	limiter   *auth.Limiter
 	vm        *metrics.Writer
 	vmRead    *metrics.Reader
@@ -181,6 +184,12 @@ func (s *Server) Handler() http.Handler {
 	agent("POST /api/agent/chats", s.handleAgentNewChat)
 	agent("GET /api/agent/chats/{id}", s.handleAgentChat)
 	agent("DELETE /api/agent/chats/{id}", s.handleAgentDeleteChat)
+	agent("PUT /api/agent/chats/{id}/model", s.handleAgentChatModel)
+	agent("GET /api/agent/settings", s.handleAISettings)
+	agent("PUT /api/agent/settings", s.handleAISaveSettings)
+	agent("GET /api/agent/providers", s.handleAIProviders)
+	agent("POST /api/agent/models", s.handleAIModels)
+	agent("POST /api/agent/test", s.handleAITest)
 	agent("POST /api/agent/chats/{id}/run", s.handleAgentRun)
 	agent("POST /api/agent/chats/{id}/abort", s.handleAgentAbort)
 	agent("GET /api/agent/actions", s.handleAgentActions)

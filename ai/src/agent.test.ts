@@ -12,6 +12,7 @@ import { fauxAssistantMessage, fauxProvider, fauxText, fauxToolCall } from "@ear
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 
 import { createApp } from "./main.js";
+import { Setup } from "./setup.js";
 import { formatExec } from "./tools.js";
 
 const token = "t".repeat(40);
@@ -47,12 +48,10 @@ test("chat run streams text and srvmon tool calls", async () => {
     fauxAssistantMessage("Все контейнеры работают."),
   ]);
 
-  const app = createApp({ dataDir, toolsUrl, token, modelRuntime, model: faux.getModel(), thinking: "off" }, () => ({
-    ready: true,
-    provider: "faux",
-    model: "faux-1",
-    version: "test",
-  }));
+  const setup = new Setup(modelRuntime);
+  await setup.apply({ provider: "faux", model: "faux-1", thinking: "off" });
+  setup.error = undefined; // the faux provider needs no key
+  const app = createApp({ dataDir, toolsUrl, token, modelRuntime, setup });
   const base = await listen(app);
   try {
     const unauth = await fetch(`${base}/v1/status`);
@@ -89,4 +88,103 @@ test("chat run streams text and srvmon tool calls", async () => {
 test("rejected command tells the model not to retry", () => {
   assert.match(formatExec({ status: "rejected", read_only: false, action_id: 3 }), /ОТКЛОНИЛ/);
   assert.match(formatExec({ status: "ok", read_only: false, action_id: 3, exit_code: 0, output: "x" }), /после подтверждения/);
+});
+
+test("settings: custom provider, live model list, chat model override", async () => {
+  // A fake OpenAI-compatible provider: lists models and answers chats.
+  const seen: { path: string; auth?: string; model?: string }[] = [];
+  const provider = createServer(async (req, res) => {
+    let raw = "";
+    for await (const c of req) raw += c;
+    const body = raw ? JSON.parse(raw) : {};
+    seen.push({ path: req.url ?? "", auth: req.headers.authorization, model: body.model });
+    if (req.url === "/v1/models") {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      return res.end(JSON.stringify({ data: [{ id: "small" }, { id: "big" }] }));
+    }
+    res.writeHead(200, { "Content-Type": "text/event-stream" });
+    const chunk = (d: unknown) => res.write(`data: ${JSON.stringify(d)}\n\n`);
+    chunk({ id: "1", object: "chat.completion.chunk", model: body.model, choices: [{ index: 0, delta: { role: "assistant", content: `ответ ${body.model}` } }] });
+    chunk({ id: "1", object: "chat.completion.chunk", model: body.model, choices: [{ index: 0, delta: {}, finish_reason: "stop" }] });
+    res.end("data: [DONE]\n\n");
+  });
+  const providerUrl = await listen(provider);
+  const dataDir = mkdtempSync(join(tmpdir(), "srvmon-ai-"));
+  const modelRuntime = await ModelRuntime.create({ authPath: join(dataDir, "auth.json"), modelsPath: null, refreshOnCreate: false });
+  const setup = new Setup(modelRuntime);
+  const app = createApp({ dataDir, toolsUrl: "http://127.0.0.1:1", token, modelRuntime, setup });
+  const base = await listen(app);
+  const post = (path: string, body: unknown) =>
+    fetch(`${base}${path}`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  try {
+    const list = await (await post("/v1/models", { provider: "custom", base_url: `${providerUrl}/v1`, api: "openai-completions", api_key: "sk-test" })).json();
+    assert.equal(list.live, true, JSON.stringify(list));
+    assert.deepEqual(list.models.map((m: { id: string }) => m.id).sort(), ["big", "small"]);
+    assert.equal(seen[0].auth, "Bearer sk-test");
+
+    const providers = await (await fetch(`${base}/v1/providers`, { headers: { Authorization: `Bearer ${token}` } })).json();
+    assert.ok(providers.some((p: { id: string }) => p.id === "deepseek"));
+
+    // Until srvmon's saved settings are known, runs wait.
+    setup.loading = true;
+    const waiting = await (await fetch(`${base}/v1/status`, { headers: { Authorization: `Bearer ${token}` } })).json();
+    assert.equal(waiting.ready, false);
+
+    const st = await (
+      await post("/v1/config", { provider: "custom", base_url: `${providerUrl}/v1`, api: "openai-completions", api_key: "sk-test", model: "small", models: ["big"] })
+    ).json();
+    assert.equal(st.ready, true, JSON.stringify(st));
+    assert.equal(st.model, "small");
+
+    const run = async (model?: string) => {
+      const res = await post("/v1/chats/1/run", { text: "привет", model });
+      const events = (await res.text()).trim().split("\n").map((l) => JSON.parse(l));
+      return events.at(-1);
+    };
+    assert.equal((await run()).text, "ответ small");
+    assert.equal((await run("big")).text, "ответ big");
+    assert.equal((await run("not-allowed")).text, "ответ small");
+
+    const test = await (await post("/v1/test", {})).json();
+    assert.equal(test.ok, true, JSON.stringify(test));
+
+    // Overlapping saves apply in order: the last one wins.
+    const custom = (model: string) => ({ provider: "custom", base_url: `${providerUrl}/v1`, api: "openai-completions", api_key: "sk-test", model, models: ["small", "big"] });
+    await Promise.all([setup.apply(custom("big")), setup.apply(custom("small"))]);
+    assert.equal(setup.modelId, "small");
+    assert.equal(setup.resolve()?.id, "small");
+
+    // A rejected setup leaves the working one in place.
+    const bad = await post("/v1/config", { provider: "no-such-provider", model: "x" });
+    assert.equal(bad.status, 400);
+    assert.equal((await run()).text, "ответ small");
+
+    // With deepseek behind a proxy, an empty address lists the real one.
+    await post("/v1/config", { provider: "deepseek", base_url: `${providerUrl}/v1`, model: "small", api_key: "sk-x" });
+    const before = seen.length;
+    await (await post("/v1/models", { provider: "deepseek", api_key: "sk-x" })).json();
+    assert.equal(seen.length, before, "listing must not hit the old proxy");
+    assert.ok(setup.resolve()?.baseUrl.startsWith(providerUrl));
+
+    // Without a key from srvmon, listing uses the key pi finds itself.
+    process.env.DEEPSEEK_API_KEY = "sk-env";
+    try {
+      await post("/v1/config", { provider: "deepseek", model: "deepseek-v9" });
+      await (await post("/v1/models", { provider: "deepseek", base_url: `${providerUrl}/v1` })).json();
+      assert.equal(seen.at(-1)?.auth, "Bearer sk-env");
+    } finally {
+      delete process.env.DEEPSEEK_API_KEY;
+    }
+
+    // A known provider with an unknown (newer) model id keeps working.
+    const st2 = await (await post("/v1/config", { provider: "deepseek", model: "deepseek-v9", api_key: "sk-x" })).json();
+    assert.equal(st2.ready, true, JSON.stringify(st2));
+  } finally {
+    app.close();
+    provider.close();
+  }
 });

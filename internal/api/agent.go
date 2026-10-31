@@ -61,6 +61,13 @@ func (s *Server) handleAgentStatus(w http.ResponseWriter, r *http.Request) {
 				out["error"] = st.Error
 			}
 		}
+		models := []string{}
+		if a, ok, _ := s.loadAISettings(r.Context()); ok {
+			models = a.Models
+		} else if m, _ := out["model"].(string); m != "" {
+			models = []string{m}
+		}
+		out["models"] = models
 		pending, _ := s.store.ListAgentActions(r.Context(), store.ActionPending, 100)
 		out["pending"] = len(pending)
 	}
@@ -280,7 +287,7 @@ func (s *Server) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal")
 		return
 	}
-	run := aiagent.RunRequest{Text: req.Text}
+	run := aiagent.RunRequest{Text: req.Text, Model: c.Model}
 	if c.ServerID != nil {
 		if srv, err := s.store.GetServer(ctx, *c.ServerID); err == nil {
 			run.Server = srv.Name

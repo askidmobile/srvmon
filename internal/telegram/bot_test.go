@@ -22,7 +22,7 @@ import (
 const testToken = "123456:ABC-test"
 
 // fakeAPI is a minimal Bot API: it records sent messages and serves queued
-// updates to getUpdates.
+// updates to getUpdates until the bot confirms them with its offset.
 type fakeAPI struct {
 	mu      sync.Mutex
 	sent    []map[string]any
@@ -49,8 +49,17 @@ func (f *fakeAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case "sendMessage":
 		f.sent = append(f.sent, params)
 	case "getUpdates":
-		ups := f.updates
-		f.updates = nil
+		// Like Telegram, keep updates until a later offset confirms them: a
+		// poll cancelled mid-flight (the bot reloading) must not lose them.
+		offset, _ := params["offset"].(float64)
+		kept := f.updates[:0]
+		for _, u := range f.updates {
+			if float64(u["update_id"].(int64)) >= offset {
+				kept = append(kept, u)
+			}
+		}
+		f.updates = kept
+		ups := append([]map[string]any(nil), kept...)
 		f.mu.Unlock()
 		if len(ups) == 0 {
 			select {

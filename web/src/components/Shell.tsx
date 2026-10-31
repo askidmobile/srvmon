@@ -12,7 +12,7 @@ const nav: { key: string; label: string; to?: string; match: Route["name"][] }[]
   { key: "3", label: "терминал", to: href.terminal(), match: ["terminal"] },
   { key: "4", label: "агент", to: href.agent(), match: ["agent"] },
   { key: "5", label: "алерты", to: href.alerts(), match: ["alerts"] },
-  { key: "6", label: "настройки", match: [] },
+  { key: "6", label: "настройки", to: href.settings(), match: ["settings"] },
 ];
 
 function Clock() {
