@@ -174,6 +174,12 @@ func Onboard(ctx context.Context, p OnboardParams, log Logger) (Result, error) {
 			log(StepOK, "sshd: PasswordAuthentication no · reload")
 		}
 	}
+	// Optional steps only warn on failure, but a cancelled or timed-out
+	// context is not an optional-step failure: report it so the caller
+	// rolls back instead of saving a half-done onboarding as success.
+	if err := ctx.Err(); err != nil {
+		return res, err
+	}
 	return res, nil
 }
 

@@ -224,3 +224,31 @@ func TestShq(t *testing.T) {
 		t.Fatalf("shq: %q %v", out, err)
 	}
 }
+
+func TestOnboardCancelledDuringOptionalStep(t *testing.T) {
+	ts := newTestServer(t)
+	key, _ := GenerateKey("")
+	ctx, cancel := context.WithCancel(context.Background())
+	ts.handler = func(cmd, stdin string) (string, uint32) {
+		switch {
+		case cmd == "id -u":
+			return "0\n", 0
+		case strings.Contains(stdin, "authorized_keys"):
+			pub, _ := ParseHostKey(key.Public)
+			ts.mu.Lock()
+			ts.authorized = append(ts.authorized, pub)
+			ts.mu.Unlock()
+			return "", 0
+		default:
+			cancel() // the owner presses "cancel" while the agent installs
+			return "", 1
+		}
+	}
+	_, err := Onboard(ctx, OnboardParams{
+		Addr: ts.addr, User: "root", Password: "S3cr3t!pw", HostKey: ts.hostKey, Key: key, SSHUser: "srvmon",
+		Agent: &AgentInstall{Image: "img", URL: "u", Token: "t"},
+	}, func(string, string) {})
+	if err == nil {
+		t.Fatal("cancelled onboarding must not report success")
+	}
+}
