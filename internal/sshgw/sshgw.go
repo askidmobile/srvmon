@@ -202,3 +202,89 @@ func ExitCode(err error) int {
 	}
 	return -1
 }
+
+// CappedBuffer keeps the first Head and the last Tail bytes written to it
+// and counts the rest, so a command with endless output cannot exhaust
+// memory.
+type CappedBuffer struct {
+	Head, Tail int
+	head       []byte
+	tail       []byte // ring
+	pos        int
+	full       bool
+	total      int64
+}
+
+func (b *CappedBuffer) Write(p []byte) (int, error) {
+	n := len(p)
+	b.total += int64(n)
+	if room := b.Head - len(b.head); room > 0 {
+		k := min(room, len(p))
+		b.head = append(b.head, p[:k]...)
+		p = p[k:]
+	}
+	if b.Tail <= 0 {
+		return n, nil
+	}
+	if b.tail == nil && len(p) > 0 {
+		b.tail = make([]byte, b.Tail)
+	}
+	if len(p) >= b.Tail {
+		copy(b.tail, p[len(p)-b.Tail:])
+		b.pos, b.full = 0, true
+		return n, nil
+	}
+	for len(p) > 0 {
+		k := copy(b.tail[b.pos:], p)
+		p = p[k:]
+		b.pos += k
+		if b.pos == b.Tail {
+			b.pos, b.full = 0, true
+		}
+	}
+	return n, nil
+}
+
+// Len is the number of bytes written in total.
+func (b *CappedBuffer) Len() int64 { return b.total }
+
+// String returns head, a gap marker if bytes were dropped, and tail.
+func (b *CappedBuffer) String() string {
+	var tail []byte
+	if b.full {
+		tail = append(append(tail, b.tail[b.pos:]...), b.tail[:b.pos]...)
+	} else {
+		tail = b.tail[:b.pos]
+	}
+	kept := int64(len(b.head) + len(tail))
+	if dropped := b.total - kept; dropped > 0 {
+		for len(tail) > 0 && tail[0]&0xC0 == 0x80 {
+			tail = tail[1:]
+		}
+		return string(b.head) + fmt.Sprintf("\n[… пропущено %d байт …]\n", dropped) + string(tail)
+	}
+	return string(b.head) + string(tail)
+}
+
+// RunCapped is Run with stdout and stderr captured into CappedBuffers of
+// head+tail bytes each.
+func RunCapped(ctx context.Context, c *ssh.Client, cmd string, head, tail int) (string, string, error) {
+	stop := context.AfterFunc(ctx, func() { c.Close() })
+	defer stop()
+	sess, err := c.NewSession()
+	if err != nil {
+		if ctx.Err() != nil {
+			err = ctx.Err()
+		}
+		return "", "", err
+	}
+	defer sess.Close()
+	out := &CappedBuffer{Head: head, Tail: tail}
+	errb := &CappedBuffer{Head: head, Tail: tail}
+	sess.Stdout, sess.Stderr = out, errb
+	err = sess.Run(cmd)
+	if ctx.Err() != nil {
+		err = ctx.Err()
+	}
+	return out.String(), errb.String(), err
+}

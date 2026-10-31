@@ -217,7 +217,9 @@ func (s *Server) runOnServer(ctx context.Context, a store.SSHAccess, cmd string,
 	defer client.Close()
 	secs := int(limit / time.Second)
 	wrapped := fmt.Sprintf("timeout -k 5 %d sh -c %s", secs, sshgw.Quote(cmd))
-	out, errOut, err := sshgw.Run(ctx, client, wrapped, nil)
+	// Capture is bounded while receiving: `head -c 10G /dev/zero` must not
+	// fill our memory before limitOutput trims it.
+	out, errOut, err := sshgw.RunCapped(ctx, client, wrapped, toolOutputKeepHead, toolOutputMax-toolOutputKeepHead)
 	code := sshgw.ExitCode(err)
 	text := out
 	if strings.TrimSpace(errOut) != "" {

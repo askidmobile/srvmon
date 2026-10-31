@@ -79,6 +79,10 @@ func ParseSchedule(expr string) (*Schedule, error) {
 	if n > 12 {
 		return nil, fmt.Errorf("минуты: не чаще раза в 5 минут")
 	}
+	// e.g. "0 0 31 2 *": valid fields, but the date never comes.
+	if s.Next(time.Now()).IsZero() {
+		return nil, fmt.Errorf("расписание никогда не срабатывает")
+	}
 	return s, nil
 }
 

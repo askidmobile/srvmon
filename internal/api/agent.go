@@ -467,6 +467,9 @@ func (s *Server) validateTask(ctx context.Context, in taskInput, t *store.AgentT
 		t.Enabled = *in.Enabled
 	}
 	next := sched.Next(s.now())
+	if next.IsZero() {
+		return "schedule"
+	}
 	t.NextRunAt = &next
 	return ""
 }

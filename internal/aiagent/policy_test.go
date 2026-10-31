@@ -118,7 +118,7 @@ func TestSchedule(t *testing.T) {
 			t.Errorf("%s: next %v, want %v", c.expr, got, c.want)
 		}
 	}
-	for _, bad := range []string{"* * * * *", "*/2 * * * *", "@every 1m", "61 * * * *", "* * *", "a b c d e", "5-1 * * * *", "*/0 * * * *"} {
+	for _, bad := range []string{"* * * * *", "*/2 * * * *", "@every 1m", "61 * * * *", "* * *", "a b c d e", "5-1 * * * *", "*/0 * * * *", "0 0 31 2 *", "0 0 30 2 *"} {
 		if _, err := ParseSchedule(bad); err == nil {
 			t.Errorf("%q: want error", bad)
 		}

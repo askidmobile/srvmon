@@ -11,9 +11,10 @@ import (
 // AI agent state: chats with their display transcript, commands waiting for
 // the owner's confirmation and scheduled tasks. The model-side context of a
 // chat lives in the srvmon-ai container; srvmon keeps what the UI shows and
-// everything that gates access to servers.
+// everything that gates access to servers. Ids are AUTOINCREMENT: a run or
+// tool call still in flight for a deleted row must never land on a new one.
 const agentSchema = `CREATE TABLE agent_chats (
-		id         INTEGER PRIMARY KEY,
+		id         INTEGER PRIMARY KEY AUTOINCREMENT,
 		server_id  INTEGER REFERENCES servers(id) ON DELETE SET NULL,
 		title      TEXT NOT NULL DEFAULT '',
 		created_at INTEGER NOT NULL,
@@ -30,7 +31,7 @@ const agentSchema = `CREATE TABLE agent_chats (
 	);
 	CREATE INDEX agent_messages_chat ON agent_messages(chat_id, id);
 	CREATE TABLE agent_actions (
-		id          INTEGER PRIMARY KEY,
+		id          INTEGER PRIMARY KEY AUTOINCREMENT,
 		chat_id     INTEGER,
 		task_id     INTEGER,
 		server_id   INTEGER NOT NULL,
@@ -46,7 +47,7 @@ const agentSchema = `CREATE TABLE agent_chats (
 	);
 	CREATE INDEX agent_actions_state ON agent_actions(state, id);
 	CREATE TABLE agent_tasks (
-		id          INTEGER PRIMARY KEY,
+		id          INTEGER PRIMARY KEY AUTOINCREMENT,
 		name        TEXT NOT NULL,
 		schedule    TEXT NOT NULL,
 		prompt      TEXT NOT NULL,

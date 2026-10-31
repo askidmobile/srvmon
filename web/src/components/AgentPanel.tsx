@@ -411,6 +411,10 @@ export function AgentPanel({
   const scroller = useRef<HTMLDivElement>(null);
   // A chat created by send() is already on screen: do not reload it.
   const created = useRef<number | undefined>(undefined);
+  // The chat on screen. Callbacks of a run or a load for another chat
+  // (the user switched while it was in flight) must not touch the view.
+  const active = useRef<number | undefined>(chatId);
+  active.current = chatId;
   const ctxId = context?.id;
 
   useEffect(() => {
@@ -438,11 +442,12 @@ export function AgentPanel({
   const loadChat = useCallback(async (id: number) => {
     try {
       const r = await agentApi.chat(id);
+      if (active.current !== id) return null;
       setChat(r.chat);
       setMessages(r.messages);
       return r.chat;
     } catch (e) {
-      if (e instanceof ApiError && e.status === 404) {
+      if (e instanceof ApiError && e.status === 404 && active.current === id) {
         setChat(null);
         setMessages([]);
         setChatId(undefined);
@@ -497,6 +502,7 @@ export function AgentPanel({
         const c = await agentApi.newChat(ctxId);
         id = c.id;
         created.current = id;
+        active.current = id;
         setChat(c);
         saveChatId(ctxId, id);
         setChatId(id);
@@ -508,7 +514,9 @@ export function AgentPanel({
     setText("");
     setMessages((m) => [...m, { id: -Date.now(), role: "user", text: msg, tools: [], ts: new Date().toISOString() }]);
     const cur: Live = { text: "", tools: [] };
-    setLive({ ...cur });
+    const runId = id;
+    const show = () => active.current === runId && setLive({ ...cur });
+    show();
     try {
       await runChat(id, msg, (ev) => {
         switch (ev.t) {
@@ -529,13 +537,15 @@ export function AgentPanel({
             if (ev.text) cur.text = ev.text;
             break;
         }
-        setLive({ ...cur });
+        show();
       });
     } catch (e) {
-      setErr(e instanceof ApiError && e.code === "busy" ? "агент ещё отвечает в этом чате" : "нет связи с агентом");
+      if (active.current === runId) setErr(e instanceof ApiError && e.code === "busy" ? "агент ещё отвечает в этом чате" : "нет связи с агентом");
     }
-    await loadChat(id);
-    setLive(null);
+    if (active.current === runId) {
+      await loadChat(runId);
+      if (active.current === runId) setLive(null);
+    }
     loadPending();
   }
 

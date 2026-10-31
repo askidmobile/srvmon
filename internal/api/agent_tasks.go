@@ -56,8 +56,9 @@ func (s *Server) startTask(t store.AgentTask, trigger string) bool {
 	var next *time.Time
 	if sched, err := aiagent.ParseSchedule(t.Schedule); err == nil {
 		// Next run counts from now: a long outage does not replay missed runs.
-		n := sched.Next(s.now())
-		next = &n
+		if n := sched.Next(s.now()); !n.IsZero() {
+			next = &n
+		}
 	}
 	if trigger == "manual" {
 		next = t.NextRunAt
