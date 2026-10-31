@@ -102,7 +102,7 @@ function Check({
         disabled={disabled}
         onChange={(e) => onChange(e.target.checked)}
       />
-      <span className={checked ? "text-primary" : "text-muted-foreground"} aria-hidden>
+      <span className={cn("shrink-0 whitespace-pre", checked ? "text-primary" : "text-muted-foreground")} aria-hidden>
         {checked ? "[x]" : "[ ]"}
       </span>
       <span>{children}</span>

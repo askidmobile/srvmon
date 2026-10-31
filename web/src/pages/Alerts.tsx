@@ -227,7 +227,7 @@ function RuleEditor({
     <>
       <tr className="border-t border-border/60 bg-secondary/40">
         <td className="py-1.5 pr-2">
-          <button type="button" className={r.enabled ? "text-primary" : "text-muted-foreground"} onClick={() => setR({ ...r, enabled: !r.enabled })}>
+          <button type="button" className={cn("whitespace-pre", r.enabled ? "text-primary" : "text-muted-foreground")} onClick={() => setR({ ...r, enabled: !r.enabled })}>
             {r.enabled ? "[x]" : "[ ]"}
           </button>
         </td>
@@ -369,7 +369,7 @@ function RulesPanel() {
                   <td className="py-1.5 pr-2">
                     <button
                       type="button"
-                      className={r.enabled ? "text-primary" : "text-muted-foreground"}
+                      className={cn("whitespace-pre", r.enabled ? "text-primary" : "text-muted-foreground")}
                       title={r.enabled ? "выключить" : "включить"}
                       onClick={() => toggle(r)}
                     >

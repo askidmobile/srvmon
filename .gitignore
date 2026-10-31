@@ -6,3 +6,6 @@
 .env
 !deploy/.env.example
 .DS_Store
+
+# tsc output next to sources: Vite resolves .js before .tsx
+web/src/**/*.js
