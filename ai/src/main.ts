@@ -74,7 +74,10 @@ async function stream(req: IncomingMessage, res: ServerResponse, run: (emit: (e:
 }
 
 export function status(setup: Setup): Status {
-  return { ready: !setup.error && !!setup.provider, provider: setup.provider, model: setup.modelId, error: setup.error, version };
+  // Until the saved settings arrive, the environment defaults may name
+  // another provider: runs wait rather than go to the wrong one.
+  const error = setup.loading ? "жду настройки из srvmon" : setup.error;
+  return { ready: !error && !!setup.provider, provider: setup.provider, model: setup.modelId, error, version };
 }
 
 function assistantText(m: { content?: { type: string; text?: string }[] }) {
@@ -176,10 +179,18 @@ async function pullConfig(toolsUrl: string, token: string, setup: Setup, onAppli
         headers: { Authorization: `Bearer ${token}` },
         signal: AbortSignal.timeout(10_000),
       });
-      if (res.status === 204) return; // nothing saved: keep the environment defaults
+      if (res.status === 204) {
+        setup.loading = false; // nothing saved: keep the environment defaults
+        return;
+      }
       if (res.ok) {
-        await setup.apply((await res.json()) as AIConfig);
-        onApplied();
+        try {
+          await setup.apply((await res.json()) as AIConfig);
+          onApplied();
+        } catch (err) {
+          setup.error = `сохранённые настройки не применились: ${err instanceof Error ? err.message : err}`;
+        }
+        setup.loading = false;
         console.log(JSON.stringify({ msg: "srvmon-ai: settings from srvmon", provider: setup.provider, model: setup.modelId, error: setup.error }));
         return;
       }
@@ -217,6 +228,7 @@ async function main() {
     setup.error = err instanceof Error ? err.message : String(err);
   }
 
+  setup.loading = true;
   const server = createApp({ dataDir, toolsUrl, token, modelRuntime, setup });
   server.requestTimeout = 0; // runs stream for minutes
   server.listen(port, () => console.log(JSON.stringify({ msg: "srvmon-ai started", port, ...status(setup) })));

@@ -129,6 +129,11 @@ test("settings: custom provider, live model list, chat model override", async ()
     const providers = await (await fetch(`${base}/v1/providers`, { headers: { Authorization: `Bearer ${token}` } })).json();
     assert.ok(providers.some((p: { id: string }) => p.id === "deepseek"));
 
+    // Until srvmon's saved settings are known, runs wait.
+    setup.loading = true;
+    const waiting = await (await fetch(`${base}/v1/status`, { headers: { Authorization: `Bearer ${token}` } })).json();
+    assert.equal(waiting.ready, false);
+
     const st = await (
       await post("/v1/config", { provider: "custom", base_url: `${providerUrl}/v1`, api: "openai-completions", api_key: "sk-test", model: "small", models: ["big"] })
     ).json();

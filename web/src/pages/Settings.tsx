@@ -140,6 +140,11 @@ function AIPanel() {
   const endpoint = `${provider}|${baseUrl.trim()}|${isCustom ? api : ""}`;
   const endpointRef = useRef(endpoint);
   endpointRef.current = endpoint;
+  // A list loaded for another address or protocol says nothing about this one.
+  useEffect(() => {
+    setList(null);
+    setListInfo(null);
+  }, [endpoint]);
 
   const loadModels = async () => {
     const asked = endpoint;

@@ -62,6 +62,8 @@ export class Setup {
   private key = "";
   private overridden = new Set<string>(); // providers registered by us
   private keyed = new Set<string>(); // providers whose runtime key we set
+  /** True at start until srvmon's saved settings (or their absence) are known. */
+  loading = false;
   /** Bumped on every apply: sessions of an older generation are reopened. */
   generation = 0;
 
@@ -86,6 +88,7 @@ export class Setup {
     try {
       await this.applyNow(cfg, provider, modelId);
       this.last = cfg;
+      this.loading = false; // srvmon pushed its settings itself
     } catch (err) {
       const prev = this.last;
       if (prev) {
