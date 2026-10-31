@@ -8,6 +8,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"encoding/hex"
 	"encoding/pem"
 	"errors"
 	"fmt"
@@ -173,6 +174,12 @@ func Run(ctx context.Context, c *ssh.Client, cmd string, stdin io.Reader) (strin
 		err = ctx.Err()
 	}
 	return out.String(), errb.String(), err
+}
+
+func randHex(n int) string {
+	b := make([]byte, n)
+	_, _ = rand.Read(b)
+	return hex.EncodeToString(b)
 }
 
 // shq quotes s for a POSIX shell.

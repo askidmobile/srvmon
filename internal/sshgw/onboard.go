@@ -81,10 +81,23 @@ func (p *priv) run(ctx context.Context, script string) (string, string, error) {
 	case p.nopass:
 		return Run(ctx, p.c, "sudo -n sh -s", strings.NewReader(script))
 	default:
-		// -k: always ask, so the password line is always consumed by sudo
-		// and never reaches sh. -p '': no prompt text in the output.
-		return Run(ctx, p.c, "sudo -S -k -p '' sh -s", strings.NewReader(p.password+"\n"+script))
+		// sudo reads the password line only when it actually asks for it
+		// (a NOPASSWD rule, e.g. one this onboarding just added, means it
+		// does not). The outer sh therefore drops every line up to a random
+		// marker before running the script, so the password is never
+		// executed as a command whichever way sudo behaves.
+		// -p '': no prompt text in the output.
+		cmd, stdin := sudoPasswordCmd(p.password, script)
+		return Run(ctx, p.c, cmd, strings.NewReader(stdin))
 	}
+}
+
+// sudoPasswordCmd builds a sudo -S invocation whose stdin carries the
+// password and then the script, separated by a random marker line.
+func sudoPasswordCmd(password, script string) (cmd, stdin string) {
+	marker := "#srvmon-" + randHex(16)
+	cmd = "sudo -S -k -p '' sh -c " + shq(`while IFS= read -r l; do [ "$l" = "$0" ] && exec sh -s; done; exit 1`) + " " + shq(marker)
+	return cmd, password + "\n" + marker + "\n" + script
 }
 
 // Onboard performs the one-time setup: password login with the pinned host

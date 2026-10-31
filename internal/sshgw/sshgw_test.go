@@ -314,3 +314,21 @@ func TestUserScriptKeepsExistingPassword(t *testing.T) {
 		}
 	}
 }
+
+// When sudo does not read the password (NOPASSWD), the password line must
+// still never run as a shell command.
+func TestSudoPasswordLineNeverExecuted(t *testing.T) {
+	cmd, stdin := sudoPasswordCmd("echo PWLEAK; exit 7", "echo ok\n")
+	shCmd := strings.TrimPrefix(cmd, "sudo -S -k -p '' ")
+	for name, in := range map[string]string{
+		"sudo did not read the password": stdin,
+		"sudo read the password":         stdin[strings.IndexByte(stdin, '\n')+1:],
+	} {
+		c := exec.Command("sh", "-c", shCmd)
+		c.Stdin = strings.NewReader(in)
+		out, err := c.CombinedOutput()
+		if err != nil || string(out) != "ok\n" {
+			t.Fatalf("%s: %q %v", name, out, err)
+		}
+	}
+}
