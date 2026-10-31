@@ -1,4 +1,4 @@
-import { ApiError } from "@/lib/api";
+import { ApiError, readBody } from "@/lib/api";
 import { t } from "@/lib/i18n";
 
 // AI agent API (stage 5). Chats stream as NDJSON from POST .../run.
@@ -153,7 +153,7 @@ async function req<T>(method: string, path: string, body?: unknown): Promise<T> 
     headers: body !== undefined ? { "Content-Type": "application/json" } : undefined,
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
-  const data = await res.json().catch(() => ({}));
+  const data = await readBody(res);
   if (!res.ok)
     throw new ApiError(
       res.status,

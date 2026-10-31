@@ -16,6 +16,42 @@ export function errorMessage(e: unknown, fallback: string): string {
   return fallback;
 }
 
+// readBody parses a JSON response. A successful response whose body does not
+// parse (the connection was cut mid-body, a proxy answered with HTML) is a
+// network failure, not an empty object: callers would read fields of {} and
+// crash. Error responses may have any body.
+export async function readBody(res: Response): Promise<unknown> {
+  if (res.status === 204) return {};
+  let text: string;
+  try {
+    text = await res.text();
+  } catch {
+    throw new ApiError(0, "network");
+  }
+  try {
+    return JSON.parse(text);
+  } catch {
+    if (res.ok) throw new ApiError(0, "bad_response");
+    return {};
+  }
+}
+
+// Go encodes empty slices as null; the screens read .length on them.
+function normalizeServer<T extends ServerView>(v: T): T {
+  v.tags ??= [];
+  return v;
+}
+
+function normalizeDetail(v: ServerDetailView): ServerDetailView {
+  normalizeServer(v);
+  v.logs ??= [];
+  if (v.detail) {
+    v.detail.cores ??= [];
+    v.detail.procs ??= [];
+  }
+  return v;
+}
+
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   const res = await fetch(path, {
     method,
@@ -23,7 +59,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
     headers: body !== undefined ? { "Content-Type": "application/json" } : undefined,
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
-  const data = await res.json().catch(() => ({}));
+  const data = await readBody(res);
   if (!res.ok) {
     const retry = Number(res.headers.get("Retry-After") ?? "") || undefined;
     const err = new ApiError(res.status, (data as { error?: string }).error ?? "error", retry);
@@ -109,8 +145,8 @@ export const api = {
   totp: (code: string) => request<{ authenticated: boolean }>("POST", "/api/auth/totp", { code }),
   setLanguage: (lang: string) => request<{ lang: string }>("PUT", "/api/settings/lang", { lang }),
   logout: () => request<unknown>("POST", "/api/auth/logout"),
-  servers: () => request<ServerView[]>("GET", "/api/servers"),
-  server: (id: number) => request<ServerDetailView>("GET", `/api/servers/${id}`),
+  servers: () => request<ServerView[] | null>("GET", "/api/servers").then((l) => (l ?? []).map(normalizeServer)),
+  server: (id: number) => request<ServerDetailView>("GET", `/api/servers/${id}`).then(normalizeDetail),
   history: (id: number, range: HistoryRange) =>
     request<History>("GET", `/api/servers/${id}/history?range=${encodeURIComponent(range)}`),
   updateCard: (id: number, card: ServerCard) => request<ServerView>("PATCH", `/api/servers/${id}`, card),

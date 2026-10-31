@@ -406,6 +406,8 @@ export const zh: Dict = {
   "tls · sign-in attempts are logged · owner access only": "tls · 登录尝试会被记录 · 仅限所有者访问",
   "to": "到",
   "to Telegram on ALERT or error": "出现 ALERT 或错误时发送到 Telegram",
+  "The screen failed to render.": "页面渲染失败。",
+  "retry": "重试",
   "to the overview": "返回总览",
   "to the session": "返回会话",
   "too many attempts, try again in {m} min": "尝试次数过多，请在 {m} 分钟后重试",
