@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
 	_ "modernc.org/sqlite" // pure-Go driver, keeps the binary CGO-free
@@ -273,15 +274,50 @@ func (s *Store) CreateServer(ctx context.Context, srv Server) (int64, error) {
 		srv.Port = 22
 	}
 	tags, _ := json.Marshal(srv.Tags)
-	res, err := s.db.ExecContext(ctx, `INSERT INTO servers
-		(name, description, project, grp, tags, host, port, provider, plan, cost, currency, next_payment, period, panel_url, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		srv.Name, srv.Description, srv.Project, srv.Group, string(tags), srv.Host, srv.Port,
-		srv.Provider, srv.Plan, srv.Cost, srv.Currency, srv.NextPayment, srv.Period, srv.PanelURL, time.Now().Unix())
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, err
 	}
-	return res.LastInsertId()
+	defer tx.Rollback()
+	// Ids are never reused (the table has no AUTOINCREMENT and SQLite cannot
+	// add it in place): in-memory state keyed by a deleted server's id, such
+	// as a late metrics push or an onboarding job, must not reach a new card.
+	var last int64
+	var v string
+	if err := tx.QueryRowContext(ctx, `SELECT value FROM settings WHERE key = ?`, keyServerIDSeq).Scan(&v); err == nil {
+		last, _ = strconv.ParseInt(v, 10, 64)
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return 0, err
+	}
+	var maxID int64
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(id), 0) FROM servers`).Scan(&maxID); err != nil {
+		return 0, err
+	}
+	id := max(last, maxID) + 1
+	if _, err := tx.ExecContext(ctx, `INSERT INTO servers
+		(id, name, description, project, grp, tags, host, port, provider, plan, cost, currency, next_payment, period, panel_url, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, srv.Name, srv.Description, srv.Project, srv.Group, string(tags), srv.Host, srv.Port,
+		srv.Provider, srv.Plan, srv.Cost, srv.Currency, srv.NextPayment, srv.Period, srv.PanelURL, time.Now().Unix()); err != nil {
+		return 0, err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO settings (key, value) VALUES (?, ?)
+		ON CONFLICT(key) DO UPDATE SET value = excluded.value`, keyServerIDSeq, strconv.FormatInt(id, 10)); err != nil {
+		return 0, err
+	}
+	return id, tx.Commit()
+}
+
+const keyServerIDSeq = "server_id_seq"
+
+// TokenLastSeen returns the last push time of one agent token (zero if never).
+func (s *Store) TokenLastSeen(ctx context.Context, tokenHash string) (time.Time, error) {
+	var ts sql.NullInt64
+	err := s.db.QueryRowContext(ctx, `SELECT last_seen_at FROM agent_tokens WHERE token_hash = ?`, tokenHash).Scan(&ts)
+	if err != nil || !ts.Valid {
+		return time.Time{}, err
+	}
+	return time.Unix(ts.Int64, 0), nil
 }
 
 // ListServers returns all servers ordered by group and name, with the most

@@ -260,23 +260,20 @@ docker run -d --name srvmon-agent --restart unless-stopped \
 	return b.String()
 }
 
-// disablePasswordScript turns off password logins. sshd uses the first value
-// it sees, so the setting goes first: a drop-in named 00-* when sshd_config
-// includes sshd_config.d (it overrides 50-cloud-init.conf), otherwise the
-// top of sshd_config. A failed `sshd -t` reverts the change.
+// disablePasswordScript turns off password logins. sshd takes the first
+// value it reads, and an Include may come before or after other settings,
+// so the directive goes to the very top of sshd_config. Success is judged by
+// the effective config (sshd -T), not just by syntax (sshd -t); otherwise
+// the change is reverted.
 const disablePasswordScript = `set -e
 F=/etc/ssh/sshd_config
 SSHD=$(command -v sshd || echo /usr/sbin/sshd)
-if grep -qiE '^[[:space:]]*Include[[:space:]]+/etc/ssh/sshd_config\.d/' "$F"; then
-  D=/etc/ssh/sshd_config.d/00-srvmon.conf
-  printf '# srvmon: key-only logins\nPasswordAuthentication no\n' > "$D"
-  "$SSHD" -t || { rm -f "$D"; echo "sshd -t failed" >&2; exit 1; }
-else
-  cp "$F" "$F.srvmon.bak"
-  if ! grep -q '^# srvmon: key-only logins' "$F"; then
-    { printf '# srvmon: key-only logins\nPasswordAuthentication no\n'; cat "$F.srvmon.bak"; } > "$F"
-  fi
-  "$SSHD" -t || { mv "$F.srvmon.bak" "$F"; echo "sshd -t failed" >&2; exit 1; }
+cp -p "$F" "$F.srvmon.bak"
+if ! grep -q '^# srvmon: key-only logins' "$F"; then
+  { printf '# srvmon: key-only logins\nPasswordAuthentication no\n'; cat "$F.srvmon.bak"; } > "$F"
 fi
+revert() { cp -p "$F.srvmon.bak" "$F"; echo "$1" >&2; exit 1; }
+"$SSHD" -t || revert "sshd -t failed"
+"$SSHD" -T 2>/dev/null | grep -qi '^passwordauthentication no$' || revert "PasswordAuthentication is still on (sshd -T)"
 systemctl reload ssh 2>/dev/null || systemctl reload sshd 2>/dev/null || service ssh reload 2>/dev/null || service sshd reload 2>/dev/null || rc-service sshd reload
 `

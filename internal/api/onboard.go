@@ -421,7 +421,6 @@ func (s *Server) runOnboard(ctx context.Context, j *job, req onboardReq, hostKey
 		}
 	}
 
-	started := time.Now()
 	res, err := sshgw.Onboard(ctx, params, j.log)
 	params.Password = ""
 	if err != nil {
@@ -457,7 +456,7 @@ func (s *Server) runOnboard(ctx context.Context, j *job, req onboardReq, hostKey
 				_ = s.store.RevokeOtherAgentTokens(bg, id, tokenHash)
 			}
 			j.log(sshgw.StepRun, "ждём первый heartbeat агента")
-			if s.waitHeartbeat(ctx, id, started) {
+			if s.waitHeartbeat(ctx, tokenHash) {
 				j.log(sshgw.StepOK, "агент на связи")
 			} else {
 				j.log(sshgw.StepWarn, "агент пока не прислал метрики: проверьте `docker logs srvmon-agent` на сервере")
@@ -470,13 +469,15 @@ func (s *Server) runOnboard(ctx context.Context, j *job, req onboardReq, hostKey
 	j.finish(true)
 }
 
-func (s *Server) waitHeartbeat(ctx context.Context, id int64, since time.Time) bool {
+// waitHeartbeat waits for the first push made with the new agent's token;
+// pushes of a replaced agent (other tokens) do not count.
+func (s *Server) waitHeartbeat(ctx context.Context, tokenHash string) bool {
 	ctx, cancel := context.WithTimeout(ctx, heartbeatWait)
 	defer cancel()
 	t := time.NewTicker(2 * time.Second)
 	defer t.Stop()
 	for {
-		if ts, err := s.store.ServerLastSeen(ctx, id); err == nil && !ts.IsZero() && !ts.Before(since.Truncate(time.Second)) {
+		if ts, err := s.store.TokenLastSeen(ctx, tokenHash); err == nil && !ts.IsZero() {
 			return true
 		}
 		select {

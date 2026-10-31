@@ -84,3 +84,20 @@ func TestServersAndTokens(t *testing.T) {
 		t.Fatal("unknown token must be rejected")
 	}
 }
+
+func TestServerIDsAreNotReused(t *testing.T) {
+	ctx := context.Background()
+	s := openTest(t)
+	a, _ := s.CreateServer(ctx, Server{Name: "a"})
+	b, _ := s.CreateServer(ctx, Server{Name: "b"})
+	if err := s.DeleteServer(ctx, b); err != nil {
+		t.Fatal(err)
+	}
+	c, err := s.CreateServer(ctx, Server{Name: "c"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c == b || c <= a {
+		t.Fatalf("id reused: a=%d b=%d c=%d", a, b, c)
+	}
+}

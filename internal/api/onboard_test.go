@@ -206,14 +206,6 @@ func TestExistingServerKeepsAddressOnFailure(t *testing.T) {
 	if code := e.postJSON(t, "/api/servers/onboard", req, &started); code != http.StatusAccepted {
 		t.Fatalf("onboard: %d", code)
 	}
-	// Deleting a card with a running job is refused.
-	dreq, _ := http.NewRequest("DELETE", e.ts.URL+"/api/servers/"+strconv.FormatInt(id, 10), nil)
-	if resp, err := e.client.Do(dreq); err == nil {
-		resp.Body.Close()
-		if resp.StatusCode != http.StatusConflict && e.srv.jobs.active(id) {
-			t.Fatalf("delete during onboarding: %d", resp.StatusCode)
-		}
-	}
 	deadline := time.Now().Add(20 * time.Second)
 	for e.srv.jobs.active(id) && time.Now().Before(deadline) {
 		time.Sleep(50 * time.Millisecond)
@@ -234,5 +226,23 @@ func TestJobsOneActivePerServer(t *testing.T) {
 	}
 	if _, err := js.add(&job{serverID: 6}); err != nil {
 		t.Fatalf("other server: %v", err)
+	}
+}
+
+func TestDeleteRefusedDuringOnboarding(t *testing.T) {
+	e := newEnv(t)
+	e.login(t)
+	id, _ := e.st.CreateServer(context.Background(), store.Server{Name: "busy"})
+	if _, err := e.srv.jobs.add(&job{serverID: id, cancel: func() {}}); err != nil {
+		t.Fatal(err)
+	}
+	req, _ := http.NewRequest("DELETE", e.ts.URL+"/api/servers/"+strconv.FormatInt(id, 10), nil)
+	resp, err := e.client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("delete during onboarding: %d", resp.StatusCode)
 	}
 }
