@@ -1,6 +1,7 @@
 import * as React from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { AgentVersion } from "@/components/AgentVersion";
 import { Hotkey, Shell } from "@/components/Shell";
 import { Button } from "@/components/ui/button";
 import { Panel } from "@/components/ui/panel";
@@ -742,7 +743,13 @@ function Passport({
     [t("kernel"), inv?.kernel || "—"],
     ["docker", inv?.docker_version || (r?.docker_ok ? t("yes") : "—")],
     ["ip", inv?.ips?.join(", ") || "—"],
-    [t("agent"), r ? `${r.agent_version} · push ${ago(data.snapshot?.received)}` : t("not connected")],
+    [
+      t("agent"),
+      <span key="agent">
+        <AgentVersion s={data} onStarted={onSaved} />
+        {r && <span className="text-muted-foreground"> · push {ago(data.snapshot?.received)}</span>}
+      </span>,
+    ],
   ];
   return (
     <Panel

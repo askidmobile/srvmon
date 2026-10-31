@@ -93,6 +93,8 @@ sudo docker compose exec -it server /srvmon-server init   # пароль + QR д
 
 В форке замените `ghcr.io/askidmobile/` на `ghcr.io/<ваш-owner>/` в `deploy/docker-compose.yml` (образы server, agent и ai) и в `internal/config/config.go`: Release публикует теги `sha-*` только в вашем пространстве имён, а Deploy запрашивает именно их. Образы основного репозитория предназначены для ручной установки выше. Если ваш образ агента в GHCR приватный, задайте в `.env` `SRVMON_AGENT_REGISTRY_USER` и `SRVMON_AGENT_REGISTRY_TOKEN` (PAT с `read:packages`): токен используется для одного `docker pull` и сразу разлогинивается.
 
+Обновление агентов: панель ставит образ агента своего релиза (`SRVMON_AGENT_IMAGE`, при деплое закреплён на развёрнутом теге). Если агент сообщает другую версию, панель один раз на релиз заменяет его контейнер по SSH (`SRVMON_AGENT_AUTOUPDATE=false` отключает это); обзор и паспорт сервера помечают устаревшие агенты и дают кнопки обновления. Агенты, поставленные вручную через `deploy/agent/docker-compose.yml`, обновляются там же: `docker compose pull && docker compose up -d`.
+
 ## Добавление серверов
 
 Мастер в панели (`+ сервер`, `#/add`):

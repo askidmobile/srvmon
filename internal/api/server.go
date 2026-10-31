@@ -46,6 +46,7 @@ type Server struct {
 	version   string
 	secrets   *secret.Box
 	jobs      *jobs
+	updates   *agentUpdates
 	setupKeys *setupKeys
 	csp       string
 	alerts    *alerts.Engine
@@ -105,6 +106,7 @@ func New(o Options) *Server {
 		version:   o.Version,
 		secrets:   o.Secrets,
 		jobs:      &jobs{m: map[string]*job{}},
+		updates:   newAgentUpdates(),
 		setupKeys: &setupKeys{m: map[string]setupKey{}},
 		now:       time.Now,
 		hashSem:   make(chan struct{}, 2),
@@ -185,6 +187,8 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/servers/{id}", s.requireSession(http.HandlerFunc(s.handleServer)))
 	mux.Handle("PATCH /api/servers/{id}", s.requireSession(http.HandlerFunc(s.handleServerCard)))
 	mux.Handle("GET /api/servers/{id}/history", s.requireSession(http.HandlerFunc(s.handleHistory)))
+	mux.Handle("POST /api/servers/{id}/agent/update", s.requireSession(http.HandlerFunc(s.handleAgentUpdate)))
+	mux.Handle("POST /api/servers/agents/update", s.requireSession(http.HandlerFunc(s.handleAgentUpdateAll)))
 
 	agent := func(pattern string, h http.HandlerFunc) { mux.Handle(pattern, s.requireSession(h)) }
 	agent("GET /api/agent/status", s.handleAgentStatus)

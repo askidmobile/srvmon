@@ -55,6 +55,9 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 	}
 	s.latest.Put(serverID, reports...)
 	s.alerts.Observe(serverID, reports...)
+	if len(reports) > 0 {
+		s.maybeAutoUpdate(serverID, reports[len(reports)-1].AgentVersion)
+	}
 	writeJSON(w, http.StatusOK, protocol.IngestResponse{Detail: s.latest.Watching(serverID)})
 }
 
@@ -62,6 +65,11 @@ type serverView struct {
 	store.Server
 	Online   bool              `json:"online"`
 	Snapshot *metrics.Snapshot `json:"snapshot,omitempty"`
+	// AgentOutdated: the agent reports another version than the panel's
+	// (AgentLatest).
+	AgentOutdated bool             `json:"agent_outdated,omitempty"`
+	AgentLatest   string           `json:"agent_latest,omitempty"`
+	AgentUpdate   *agentUpdateView `json:"agent_update,omitempty"`
 }
 
 func (s *Server) handleServers(w http.ResponseWriter, r *http.Request) {
@@ -79,6 +87,7 @@ func (s *Server) handleServers(w http.ResponseWriter, r *http.Request) {
 			v.Snapshot = &snap
 			v.Online = now.Sub(snap.Received) < offlineAfter
 		}
+		s.decorateAgent(&v)
 		out = append(out, v)
 	}
 	writeJSON(w, http.StatusOK, out)
