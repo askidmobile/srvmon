@@ -217,6 +217,12 @@ export async function drive(session: AgentSession, text: string, emit: (e: Event
   const onAbort = () => void session.abort();
   signal.addEventListener("abort", onAbort, { once: true });
   try {
+    // Stopped while the session was being created: abort events are not
+    // replayed to the listener above, so do not start the prompt at all.
+    if (signal.aborted) {
+      emit({ t: "error", msg: "остановлено" });
+      return;
+    }
     await session.prompt(text);
     if (signal.aborted) emit({ t: "error", msg: "остановлено" });
     else if (lastError) emit({ t: "error", msg: lastError });

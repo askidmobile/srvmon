@@ -184,11 +184,8 @@ func checkProgram(words []string) string {
 		}
 		return ""
 	case "dmesg":
-		if a := hasArg(words, "-c", "-C", "-D", "-E", "-n", "--clear", "--read-clear", "--console-off",
-			"--console-on", "--console-level"); a != "" {
-			return "dmesg " + a + " меняет состояние"
-		}
-		return ""
+		_, why := parseOpts(words, dmesgOpts)
+		return why
 	case "find":
 		for _, w := range words[1:] {
 			switch w {
@@ -198,22 +195,20 @@ func checkProgram(words []string) string {
 		}
 		return ""
 	case "journalctl":
-		if a := hasArg(words, "--vacuum-size", "--vacuum-time", "--vacuum-files", "--rotate", "--flush", "--sync",
-			"--relinquish-var", "--smart-relinquish-var", "--setup-keys", "--update-catalog"); a != "" {
-			return "journalctl " + a
-		}
-		return ""
+		// Positional words are matches (FIELD=value) or paths: read-only.
+		_, why := parseOpts(joinBoot(words), journalOpts)
+		return why
 	case "systemctl":
-		return checkSub(words, "systemctl", set("status", "show", "cat", "is-active", "is-enabled", "is-failed",
-			"list-units", "list-unit-files", "list-timers", "list-sockets", "list-dependencies", "list-jobs"), nil, true)
+		return checkSub(words, systemctlOpts, set("status", "show", "cat", "is-active", "is-enabled", "is-failed",
+			"list-units", "list-unit-files", "list-timers", "list-sockets", "list-dependencies", "list-jobs"), true)
 	case "top":
 		if hasArg(words, "-b") == "" {
 			return "top без -b"
 		}
 		return ""
 	case "hostnamectl", "timedatectl", "loginctl", "networkctl", "resolvectl":
-		return checkSub(words, prog, set("status", "show", "list", "list-sessions", "list-users", "statistics",
-			"show-session", "show-user", "list-timezones", "timesync-status"), nil, true)
+		return checkSub(words, ctlOpts, set("status", "show", "list", "list-sessions", "list-users", "statistics",
+			"show-session", "show-user", "list-timezones", "timesync-status"), true)
 	case "ip":
 		return checkIP(words)
 	case "docker":
@@ -222,30 +217,104 @@ func checkProgram(words []string) string {
 	return prog + " нет в списке команд только для чтения"
 }
 
-// checkSub accepts `prog [flags] sub ...` when sub is in allowed. Flags in
-// valued take a value. With emptyOK a bare `prog` is accepted.
-func checkSub(words []string, prog string, allowed map[string]bool, valued map[string]bool, emptyOK bool) string {
+// opts maps an allowed option to whether it takes a value. Anything not in
+// the map is refused: options of these programs can write files
+// (journalctl --cursor-file, docker compose config -o), so a list of bad
+// options is never complete.
+type opts map[string]bool
+
+func spec(noValue, value string) opts {
+	o := opts{}
+	for _, f := range strings.Fields(noValue) {
+		o[f] = false
+	}
+	for _, f := range strings.Fields(value) {
+		o[f] = true
+	}
+	return o
+}
+
+// parseOpts walks words[1:] like getopt (options may follow positionals) and
+// returns the positional words, or why the command is refused.
+func parseOpts(words []string, o opts) ([]string, string) {
+	prog := words[0]
+	var pos []string
 	for i := 1; i < len(words); i++ {
 		w := words[i]
-		if strings.HasPrefix(w, "-") {
-			if w == "--version" || w == "--help" {
-				return ""
+		switch {
+		case w == "--":
+			return append(pos, words[i+1:]...), ""
+		case w == "-" || !strings.HasPrefix(w, "-"):
+			pos = append(pos, w)
+		case strings.HasPrefix(w, "--"):
+			name, _, hasVal := strings.Cut(w, "=")
+			takes, ok := o[name]
+			if !ok {
+				return nil, prog + " " + name + " нет в списке безопасных опций"
 			}
-			if valued[w] {
+			if hasVal && !takes {
+				return nil, prog + " " + name + " без значения"
+			}
+			if takes && !hasVal {
 				i++
 			}
-			continue
+		default:
+			// Short flags, possibly combined (-xe, -n50, -u nginx).
+			for j := 1; j < len(w); j++ {
+				f := "-" + string(w[j])
+				takes, ok := o[f]
+				if !ok {
+					return nil, prog + " " + f + " нет в списке безопасных опций"
+				}
+				if takes {
+					if j == len(w)-1 {
+						i++
+					}
+					break
+				}
+			}
 		}
-		if allowed[w] {
+	}
+	return pos, ""
+}
+
+// checkSub accepts `prog [options] sub ...` when sub is in allowed and all
+// options are in o. With emptyOK a bare `prog` is accepted.
+func checkSub(words []string, o opts, allowed map[string]bool, emptyOK bool) string {
+	pos, why := parseOpts(words, o)
+	if why != "" {
+		return why
+	}
+	if len(pos) == 0 {
+		if emptyOK {
 			return ""
 		}
-		return prog + " " + w
+		return words[0] + " без подкоманды"
 	}
-	if emptyOK {
-		return ""
+	if !allowed[pos[0]] {
+		return words[0] + " " + pos[0]
 	}
-	return prog + " без подкоманды"
+	return ""
 }
+
+var journalOpts = spec(
+	"-f --follow -r --reverse -x --catalog -e --pager-end -a --all -q --quiet -l --full --no-full -m --merge "+
+		"-k --dmesg -b --no-pager --no-hostname --utc --list-boots --disk-usage --system --user -N --fields "+
+		"--no-tail --show-cursor --header --version --help",
+	"-u --unit --user-unit -n --lines -S --since -U --until -p --priority -g --grep -o --output "+
+		"-t --identifier -T --exclude-identifier --output-fields -F --field --boot --facility -c --cursor "+
+		"--after-cursor -M --machine")
+
+var dmesgOpts = spec("-T --ctime -H --human -k --kernel -u --userspace -x --decode -L -t --notime -r --raw "+
+	"-d --show-delta -e --reltime -P --nopager -w --follow -W --follow-new -S --syslog --version --help",
+	"-l --level -f --facility --color --since --until --time-format -F --file")
+
+var systemctlOpts = spec(
+	"-a --all -l --full -r --recursive --reverse --after --before --failed --value --no-legend --no-pager "+
+		"--plain -q --quiet --user --system --show-types --version --help",
+	"-t --type --state -p --property -n --lines -o --output")
+
+var ctlOpts = spec("-a --all -l --full --value --no-legend --no-pager --version --help", "-p --property")
 
 var ipWrite = set("add", "del", "delete", "change", "replace", "set", "flush", "exec", "append", "prepend",
 	"save", "restore", "update", "attach", "detach", "up", "down", "load", "unload")
@@ -274,9 +343,13 @@ var dockerGroups = map[string]map[string]bool{
 	"compose":   set("ps", "logs", "config", "ls", "images", "top", "version", "events", "port"),
 }
 
-// docker compose flags that take a value (before the subcommand).
-var composeValued = set("-f", "--file", "-p", "--project-name", "--project-directory", "--env-file", "--profile",
-	"--ansi", "--progress", "--parallel")
+// docker compose options before the subcommand.
+var composeGlobal = spec("--compatibility --version --help",
+	"-f --file -p --project-name --project-directory --env-file --profile --ansi --progress --parallel")
+
+// Options after a docker subcommand are not checked one by one; these write
+// files and are refused.
+var dockerFileOpts = set("-o", "--output")
 
 func checkDocker(words []string) string {
 	if len(words) < 2 {
@@ -299,14 +372,24 @@ func checkDocker(words []string) string {
 	if !ok {
 		return "docker " + sub
 	}
-	var valued map[string]bool
-	if sub == "compose" {
-		valued = composeValued
+	for _, w := range words[2:] {
+		name, _, _ := strings.Cut(w, "=")
+		if dockerFileOpts[name] || (len(w) > 2 && w[0] == '-' && w[1] != '-' && strings.ContainsRune(w[1:], 'o')) {
+			return "docker " + sub + " " + w + " пишет в файл"
+		}
 	}
 	for i := 2; i < len(words); i++ {
 		w := words[i]
 		if strings.HasPrefix(w, "-") {
-			if valued[w] {
+			if sub != "compose" {
+				continue
+			}
+			name, _, hasVal := strings.Cut(w, "=")
+			takes, ok := composeGlobal[name]
+			if !ok {
+				return "docker compose " + name + " нет в списке безопасных опций"
+			}
+			if takes && !hasVal {
 				i++
 			}
 			continue
@@ -387,4 +470,33 @@ func checkDate(words []string) string {
 		}
 	}
 	return ""
+}
+
+// joinBoot turns `journalctl -b -1` (an optional value as the next word,
+// which journalctl accepts) into `-b-1` so parseOpts does not read -1 as a flag.
+func joinBoot(words []string) []string {
+	out := make([]string, 0, len(words))
+	for i := 0; i < len(words); i++ {
+		w := words[i]
+		if (w == "-b" || w == "--boot") && i+1 < len(words) && isInt(words[i+1]) {
+			out = append(out, "--boot="+words[i+1])
+			i++
+			continue
+		}
+		out = append(out, w)
+	}
+	return out
+}
+
+func isInt(s string) bool {
+	s = strings.TrimPrefix(s, "-")
+	if s == "" {
+		return false
+	}
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
 }
