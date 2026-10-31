@@ -18,6 +18,7 @@ concurrency:
 jobs:
   go:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-go@v6
@@ -36,6 +37,7 @@ jobs:
 
   web:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: web
@@ -52,6 +54,7 @@ jobs:
 
   ai:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: ai
@@ -68,12 +71,14 @@ jobs:
 
   shell:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
       - run: shellcheck deploy/*.sh
 
   docker:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     needs: [go, web, ai]
     strategy:
       matrix:
