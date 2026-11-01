@@ -12,8 +12,9 @@ import (
 	"github.com/askidmobile/srvmon/internal/protocol"
 )
 
-// journalLines caps one journalctl read.
-const journalLines = 200
+// journalLines caps one journalctl read. Info entries are read too: a
+// service's stdout lands at PRIORITY=6 even when the line says [WARNING].
+const journalLines = 1000
 
 // journal returns warn-or-worse journald entries since the previous call;
 // the first call looks back one hour. The agent runs journalctl itself (a
@@ -27,7 +28,7 @@ func (t *LogTailer) journal(ctx context.Context) []protocol.LogLine {
 		t.noJournal = true
 		return nil
 	}
-	args := []string{"-q", "--no-pager", "-o", "json", "-p", "warning", "-n", strconv.Itoa(journalLines)}
+	args := []string{"-q", "--no-pager", "-o", "json", "-p", "info", "-n", strconv.Itoa(journalLines)}
 	if t.journalCursor != "" {
 		args = append(args, "--after-cursor="+t.journalCursor)
 	} else {
@@ -66,13 +67,8 @@ func parseJournal(out []byte) ([]protocol.LogLine, string) {
 		if msg == "" {
 			continue
 		}
-		var lvl string
-		switch prio, _ := strconv.Atoi(jstr(e["PRIORITY"])); {
-		case prio <= 3:
-			lvl = "ERR"
-		case prio == 4:
-			lvl = "WARN"
-		default:
+		lvl := journalLevel(msg, jstr(e["PRIORITY"]))
+		if lvl == "" {
 			continue
 		}
 		us, _ := strconv.ParseInt(jstr(e["__REALTIME_TIMESTAMP"]), 10, 64)
@@ -90,6 +86,29 @@ func parseJournal(out []byte) ([]protocol.LogLine, string) {
 		lines = append(lines, protocol.LogLine{Time: ts, Level: lvl, Source: src, Msg: clip(msg, maxLogMsg)})
 	}
 	return lines, cursor
+}
+
+// journalLevel picks the level of a journald entry. PRIORITY is what the
+// sender declared, but everything a service prints to stdout or stderr gets
+// the unit's default (info) whatever it says, so a level the application
+// wrote into the line counts as well, and the more severe of the two wins.
+// Words in the message do not: "no 10002 errors" at PRIORITY=6 is info.
+func journalLevel(msg, priority string) string {
+	lvl := ""
+	if p, err := strconv.Atoi(priority); err == nil {
+		switch {
+		case p <= 3:
+			lvl = "ERR"
+		case p == 4:
+			lvl = "WARN"
+		}
+	}
+	if app, ok := explicitLevel(msg); ok {
+		if out, known := levelName(app); known && severity(out) > severity(lvl) {
+			lvl = out
+		}
+	}
+	return lvl
 }
 
 // jstr decodes a journald JSON field: a string, or an array of bytes for

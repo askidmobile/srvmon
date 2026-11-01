@@ -33,17 +33,21 @@ type DetailCollector struct {
 	prevAt   time.Time
 	prevCPU  map[string]cpuTimes // "cpu", "cpu0", ...
 	prevProc map[int]uint64      // pid -> CPU time in nanoseconds
-	// opaque holds pids whose /proc/<pid>/stat the kernel answers only
-	// after a ptrace access check (non-dumpable processes such as upowerd).
-	// Under the docker-default AppArmor profile every such read logs a
-	// denial, so these pids are read from files without that check.
-	opaque map[int]*opaqueProc
+	// sched holds the per-thread schedstat counters of every process when
+	// the agent runs under a MAC profile (see readMode).
+	sched map[int]*opaqueProc
+	// mode is how process CPU is read, decided on the first collection.
+	mode procMode
 	// noSchedstat is set when the kernel has no schedstat files
-	// (CONFIG_SCHED_INFO off); opaque processes then keep using stat.
+	// (CONFIG_SCHED_INFO off).
 	noSchedstat bool
-	prevDisk    [2]uint64 // read, written sectors
-	users       map[int]string
-	usersRead   time.Time
+	// SelfAttr is the agent's own LSM label file; empty means
+	// /proc/self/attr/{apparmor/,}current. Tests point it elsewhere.
+	SelfAttr  string
+	selfIDs   procIDs
+	prevDisk  [2]uint64 // read, written sectors
+	users     map[int]string
+	usersRead time.Time
 }
 
 type cpuTimes struct {
@@ -234,6 +238,7 @@ type procSample struct {
 	ticks     uint64 // CPU time, ns
 	rss       uint64
 	cpu       float64
+	cpuNA     bool
 	container string
 }
 
@@ -251,43 +256,15 @@ func (d *DetailCollector) processes(det *protocol.Detail, dt float64, containerI
 		if err != nil {
 			continue
 		}
-		var name string
-		var cpuNs, rssPages uint64
-		if op := d.opaque[pid]; op != nil {
-			if name, cpuNs, rssPages, err = d.readOpaque(e.Name(), op); err != nil {
-				continue
-			}
-		} else {
-			b, err := os.ReadFile(d.proc(e.Name() + "/stat"))
-			if err != nil {
-				continue
-			}
-			var ticks uint64
-			var ok, hidden bool
-			name, ticks, rssPages, hidden, ok = parsePidStat(b)
-			if !ok {
-				continue
-			}
-			cpuNs = ticks * (1e9 / clkTck)
-			if hidden && !d.noSchedstat {
-				// This read already logged one denial; switch to the
-				// check-free files for as long as the pid lives. The CPU
-				// counter continues from the stat value, so rates stay
-				// continuous across the switch.
-				op := &opaqueProc{cum: cpuNs}
-				if _, _, _, err := d.readOpaque(e.Name(), op); err == errNoSchedstat {
-					d.noSchedstat = true
-				} else if err == nil {
-					if d.opaque == nil {
-						d.opaque = map[int]*opaqueProc{}
-					}
-					d.opaque[pid] = op
-				}
-			}
+		name, cpuNs, rssPages, cpuOK, ok := d.readProc(pid, e.Name())
+		if !ok {
+			continue
 		}
-		p := procSample{pid: pid, name: name, ticks: cpuNs, rss: rssPages * page, uid: -1}
-		cur[pid] = cpuNs
-		if prev, ok := d.prevProc[pid]; ok && dt > 0 && cpuNs >= prev {
+		p := procSample{pid: pid, name: name, ticks: cpuNs, rss: rssPages * page, uid: -1, cpuNA: !cpuOK}
+		if cpuOK {
+			cur[pid] = cpuNs
+		}
+		if prev, ok := d.prevProc[pid]; ok && cpuOK && dt > 0 && cpuNs >= prev {
 			p.cpu = float64(cpuNs-prev) / 1e9 / dt * 100
 		}
 		if len(containerIDs) > 0 {
@@ -306,9 +283,9 @@ func (d *DetailCollector) processes(det *protocol.Detail, dt float64, containerI
 		list = append(list, p)
 	}
 	d.prevProc = cur
-	for pid := range d.opaque {
+	for pid := range d.sched {
 		if _, alive := cur[pid]; !alive {
-			delete(d.opaque, pid)
+			delete(d.sched, pid)
 		}
 	}
 	det.ProcsTotal = len(list)
@@ -324,7 +301,7 @@ func (d *DetailCollector) processes(det *protocol.Detail, dt float64, containerI
 	users := d.userNames()
 	for _, p := range list {
 		out := protocol.Process{
-			PID: p.pid, Name: p.name, CPUPercent: p.cpu, MemBytes: p.rss, Container: p.container,
+			PID: p.pid, Name: p.name, CPUPercent: p.cpu, CPUUnknown: p.cpuNA, MemBytes: p.rss, Container: p.container,
 			Cmd: d.cmdline(p.pid),
 		}
 		if uid := d.uid(p.pid); uid >= 0 {
@@ -341,28 +318,24 @@ func (d *DetailCollector) processes(det *protocol.Detail, dt float64, containerI
 
 // parsePidStat extracts comm, utime+stime and rss pages from /proc/<pid>/stat.
 // comm may contain spaces and parentheses, so fields are counted after the
-// last ')'. hidden reports that the kernel masked the address fields
-// (startcode and endcode read as 1), which it does when the reader failed
-// the ptrace access check for that process.
-func parsePidStat(b []byte) (name string, ticks, rss uint64, hidden, ok bool) {
+// last ')'.
+func parsePidStat(b []byte) (name string, ticks, rss uint64, ok bool) {
 	s := string(b)
 	open := strings.IndexByte(s, '(')
 	end := strings.LastIndexByte(s, ')')
 	if open < 0 || end < open {
-		return "", 0, 0, false, false
+		return "", 0, 0, false
 	}
 	name = s[open+1 : end]
 	f := strings.Fields(s[end+1:])
-	// f[0] is state (field 3); utime is field 14, stime 15, rss 24,
-	// startcode 26, endcode 27.
+	// f[0] is state (field 3); utime is field 14, stime 15, rss 24.
 	if len(f) < 22 {
-		return "", 0, 0, false, false
+		return "", 0, 0, false
 	}
 	ut, _ := strconv.ParseUint(f[11], 10, 64)
 	st, _ := strconv.ParseUint(f[12], 10, 64)
 	rss, _ = strconv.ParseUint(f[21], 10, 64)
-	hidden = len(f) > 24 && f[23] == "1" && f[24] == "1"
-	return name, ut + st, rss, hidden, true
+	return name, ut + st, rss, true
 }
 
 // opaqueProc keeps a cumulative CPU counter for a process read through
