@@ -248,6 +248,7 @@ var zh = map[string]string{
 	"the agent gave no answer":                                                         "代理没有给出回答",
 	"pick a model from the list in the AI settings":                                    "请从 AI 设置的列表中选择模型",
 	"this alert is not about a server state: nothing to diagnose":                      "此告警与服务器状态无关：无需诊断",
+	"this alert has no diagnosis yet":                                                  "此告警还没有诊断",
 	"DSA keys are not accepted: use ed25519":                                           "不接受 DSA 密钥：请使用 ed25519",
 	"RSA keys shorter than 3072 bits are not accepted: use ed25519":                    "不接受短于 3072 位的 RSA 密钥：请使用 ed25519",
 	"authorized_keys has a broken emergency block (begin without end): fix it by hand": "authorized_keys 中的应急密钥块已损坏（有开始无结束）：请手动修复",

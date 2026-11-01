@@ -164,6 +164,18 @@ func (s *Store) ListAgentChats(ctx context.Context, limit int) ([]AgentChat, err
 }
 
 // DeleteAgentChat removes a chat and its transcript.
+// AgentChatByTitlePrefix returns the newest chat whose title starts with
+// prefix, or ErrNotFound.
+func (s *Store) AgentChatByTitlePrefix(ctx context.Context, prefix string) (AgentChat, error) {
+	c, err := scanChat(s.db.QueryRowContext(ctx,
+		`SELECT id, server_id, title, model, created_at, updated_at FROM agent_chats
+		 WHERE substr(title, 1, length(?1)) = ?1 ORDER BY id DESC LIMIT 1`, prefix))
+	if errors.Is(err, sql.ErrNoRows) {
+		return c, ErrNotFound
+	}
+	return c, err
+}
+
 func (s *Store) DeleteAgentChat(ctx context.Context, id int64) error {
 	res, err := s.db.ExecContext(ctx, `DELETE FROM agent_chats WHERE id = ?`, id)
 	if err != nil {

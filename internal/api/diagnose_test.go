@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -184,5 +185,110 @@ func TestDiagnosisQueueLimitsAndResult(t *testing.T) {
 	}
 	if set := s.loadDiagSettings(ctx); set.Enabled || set.PerHour != 2 {
 		t.Fatalf("%+v", set)
+	}
+}
+
+func TestAlertChatContinuesDiagnosis(t *testing.T) {
+	ai, runs := diagAI(t)
+	a := newAgentEnv(t, ai.URL)
+	ctx := context.Background()
+	al := a.alert(t, store.SevCrit, "pg")
+
+	// No diagnosis yet: nothing to continue.
+	if resp := a.do(t, "POST", fmt.Sprintf("/api/alerts/%d/chat", al.ID), nil); resp.StatusCode != 400 {
+		t.Fatalf("without a diagnosis: %d", resp.StatusCode)
+	}
+	if _, err := a.srv.queueDiagnosis(ctx, al, "manual"); err != nil {
+		t.Fatal(err)
+	}
+	a.srv.diagnose(ctx, <-a.srv.diag.queue)
+
+	open := func() chatView {
+		t.Helper()
+		resp := a.do(t, "POST", fmt.Sprintf("/api/alerts/%d/chat", al.ID), nil)
+		defer resp.Body.Close()
+		if resp.StatusCode != 200 {
+			t.Fatalf("open: %d", resp.StatusCode)
+		}
+		var c chatView
+		_ = json.NewDecoder(resp.Body).Decode(&c)
+		return c
+	}
+	c := open()
+	if c.ServerID == nil || *c.ServerID != a.srvID || !strings.HasPrefix(c.Title, diagChatPrefix(al.ID)) {
+		t.Fatalf("%+v", c)
+	}
+	msgs, _ := a.st.AgentMessages(ctx, c.ID)
+	if len(msgs) != 1 || msgs[0].Role != "assistant" || !strings.Contains(msgs[0].Text, "OOM") {
+		t.Fatalf("%+v", msgs)
+	}
+	// A second click reopens the same chat.
+	if again := open(); again.ID != c.ID {
+		t.Fatalf("new chat %d instead of %d", again.ID, c.ID)
+	}
+
+	// The first question carries the diagnosis to the model, the next ones do not.
+	before := len(runs())
+	for i, q := range []string{"а что с памятью?", "и что делать?"} {
+		resp := a.do(t, "POST", fmt.Sprintf("/api/agent/chats/%d/run", c.ID), map[string]string{"text": q})
+		_, _ = io.Copy(io.Discard, resp.Body) // the run ends with the stream
+		resp.Body.Close()
+		r := runs()
+		if len(r) != before+i+1 {
+			t.Fatalf("runs: %d", len(r))
+		}
+		got := r[len(r)-1]
+		if got.Server != "prod-api-01" || got.DiagnoseID != 0 || !strings.HasSuffix(got.Text, q) {
+			t.Fatalf("%+v", got)
+		}
+		if seeded := strings.Contains(got.Text, "OOM"); seeded != (i == 0) {
+			t.Fatalf("question %d seeded=%v: %q", i, seeded, got.Text)
+		}
+	}
+	// The transcript shows the question as typed, without the context.
+	msgs, _ = a.st.AgentMessages(ctx, c.ID)
+	if len(msgs) < 2 || msgs[1].Role != "user" || msgs[1].Text != "а что с памятью?" {
+		t.Fatalf("%+v", msgs)
+	}
+}
+
+func TestSeededContextSurvivesFailedRun(t *testing.T) {
+	diag := store.AgentMessage{Role: "assistant", Text: "OOM"}
+	q := store.AgentMessage{Role: "user", Text: "?"}
+	if seededContext([]store.AgentMessage{diag}) == "" {
+		t.Fatal("no seed before the first question")
+	}
+	failed := store.AgentMessage{Role: "assistant", Error: "srvmon-ai: connection refused"}
+	if !strings.Contains(seededContext([]store.AgentMessage{diag, q, failed}), "OOM") {
+		t.Fatal("seed lost after a run that never reached the model")
+	}
+	ok := store.AgentMessage{Role: "assistant", Text: "answer"}
+	if seededContext([]store.AgentMessage{diag, q, failed, q, ok}) != "" {
+		t.Fatal("seed resent after the model answered")
+	}
+	if seededContext([]store.AgentMessage{q, ok}) != "" {
+		t.Fatal("seed in an ordinary chat")
+	}
+}
+
+func TestAlertChatReopensPastHistoryPage(t *testing.T) {
+	ai, _ := diagAI(t)
+	a := newAgentEnv(t, ai.URL)
+	ctx := context.Background()
+	al := a.alert(t, store.SevCrit, "pg")
+	if _, err := a.srv.queueDiagnosis(ctx, al, "manual"); err != nil {
+		t.Fatal(err)
+	}
+	a.srv.diagnose(ctx, <-a.srv.diag.queue)
+	var first, again chatView
+	if code := a.postJSON(t, fmt.Sprintf("/api/alerts/%d/chat", al.ID), nil, &first); code != 200 {
+		t.Fatal(code)
+	}
+	for i := 0; i < 105; i++ {
+		c, _ := a.st.CreateAgentChat(ctx, nil, "")
+		_, _ = a.st.AddAgentMessage(ctx, c.ID, store.AgentMessage{Role: "user", Text: "hi"})
+	}
+	if code := a.postJSON(t, fmt.Sprintf("/api/alerts/%d/chat", al.ID), nil, &again); code != 200 || again.ID != first.ID {
+		t.Fatalf("%d: chat %d, want %d", code, again.ID, first.ID)
 	}
 }

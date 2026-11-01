@@ -1,6 +1,7 @@
 import { type ReactNode, useCallback, useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { Check } from "@/components/ui/check";
 import { Panel } from "@/components/ui/panel";
 import { ApiError } from "@/lib/api";
 import { type BackupConfig, type BackupObject, type BackupView, type EmergencyView, backupApi } from "@/lib/backup";
@@ -167,10 +168,9 @@ export function BackupPanel() {
             "The panel database (servers, SSH keys, rules, settings, agent chats) is copied on schedule, encrypted with a key derived from the master key and uploaded to S3-compatible storage. The master key is never in a backup: export it below and keep it offline. Metrics history is not backed up.",
           )}
         </div>
-        <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" checked={c.enabled} onChange={(e) => setC({ ...c, enabled: e.target.checked })} />
+        <Check className="text-sm" checked={c.enabled} onChange={(v) => setC({ ...c, enabled: v })}>
           {t("back up on schedule")}
-        </label>
+        </Check>
         <div className="grid gap-3 sm:grid-cols-2">
           <Field
             label={t("endpoint")}
@@ -256,10 +256,9 @@ export function BackupPanel() {
             />
           </Field>
         </div>
-        <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" checked={c.s3.path_style} onChange={(e) => set3("path_style", e.target.checked)} />
+        <Check className="text-sm" checked={c.s3.path_style} onChange={(v) => set3("path_style", v)}>
           {t("path-style addressing (MinIO and some providers)")}
-        </label>
+        </Check>
 
         <div className="flex flex-wrap items-center gap-2 border-t border-border/60 pt-3">
           <Button disabled={!!busy} onClick={() => void save()}>
