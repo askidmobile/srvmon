@@ -501,3 +501,135 @@ export function terminalURL(serverId: number, cols: number, rows: number, contai
   if (container) q.set("container", container);
   return `${proto}//${location.host}/api/servers/${serverId}/terminal?${q}`;
 }
+
+// --- terminal recordings ---
+
+export interface Recording {
+  id: number;
+  server_id: number;
+  server_name: string;
+  target: string;
+  ip: string;
+  cols: number;
+  rows: number;
+  started_at: string;
+  ended_at?: string;
+  bytes: number;
+  truncated: boolean;
+}
+
+export interface RecSettings {
+  enabled: boolean;
+  retention_days: number;
+  max_mb: number;
+}
+
+export interface RecSettingsView extends RecSettings {
+  available: boolean;
+  count: number;
+  disk_bytes: number;
+}
+
+export const recApi = {
+  // A page of 100, newest first; before = the last id of the previous page.
+  list: (server?: number, before?: number) => {
+    const q = new URLSearchParams();
+    if (server) q.set("server", String(server));
+    if (before) q.set("before", String(before));
+    return request<Recording[] | null>("GET", `/api/recordings${q.size ? `?${q}` : ""}`).then((l) => l ?? []);
+  },
+  servers: () =>
+    request<{ id: number; name: string; count: number }[] | null>("GET", "/api/recordings/servers").then((l) => l ?? []),
+  get: (id: number) => request<Recording>("GET", `/api/recordings/${id}`),
+  remove: (id: number) => request<unknown>("DELETE", `/api/recordings/${id}`),
+  removeAll: () => request<{ deleted: number }>("DELETE", "/api/recordings"),
+  settings: () => request<RecSettingsView>("GET", "/api/recordings/settings"),
+  saveSettings: (s: RecSettings) => request<RecSettingsView>("PUT", "/api/recordings/settings", s),
+  castURL: (id: number, download = false) => `/api/recordings/${id}/cast${download ? "?download=1" : ""}`,
+  cast: async (id: number): Promise<string> => {
+    const res = await fetch(`/api/recordings/${id}/cast`, { credentials: "same-origin" });
+    if (!res.ok) {
+      const data = (await readBody(res)) as { error?: string };
+      throw new ApiError(res.status, data.error ?? "error");
+    }
+    return res.text();
+  },
+};
+
+// --- files over SFTP ---
+
+export interface FileEntry {
+  name: string;
+  size: number;
+  mode: string;
+  mtime: string;
+  dir: boolean;
+  link?: boolean;
+}
+
+export interface FileList {
+  path: string;
+  entries: FileEntry[] | null;
+  truncated?: boolean;
+}
+
+// Uploads go in chunks below the reverse proxy's body limit.
+const UPLOAD_CHUNK = 4 << 20;
+
+export const filesApi = {
+  list: (id: number, path?: string) =>
+    request<FileList>("GET", `/api/servers/${id}/files${path ? `?path=${encodeURIComponent(path)}` : ""}`).then(
+      (l) => ({ ...l, entries: l.entries ?? [] }),
+    ),
+  downloadURL: (id: number, path: string) => `/api/servers/${id}/files/download?path=${encodeURIComponent(path)}`,
+  mkdir: (id: number, path: string) => request<unknown>("POST", `/api/servers/${id}/files/mkdir`, { path }),
+  rename: (id: number, from: string, to: string) =>
+    request<unknown>("POST", `/api/servers/${id}/files/rename`, { from, to }),
+  remove: (id: number, path: string, recursive: boolean) =>
+    request<unknown>("POST", `/api/servers/${id}/files/delete`, { path, recursive }),
+  upload: async (
+    id: number,
+    path: string,
+    file: File,
+    overwrite: boolean,
+    onProgress: (sent: number) => void,
+    signal?: AbortSignal,
+  ) => {
+    // A fresh id per upload keeps two uploads of the same name apart.
+    const rnd = new Uint8Array(16);
+    crypto.getRandomValues(rnd);
+    const upload = Array.from(rnd, (b) => b.toString(16).padStart(2, "0")).join("");
+    let offset = 0;
+    try {
+      do {
+        const chunk = file.slice(offset, offset + UPLOAD_CHUNK);
+        const final = offset + chunk.size >= file.size;
+        const q = new URLSearchParams({ path, upload, offset: String(offset) });
+        if (final) q.set("final", "1");
+        if (overwrite) q.set("overwrite", "1");
+        const res = await fetch(`/api/servers/${id}/files/upload?${q}`, {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/octet-stream" },
+          body: chunk,
+          signal,
+        });
+        const data = (await readBody(res)) as { error?: string; message?: string };
+        if (!res.ok) {
+          const err = new ApiError(res.status, data.error ?? "error");
+          if (data.message) err.message = data.message;
+          throw err;
+        }
+        offset += chunk.size;
+        onProgress(offset);
+      } while (offset < file.size);
+    } catch (e) {
+      // Drop the half-written part file on the server (best effort).
+      const q = new URLSearchParams({ path, upload });
+      void fetch(`/api/servers/${id}/files/upload/abort?${q}`, { method: "POST", credentials: "same-origin" }).catch(
+        () => undefined,
+      );
+      throw e;
+    }
+  },
+};

@@ -7,6 +7,7 @@ require (
 	github.com/mdp/qrterminal/v3 v3.2.1
 	github.com/minio/minio-go/v7 v7.0.95
 	github.com/nicholas-fedor/shoutrrr v0.18.0
+	github.com/pkg/sftp v1.13.10
 	golang.org/x/crypto v0.58.0
 	golang.org/x/term v0.47.0
 	modernc.org/sqlite v1.61.0
@@ -21,6 +22,7 @@ require (
 	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/klauspost/compress v1.18.0 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.11 // indirect
+	github.com/kr/fs v0.1.0 // indirect
 	github.com/mattn/go-colorable v0.1.15 // indirect
 	github.com/mattn/go-isatty v0.0.24 // indirect
 	github.com/minio/crc64nvme v1.0.2 // indirect

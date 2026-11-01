@@ -6,7 +6,7 @@ import { useEffect, useRef } from "react";
 import { terminalURL } from "@/lib/api";
 import { t } from "@/lib/i18n";
 
-const THEME = {
+export const THEME = {
   background: "#050806",
   foreground: "#c9e4cf",
   cursor: "#3ddc6e",
@@ -33,25 +33,31 @@ const THEME = {
 export type TermStatus = "connecting" | "open" | "closed";
 
 // One SSH session: xterm.js <-> WebSocket <-> srvmon-server <-> sshd.
-// Binary frames carry terminal bytes, text frames carry resize events.
+// Binary frames carry terminal bytes; text frames carry JSON control
+// messages: resize from the browser, {"type":"rec"} from the server when the
+// session is recorded.
 export function XTerm({
   serverId,
   container,
   active,
   onStatus,
   onSize,
+  onRec,
+  onFocus,
 }: {
   serverId: number;
   container?: string;
   active: boolean;
   onStatus: (s: TermStatus) => void;
   onSize: (cols: number, rows: number) => void;
+  onRec?: (id: number) => void;
+  onFocus?: () => void;
 }) {
   const box = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
-  const cb = useRef({ onStatus, onSize });
-  cb.current = { onStatus, onSize };
+  const cb = useRef({ onStatus, onSize, onRec, onFocus });
+  cb.current = { onStatus, onSize, onRec, onFocus };
 
   useEffect(() => {
     const term = new Terminal({
@@ -82,8 +88,16 @@ export function XTerm({
       ws.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
     };
     ws.onmessage = (ev) => {
-      if (ev.data instanceof ArrayBuffer) term.write(new Uint8Array(ev.data));
-      else term.write(String(ev.data));
+      if (ev.data instanceof ArrayBuffer) {
+        term.write(new Uint8Array(ev.data));
+        return;
+      }
+      try {
+        const c = JSON.parse(String(ev.data)) as { type?: string; on?: boolean; id?: number };
+        if (c.type === "rec" && c.on) cb.current.onRec?.(c.id ?? 0);
+      } catch {
+        /* not a control message */
+      }
     };
     ws.onclose = (ev) => {
       cb.current.onStatus("closed");
@@ -105,6 +119,10 @@ export function XTerm({
       if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "resize", cols, rows }));
     });
     cb.current.onSize(term.cols, term.rows);
+    // Clicking into a split pane makes it the active one.
+    const ta = term.textarea;
+    const focus = () => cb.current.onFocus?.();
+    ta?.addEventListener("focus", focus);
 
     const ro = new ResizeObserver(() => {
       if (box.current && box.current.offsetParent !== null) {
@@ -119,6 +137,7 @@ export function XTerm({
 
     return () => {
       ro.disconnect();
+      ta?.removeEventListener("focus", focus);
       onData.dispose();
       onBinary.dispose();
       onResize.dispose();

@@ -14,10 +14,10 @@ import {
   type AITest,
   type DiagnoseSettings,
 } from "@/lib/agent";
-import { api as panelApi, ApiError } from "@/lib/api";
+import { api as panelApi, ApiError, recApi, type RecSettingsView } from "@/lib/api";
 import { LANGS, type Lang, setLang, t, tn, useLang } from "@/lib/i18n";
-import { type Route } from "@/lib/router";
-import { cn } from "@/lib/utils";
+import { href, type Route } from "@/lib/router";
+import { cn, formatBytes } from "@/lib/utils";
 
 const fieldCls =
   "h-9 w-full min-w-0 border border-input bg-field px-2.5 text-hi placeholder:text-muted-foreground focus-visible:outline-1 focus-visible:outline-ring disabled:opacity-60";
@@ -112,6 +112,128 @@ function LanguagePanel() {
           {t("The language of the panel, Telegram bot messages and AI agent replies.")}
         </div>
       </div>
+    </Panel>
+  );
+}
+
+// Terminal session recording: on/off, retention and the size limit.
+function RecordingPanel() {
+  const [v, setV] = useState<RecSettingsView | null>(null);
+  const [days, setDays] = useState("30");
+  const [maxMB, setMaxMB] = useState("50");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  const apply = (r: RecSettingsView) => {
+    setV(r);
+    setDays(String(r.retention_days));
+    setMaxMB(String(r.max_mb));
+  };
+  useEffect(() => {
+    recApi
+      .settings()
+      .then(apply)
+      .catch(() => setMsg({ ok: false, text: t("could not load") }));
+  }, []);
+
+  const save = async (enabled: boolean) => {
+    const d = Number(days);
+    const m = Number(maxMB);
+    if (!Number.isInteger(d) || d < 1 || d > 365 || !Number.isInteger(m) || m < 1 || m > 500) {
+      setMsg({ ok: false, text: t("retention 1–365 days, limit 1–500 MB") });
+      return;
+    }
+    setBusy(true);
+    setMsg(null);
+    try {
+      apply(await recApi.saveSettings({ enabled, retention_days: d, max_mb: m }));
+      setMsg({ ok: true, text: t("saved") });
+    } catch {
+      setMsg({ ok: false, text: t("could not save") });
+    }
+    setBusy(false);
+  };
+
+  const removeAll = async () => {
+    if (!confirm(t("Delete all terminal recordings?"))) return;
+    setBusy(true);
+    try {
+      await recApi.removeAll();
+      apply(await recApi.settings());
+      setMsg({ ok: true, text: t("deleted") });
+    } catch {
+      setMsg({ ok: false, text: t("could not delete") });
+    }
+    setBusy(false);
+  };
+
+  return (
+    <Panel
+      title={t("terminal recording")}
+      right={
+        v ? (
+          <a className="text-primary" href={href.recordings()}>
+            {tn(v.count, "{n} recording", "{n} recordings")} · {formatBytes(v.disk_bytes)}
+          </a>
+        ) : undefined
+      }
+    >
+      {!v ? (
+        msg ? <div className="text-crit">{msg.text}</div> : <div className="text-muted-foreground">{t("loading…")}</div>
+      ) : (
+        <div className="flex flex-col gap-3">
+          <div className="text-xs text-muted-foreground">
+            {t(
+              "Web terminal sessions are saved in asciinema format: what the server printed and window resizes, never keystrokes, so passwords typed at hidden prompts stay out. Output may still contain secrets (cat .env), so files are encrypted with the master key and deleted after the retention period.",
+            )}
+          </div>
+          {!v.available && <div className="text-sm text-warn">{t("Recording needs a data directory and the master key.")}</div>}
+          <div className="flex flex-wrap items-end gap-4">
+            <div className="flex flex-col gap-1">
+              <span className="text-sm text-muted-foreground">{t("recording")}</span>
+              <div className="flex gap-2" role="radiogroup" aria-label={t("recording")}>
+                <Button
+                  size="sm"
+                  role="radio"
+                  aria-checked={v.enabled}
+                  variant={v.enabled ? "default" : "outline"}
+                  disabled={busy}
+                  onClick={() => !v.enabled && void save(true)}
+                >
+                  {t("on")}
+                </Button>
+                <Button
+                  size="sm"
+                  role="radio"
+                  aria-checked={!v.enabled}
+                  variant={!v.enabled ? "default" : "outline"}
+                  disabled={busy}
+                  onClick={() => v.enabled && void save(false)}
+                >
+                  {t("off")}
+                </Button>
+              </div>
+            </div>
+            <div className="w-32">
+              <Field label={t("keep, days")} htmlFor="rec-days">
+                <input id="rec-days" className={fieldCls} inputMode="numeric" value={days} onChange={(e) => setDays(e.target.value)} />
+              </Field>
+            </div>
+            <div className="w-48">
+              <Field label={t("limit per session, MB")} htmlFor="rec-max">
+                <input id="rec-max" className={fieldCls} inputMode="numeric" value={maxMB} onChange={(e) => setMaxMB(e.target.value)} />
+              </Field>
+            </div>
+            <Button disabled={busy} onClick={() => void save(v.enabled)}>
+              {t("save")}
+            </Button>
+            <Button variant="destructive" disabled={busy || v.count === 0} onClick={() => void removeAll()}>
+              {t("delete all")}
+            </Button>
+          </div>
+          {msg && <div className={cn("text-sm", msg.ok ? "text-primary" : "text-crit")}>{msg.text}</div>}
+        </div>
+      )}
     </Panel>
   );
 }
@@ -624,6 +746,7 @@ export function SettingsPage({ route, version, onLogout }: { route: Route; versi
     >
       <div className="flex max-w-5xl flex-col gap-5">
         <LanguagePanel />
+        <RecordingPanel />
         <AIPanel />
         <DiagnosePanel />
         <McpPanel />
