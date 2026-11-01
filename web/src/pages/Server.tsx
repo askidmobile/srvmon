@@ -11,6 +11,8 @@ import {
   ApiError,
   historyRanges,
   type Container,
+  type ContainerHistory,
+  type DiskHealth,
   type History,
   type HistoryRange,
   type LogLine,
@@ -221,17 +223,28 @@ function MemoryPanel({ data }: { data: ServerDetailView }) {
       <div className="mt-2.5 flex flex-col gap-1 border-t border-border pt-2">
         {(h.disks ?? []).map((disk) => {
           const p = disk.total ? (disk.used / disk.total) * 100 : 0;
+          const full = data.disk_full_hours?.[disk.mount];
           return (
-            <div key={disk.mount} className="grid grid-cols-[96px_minmax(0,1fr)_44px_56px] items-center gap-2.5">
-              <span className="truncate text-muted-foreground" title={`${disk.mount} (${disk.fs})`}>
-                {disk.mount}
-              </span>
-              <Track value={p} />
-              <span className="text-right">{pct(p)}</span>
-              <span className="text-right text-hi" title={t("used {size}", { size: formatBytes(disk.used) })}>
-                {formatBytes(disk.total)}
-              </span>
-            </div>
+            <React.Fragment key={disk.mount}>
+              <div className="grid grid-cols-[96px_minmax(0,1fr)_44px_56px] items-center gap-2.5">
+                <span className="truncate text-muted-foreground" title={`${disk.mount} (${disk.fs})`}>
+                  {disk.mount}
+                </span>
+                <Track value={p} />
+                <span className="text-right">{pct(p)}</span>
+                <span className="text-right text-hi" title={t("used {size}", { size: formatBytes(disk.used) })}>
+                  {formatBytes(disk.total)}
+                </span>
+              </div>
+              {full != null && (
+                <div
+                  className={cn("pl-[106px] text-xs", full < 24 ? "text-crit" : full < 24 * 7 ? "text-warn" : "text-muted-foreground")}
+                  title={t("linear forecast from the growth over the last 6 hours")}
+                >
+                  └ {t("full in ~{time}", { time: fmtHours(full) })}
+                </div>
+              )}
+            </React.Fragment>
           );
         })}
         {d && (
@@ -243,6 +256,15 @@ function MemoryPanel({ data }: { data: ServerDetailView }) {
       </div>
     </Panel>
   );
+}
+
+// Hours as "45m", "13h", "3d 4h".
+function fmtHours(h: number): string {
+  if (h < 1) return t("{n}m", { n: Math.max(1, Math.round(h * 60)) });
+  if (h < 48) return t("{n}h", { n: Math.round(h) });
+  const d = Math.floor(h / 24);
+  const rest = Math.round(h - d * 24);
+  return t("{n}d", { n: d }) + (rest ? " " + t("{n}h", { n: rest }) : "");
 }
 
 function lastValue(xs: (number | null)[] | undefined): number | null {
@@ -401,8 +423,82 @@ function containerRank(c: Container) {
   return 2;
 }
 
+const containerRanges: HistoryRange[] = ["1h", "6h", "24h", "7d"];
+
+// CPU and memory of one container over a window, from VictoriaMetrics.
+function ContainerChart({ serverId, name }: { serverId: number; name: string }) {
+  const [range, setRange] = useState<HistoryRange>("24h");
+  const [hist, setHist] = useState<ContainerHistory | null>(null);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    let alive = true;
+    const tick = () =>
+      api
+        .containerHistory(serverId, name, range)
+        .then((h) => {
+          if (!alive) return;
+          setHist(h);
+          setError("");
+        })
+        .catch(() => alive && setError(t("no connection to the metrics storage")));
+    tick();
+    const id = setInterval(tick, 60000);
+    return () => {
+      alive = false;
+      clearInterval(id);
+    };
+  }, [serverId, name, range]);
+  const cpu = hist?.cpu ?? [];
+  const mem = hist?.mem ?? [];
+  const nums = (xs: (number | null)[]) => xs.filter((v): v is number => v != null);
+  const cpuMax = Math.max(100, ...nums(cpu));
+  const memMax = Math.max(1, ...nums(mem));
+  const empty = hist && nums(cpu).length === 0 && nums(mem).length === 0;
+  const stat = (xs: (number | null)[], f: (v: number) => string) => {
+    const v = nums(xs);
+    if (v.length === 0) return "─";
+    return `${t("avg")} ${f(v.reduce((a, b) => a + b, 0) / v.length)} · ${t("max")} ${f(Math.max(...v))}`;
+  };
+  return (
+    <div className="flex flex-col gap-2 border-l-2 border-primary/60 py-2 pl-3">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <span className="text-hi">{name}</span>
+        <span className="flex items-center gap-1" role="group" aria-label={t("chart window")}>
+          {containerRanges.map((x) => (
+            <Button key={x} size="sm" variant={x === range ? "default" : "outline"} onClick={() => setRange(x)}>
+              {x}
+            </Button>
+          ))}
+        </span>
+        {error && <span className="text-crit">{error}</span>}
+      </div>
+      {empty ? (
+        <span className="text-muted-foreground">{t("no history yet: it is written by agents of this version and newer")}</span>
+      ) : (
+        <div className="grid gap-x-6 gap-y-2 md:grid-cols-2">
+          <div className="min-w-0">
+            <div className="flex justify-between text-xs text-muted-foreground">
+              <span>cpu · {t("% of one core")}</span>
+              <span>{stat(cpu, pct)}</span>
+            </div>
+            <Bars values={cpu} max={cpuMax} height={64} color={C.ok} grid label={t("container cpu")} />
+          </div>
+          <div className="min-w-0">
+            <div className="flex justify-between text-xs text-muted-foreground">
+              <span>mem</span>
+              <span>{stat(mem, formatBytes)}</span>
+            </div>
+            <Bars values={mem} max={memMax} height={64} color={C.cached} grid label={t("container memory")} />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function DockerPanel({ data, onLogs }: { data: ServerDetailView; onLogs: (name: string) => void }) {
   const r = data.snapshot?.report;
+  const [open, setOpen] = useState("");
   const list = useMemo(
     () => [...(r?.containers ?? [])].sort((a, b) => containerRank(a) - containerRank(b) || a.name.localeCompare(b.name)),
     [r],
@@ -437,11 +533,22 @@ function DockerPanel({ data, onLogs }: { data: ServerDetailView; onLogs: (name: 
               const bad = c.state !== "running" || c.health === "unhealthy";
               const warn = !bad && (c.health === "starting" || (c.restarts ?? 0) > 0);
               return (
-                <tr key={c.id} className="hover:bg-secondary/60">
+                <React.Fragment key={c.id}>
+                <tr className="hover:bg-secondary/60">
                   <td className={cn("px-1.5", bad ? "text-crit" : warn ? "text-warn" : "text-primary")}>
                     {bad ? "○" : warn ? "▲" : "●"}
                   </td>
-                  <td className="px-1.5 whitespace-nowrap text-hi">{c.name}</td>
+                  <td className="px-1.5 whitespace-nowrap text-hi">
+                    <button
+                      type="button"
+                      className="cursor-pointer text-left hover:text-primary"
+                      aria-expanded={open === c.name}
+                      title={t("cpu and memory history")}
+                      onClick={() => setOpen(open === c.name ? "" : c.name)}
+                    >
+                      {open === c.name ? "▾" : "▸"} {c.name}
+                    </button>
+                  </td>
                   <td className="max-w-[280px] truncate px-1.5 text-muted-foreground" title={c.image}>
                     {c.image}
                   </td>
@@ -480,12 +587,166 @@ function DockerPanel({ data, onLogs }: { data: ServerDetailView; onLogs: (name: 
                     </Button>
                   </td>
                 </tr>
+                {open === c.name && (
+                  <tr>
+                    <td colSpan={10} className="px-1.5">
+                      <ContainerChart serverId={data.id} name={c.name} />
+                    </td>
+                  </tr>
+                )}
+                </React.Fragment>
               );
             })}
           </tbody>
         </table>
         {list.length === 0 && <Empty>{t("no containers")}</Empty>}
       </div>
+    </Panel>
+  );
+}
+
+// --- disk health ---
+
+function smartBad(d: DiskHealth): boolean {
+  return (
+    d.passed === false ||
+    !!d.critical_warning ||
+    (d.pending ?? 0) > 0 ||
+    (d.uncorrectable ?? 0) > 0 ||
+    (d.percent_used ?? 0) >= 100 ||
+    (!!d.spare_threshold && d.available_spare != null && d.available_spare <= d.spare_threshold)
+  );
+}
+
+function smartWarn(d: DiskHealth): boolean {
+  return (d.reallocated ?? 0) > 0 || (d.media_errors ?? 0) > 0 || (d.percent_used ?? 0) >= 80 || (d.temp_c ?? 0) >= 60;
+}
+
+// Why a disk was not read (DiskHealth.error), as English source strings.
+const smartErrors: Record<string, string> = {
+  standby: "asleep (standby), not woken up",
+  unsupported: "no S.M.A.R.T. through this controller (virtual disk or RAID)",
+  permission: "no access: the agent container lacks device permissions",
+};
+
+function SmartPanel({ data, onChanged }: { data: ServerDetailView; onChanged: () => void }) {
+  const disks = data.smart ?? [];
+  const on = !!data.inventory?.smart;
+  const updating = data.agent_update?.state === "running";
+  const [error, setError] = useState("");
+  const toggle = (enabled: boolean) => {
+    if (
+      enabled &&
+      !confirm(
+        t(
+          "The agent will be restarted with raw read access to the disks (CAP_SYS_RAWIO, CAP_SYS_ADMIN, block devices read-only) and will read S.M.A.R.T. every 30 minutes. Sleeping disks are not woken up. Continue?",
+        ),
+      )
+    )
+      return;
+    setError("");
+    api
+      .agentSmart(data.id, enabled)
+      .then(onChanged)
+      .catch((e) => setError(e?.code === "update_running" ? t("already updating") : t("could not start the update")));
+  };
+  const right = data.smart_at ? t("read {ago} · every 30 min", { ago: ago(data.smart_at) }) : undefined;
+  let body: React.ReactNode;
+  if (disks.length > 0) {
+    body = (
+      <div className={scrollBox}>
+        <table className="w-full min-w-[760px] border-collapse text-left">
+          <thead className="text-muted-foreground">
+            <tr className="border-b border-border">
+              {["st", "disk", "model", "health", "temp", "power on", "wear / sectors"].map((h) => (
+                <th key={h} className="px-1.5 py-1 font-normal">
+                  {t(h)}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {disks.map((d) => {
+              const bad = smartBad(d);
+              const warn = !bad && smartWarn(d);
+              const facts =
+                d.type === "nvme"
+                  ? [
+                      d.percent_used != null && t("used {n}%", { n: d.percent_used }),
+                      d.available_spare != null && t("spare {n}%", { n: d.available_spare }),
+                      d.media_errors != null && t("media errors {n}", { n: d.media_errors }),
+                    ]
+                  : [
+                      d.reallocated != null && `realloc ${d.reallocated}`,
+                      d.pending != null && `pending ${d.pending}`,
+                      d.uncorrectable != null && `uncorr ${d.uncorrectable}`,
+                    ];
+              const st = d.error ? "text-muted-foreground" : bad ? "text-crit" : warn ? "text-warn" : "text-primary";
+              return (
+                <tr key={d.device} className="hover:bg-secondary/60">
+                  <td className={cn("px-1.5", st)}>{d.error ? "·" : bad ? "○" : warn ? "▲" : "●"}</td>
+                  <td className="px-1.5 whitespace-nowrap text-hi">{d.device}</td>
+                  <td className="max-w-[260px] truncate px-1.5 text-muted-foreground" title={d.serial ? `${d.model} · ${d.serial}` : d.model}>
+                    {d.model || "─"}
+                  </td>
+                  {d.error ? (
+                    <td colSpan={4} className="px-1.5 text-muted-foreground">
+                      {t(smartErrors[d.error] ?? d.error)}
+                    </td>
+                  ) : (
+                    <>
+                      <td className={cn("px-1.5", d.passed === false ? "text-crit" : d.passed ? "text-primary" : "text-muted-foreground")}>
+                        {d.passed == null ? "─" : d.passed ? "PASSED" : "FAILED"}
+                        {!!d.critical_warning && <span className="text-crit"> · warn 0x{d.critical_warning.toString(16)}</span>}
+                      </td>
+                      <td className={cn("px-1.5", (d.temp_c ?? 0) >= 60 && "text-warn")}>{d.temp_c != null ? `${d.temp_c}°C` : "─"}</td>
+                      <td className="px-1.5 whitespace-nowrap">{d.power_on_hours != null ? fmtHours(d.power_on_hours) : "─"}</td>
+                      <td className="px-1.5 whitespace-nowrap">{facts.filter(Boolean).join(" · ") || "─"}</td>
+                    </>
+                  )}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    );
+  } else if (on) {
+    body = <Empty>{t("S.M.A.R.T. is on: waiting for the first read of the disks")}</Empty>;
+  } else {
+    body = (
+      <div className="flex flex-col gap-1 py-2 text-muted-foreground">
+        <span>
+          {t("S.M.A.R.T. is off. It needs raw read access to the disks, so it is enabled per server; otherwise the agent stays unprivileged.")}
+        </span>
+        {!data.has_ssh && (
+          <span>{t("No ssh access from the panel: set SRVMON_SMART=1 and the device options of deploy/agent/docker-compose.yml on the server.")}</span>
+        )}
+      </div>
+    );
+  }
+  return (
+    <Panel title={t("disk health · S.M.A.R.T.")} right={right}>
+      {body}
+      {data.has_ssh && (
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          {updating ? (
+            <span className="text-warn">{t("updating…")}</span>
+          ) : on ? (
+            <Button size="sm" variant="outline" onClick={() => toggle(false)}>
+              {t("turn S.M.A.R.T. off")}
+            </Button>
+          ) : (
+            <Button size="sm" variant="outline" onClick={() => toggle(true)}>
+              {t("turn S.M.A.R.T. on")}
+            </Button>
+          )}
+          {data.agent_update?.state === "failed" && (
+            <span className="text-crit">{t("update failed: {error}", { error: data.agent_update.error ?? "" })}</span>
+          )}
+          {error && <span className="text-crit">{error}</span>}
+        </div>
+      )}
     </Panel>
   );
 }
@@ -1006,6 +1267,7 @@ export function ServerScreen({
         </div>
 
         <DockerPanel data={data} onLogs={showLogs} />
+        <SmartPanel data={data} onChanged={load} />
 
         <div className="flex flex-wrap gap-x-4 gap-y-5">
           <LogsPanel

@@ -498,3 +498,24 @@ func TestAgentUpdateScriptMatchesInstall(t *testing.T) {
 		t.Errorf("install:\n%s\nupdate:\n%s", in, up)
 	}
 }
+
+func TestAgentScriptsSmart(t *testing.T) {
+	on, off := true, false
+	if s := agentScript(AgentInstall{Image: "img", Smart: &on}); !strings.Contains(s, "SM=1\n") || !strings.Contains(s, `"$@" "$IMG"`) {
+		t.Fatalf("install with smart:\n%s", s)
+	}
+	if s := agentScript(AgentInstall{Image: "img"}); !strings.Contains(s, "SM=0\n") {
+		t.Fatal("install defaults to smart on")
+	}
+	if s := agentUpdateScript(AgentInstall{Image: "img"}); !strings.Contains(s, "SM=keep\n") || !strings.Contains(s, "grep -qx 'SRVMON_SMART=1'") {
+		t.Fatal("update does not keep the smart setting")
+	}
+	if s := agentUpdateScript(AgentInstall{Image: "img", Smart: &off}); !strings.Contains(s, "SM=0\n") {
+		t.Fatal("update cannot turn smart off")
+	}
+	for _, want := range []string{"--cap-add SYS_RAWIO", "--cap-add SYS_ADMIN", "'b 8:* r'", "'b 259:* r'"} {
+		if !strings.Contains(smartScript, want) {
+			t.Errorf("smart args miss %s", want)
+		}
+	}
+}

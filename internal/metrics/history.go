@@ -168,10 +168,15 @@ func (r *Reader) ContainerSeries(ctx context.Context, server, container, rangeNa
 			return out, err
 		}
 	}
-	// query_range stamps a bucket with its end; shift to the start.
+	// Each point averages the step before it, and VictoriaMetrics aligns
+	// points to multiples of step (the last one may lie past end): place a
+	// point by the middle of the time it covers.
 	shift := func(ss []sample) []sample {
 		for i := range ss {
-			ss[i].t = ss[i].t.Add(-step)
+			ss[i].t = ss[i].t.Add(-step / 2)
+			if !ss[i].t.Before(end) {
+				ss[i].t = end.Add(-time.Nanosecond)
+			}
 		}
 		return ss
 	}
