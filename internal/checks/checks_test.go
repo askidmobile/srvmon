@@ -351,6 +351,24 @@ func TestRunner(t *testing.T) {
 	}
 }
 
+func TestRetryKeepsFirstCertificate(t *testing.T) {
+	r := New(nil, nil, nil)
+	r.retry = time.Millisecond
+	exp := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	n := 0
+	r.probe = func(ctx context.Context, tg Target) Result {
+		n++
+		if n == 1 {
+			return Result{Error: "certificate expired", Cert: &CertInfo{NotAfter: exp}}
+		}
+		return Result{Error: "timeout"}
+	}
+	res := r.checkOne(context.Background(), store.Check{Target: "https://x.example.com/"})
+	if res.Error != "timeout" || res.Cert == nil || !res.Cert.NotAfter.Equal(exp) {
+		t.Fatalf("%+v", res)
+	}
+}
+
 func TestTLSConfigClassicCurves(t *testing.T) {
 	for _, c := range tlsConfig("").CurvePreferences {
 		if c == tls.X25519MLKEM768 {

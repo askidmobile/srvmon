@@ -188,7 +188,13 @@ func (r *Runner) checkOne(ctx context.Context, c store.Check) Result {
 		return res
 	case <-time.After(r.retry):
 	}
-	return r.probe(ctx, t)
+	retry := r.probe(ctx, t)
+	if retry.Cert == nil {
+		// The first attempt saw the certificate (say, an expired one) and
+		// the retry did not get that far: keep what was seen.
+		retry.Cert = res.Cert
+	}
+	return retry
 }
 
 func (r *Runner) writeMetrics(ctx context.Context, list []store.Check) {
