@@ -248,6 +248,7 @@ var ru = map[string]string{
 	"the agent gave no answer":                                                         "агент не дал ответа",
 	"pick a model from the list in the AI settings":                                    "выберите модель из списка в настройках AI",
 	"this alert is not about a server state: nothing to diagnose":                      "этот алерт не о состоянии сервера: диагностировать нечего",
+	"this alert has no diagnosis yet":                                                  "у этого алерта ещё нет диагноза",
 	"DSA keys are not accepted: use ed25519":                                           "DSA-ключи не принимаются: используйте ed25519",
 	"RSA keys shorter than 3072 bits are not accepted: use ed25519":                    "RSA-ключи короче 3072 бит не принимаются: используйте ed25519",
 	"authorized_keys has a broken emergency block (begin without end): fix it by hand": "в authorized_keys сломан блок аварийных ключей (начало без конца): исправьте вручную",

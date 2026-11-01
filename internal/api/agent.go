@@ -284,11 +284,16 @@ func (s *Server) handleAgentRun(w http.ResponseWriter, r *http.Request) {
 		s.agent.mu.Unlock()
 	}()
 
+	// A chat opened from an alert diagnosis: the model has not seen it yet.
+	var seed string
+	if prev, err := s.store.AgentMessages(ctx, c.ID); err == nil {
+		seed = seededContext(prev)
+	}
 	if _, err := s.store.AddAgentMessage(ctx, c.ID, store.AgentMessage{Role: "user", Text: req.Text}); err != nil {
 		writeError(w, http.StatusInternalServerError, "internal")
 		return
 	}
-	run := aiagent.RunRequest{Text: req.Text, Model: c.Model}
+	run := aiagent.RunRequest{Text: seed + req.Text, Model: c.Model}
 	if c.ServerID != nil {
 		if srv, err := s.store.GetServer(ctx, *c.ServerID); err == nil {
 			run.Server = srv.Name

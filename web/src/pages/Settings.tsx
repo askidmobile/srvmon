@@ -4,6 +4,7 @@ import { McpPanel } from "@/components/McpPanel";
 import { BackupPanel, EmergencyPanel } from "@/components/Recovery";
 import { Hotkey, Shell } from "@/components/Shell";
 import { Button } from "@/components/ui/button";
+import { Check } from "@/components/ui/check";
 import { Panel } from "@/components/ui/panel";
 import {
   agentApi,
@@ -558,10 +559,9 @@ function AIPanel() {
                   aria-label={t("model filter")}
                 />
                 {listInfo?.live && list.some((m) => !m.live) && (
-                  <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                    <input type="checkbox" checked={onlyLive} onChange={(e) => setOnlyLive(e.target.checked)} />
+                  <Check className="text-xs text-muted-foreground" checked={onlyLive} onChange={setOnlyLive}>
                     {t("only available with the key")}
-                  </label>
+                  </Check>
                 )}
               </div>
               <div className="max-h-72 overflow-y-auto border border-border/60 [scrollbar-width:thin]">
@@ -570,7 +570,7 @@ function AIPanel() {
                     {shown.slice(0, 300).map((m) => (
                       <tr key={m.id} className="border-t border-border/40 first:border-t-0 hover:bg-white/[0.02]">
                         <td className="w-8 py-1 pl-2">
-                          <input type="checkbox" checked={picked.includes(m.id)} onChange={() => togglePick(m.id)} aria-label={t("in chat: {id}", { id: m.id })} />
+                          <Check checked={picked.includes(m.id)} onChange={() => togglePick(m.id)} aria-label={t("in chat: {id}", { id: m.id })} />
                         </td>
                         <td className="py-1 pr-2">
                           <span className={cn(m.id === model ? "text-primary" : "text-hi")}>{m.id}</span>
@@ -683,10 +683,9 @@ function DiagnosePanel() {
     setBusy(false);
   };
   const check = (on: boolean, label: string, set: (v: boolean) => void) => (
-    <button type="button" className="flex items-center gap-2 text-left" onClick={() => set(!on)} aria-pressed={on}>
-      <span className={cn("whitespace-pre", on ? "text-primary" : "text-muted-foreground")}>{on ? "[x]" : "[ ]"}</span>
-      <span>{label}</span>
-    </button>
+    <Check checked={on} onChange={set}>
+      {label}
+    </Check>
   );
   return (
     <Panel title={t("AI diagnosis of alerts")}>

@@ -283,6 +283,7 @@ func (s *Server) Handler() http.Handler {
 	agent("GET /api/agent/diagnose", s.handleDiagnoseSettings)
 	agent("PUT /api/agent/diagnose", s.handleDiagnoseSave)
 	agent("POST /api/alerts/{id}/diagnose", s.handleAlertDiagnose)
+	agent("POST /api/alerts/{id}/chat", s.handleAlertChat)
 
 	s.alertRoutes(mux)
 	s.mcpRoutes(mux)

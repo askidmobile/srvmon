@@ -2,6 +2,7 @@ import * as React from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { Check } from "@/components/ui/check";
 import { Input } from "@/components/ui/input";
 import {
   type AgentAction,
@@ -11,7 +12,9 @@ import {
   type AgentStatus,
   type AgentTask,
   type AgentToolCall,
+  loadChatId,
   runChat,
+  saveChatId,
   toolLine,
 } from "@/lib/agent";
 import { ApiError } from "@/lib/api";
@@ -29,26 +32,6 @@ interface Live {
   text: string;
   tools: AgentToolCall[];
   error?: string;
-}
-
-const chatKey = (serverId?: number) => `srvmon.agent.chat.${serverId ?? "all"}`;
-
-function loadChatId(serverId?: number): number | undefined {
-  try {
-    const v = Number(localStorage.getItem(chatKey(serverId)));
-    return Number.isInteger(v) && v > 0 ? v : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-function saveChatId(serverId: number | undefined, id: number | undefined) {
-  try {
-    if (id) localStorage.setItem(chatKey(serverId), String(id));
-    else localStorage.removeItem(chatKey(serverId));
-  } catch {
-    // private mode: the chat is just not remembered
-  }
 }
 
 // Minimal markdown: ``` blocks and `inline code`.
@@ -267,10 +250,9 @@ function TasksTab({ contextServer, onChanged }: { contextServer?: string; onChan
             value={servers}
             onChange={(e) => setServers(e.target.value)}
           />
-          <label className="flex items-center gap-2 text-xs">
-            <input type="checkbox" checked={tg} onChange={(e) => setTg(e.target.checked)} />{" "}
+          <Check className="text-xs" checked={tg} onChange={setTg}>
             {t("to Telegram on ALERT or error")}
-          </label>
+          </Check>
           {err && <div className="text-xs text-crit">{err}</div>}
           <Button size="sm" type="submit">
             {t("create")}

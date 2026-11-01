@@ -366,3 +366,97 @@ func (s *Server) handleAlertDiagnose(w http.ResponseWriter, r *http.Request) {
 	_ = s.store.Audit(r.Context(), s.clientIP(r), "agent_diagnosis_manual", fmt.Sprintf("#%d", a.ID))
 	writeJSON(w, http.StatusOK, d)
 }
+
+// --- continuing a diagnosis in a chat ---
+
+// diagChatTitle names the chat that continues the diagnosis of an alert; the
+// prefix also finds that chat again, so a second click reopens it.
+func diagChatTitle(a store.Alert) string {
+	title := []rune(fmt.Sprintf("🩺 #%d %s", a.ID, a.Message))
+	if len(title) > 60 {
+		title = append(title[:59], '…')
+	}
+	return string(title)
+}
+
+func diagChatPrefix(id int64) string { return fmt.Sprintf("🩺 #%d ", id) }
+
+// handleAlertChat opens a chat with the agent about the alert's server that
+// starts from the diagnosis: the transcript shows it as the agent's first
+// message, and handleAgentRun hands it to the model with the first question.
+func (s *Server) handleAlertChat(w http.ResponseWriter, r *http.Request) {
+	if !s.agentEnabled(w) {
+		return
+	}
+	id, ok := pathID(r)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "bad_id")
+		return
+	}
+	ctx := r.Context()
+	a, err := s.store.GetAlert(ctx, id)
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "not_found")
+		return
+	} else if err != nil {
+		s.internalError(w, "get alert", err)
+		return
+	}
+	d, err := s.store.GetDiagnosis(ctx, a.ID)
+	if err != nil || d.State != store.DiagDone || strings.TrimSpace(d.Text) == "" {
+		s.writeValidation(w, i18n.T("this alert has no diagnosis yet"))
+		return
+	}
+	var serverID *int64
+	if a.ServerID > 0 {
+		if ok, _ := s.store.ServerExists(ctx, a.ServerID); ok {
+			serverID = &a.ServerID
+		}
+	}
+	chats, err := s.store.ListAgentChats(ctx, 100)
+	if err != nil {
+		s.internalError(w, "list chats", err)
+		return
+	}
+	prefix := diagChatPrefix(a.ID)
+	for _, c := range chats {
+		if strings.HasPrefix(c.Title, prefix) && ((c.ServerID == nil) == (serverID == nil)) {
+			writeJSON(w, http.StatusOK, s.chatView(ctx, c))
+			return
+		}
+	}
+	c, err := s.store.CreateAgentChat(ctx, serverID, diagChatTitle(a))
+	if err != nil {
+		s.internalError(w, "create chat", err)
+		return
+	}
+	text := fmt.Sprintf("🩺 %s · %s · %s\n\n%s", i18n.T("AI diagnosis"), strings.ToUpper(a.Severity), a.Message, d.Text)
+	if _, err := s.store.AddAgentMessage(ctx, c.ID, store.AgentMessage{Role: "assistant", Text: text}); err != nil {
+		s.internalError(w, "seed chat", err)
+		return
+	}
+	_ = s.store.Audit(ctx, s.clientIP(r), "agent_diagnosis_chat", fmt.Sprintf("#%d chat %d", a.ID, c.ID))
+	writeJSON(w, http.StatusOK, s.chatView(ctx, c))
+}
+
+// seededContext returns what the model has to be told before the first
+// question of a chat opened from a diagnosis: the srvmon-ai session of a new
+// chat is empty, while the transcript already shows the agent's diagnosis.
+// Empty for any chat that already had a question.
+func seededContext(msgs []store.AgentMessage) string {
+	var seed []string
+	for _, m := range msgs {
+		if m.Role == "user" {
+			return ""
+		}
+		if m.Role == "assistant" && strings.TrimSpace(m.Text) != "" {
+			seed = append(seed, m.Text)
+		}
+	}
+	if len(seed) == 0 {
+		return ""
+	}
+	return "Context: this chat continues from your earlier read-only diagnosis of an alert. " +
+		"The owner saw it and now asks a follow-up question. Your diagnosis:\n\n" +
+		strings.Join(seed, "\n\n") + "\n\n---\nThe owner's question:\n"
+}

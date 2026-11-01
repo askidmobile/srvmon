@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Hotkey, Shell } from "@/components/Shell";
 import { Button } from "@/components/ui/button";
+import { Check } from "@/components/ui/check";
 import { SUDO_MODES, SudoPicker } from "@/components/SudoMode";
 import { Panel } from "@/components/ui/panel";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -82,34 +83,6 @@ function Field({ label, htmlFor, children }: { label: string; htmlFor: string; c
       </label>
       {children}
     </div>
-  );
-}
-
-function Check({
-  checked,
-  onChange,
-  disabled,
-  children,
-}: {
-  checked: boolean;
-  onChange: (v: boolean) => void;
-  disabled?: boolean;
-  children: React.ReactNode;
-}) {
-  return (
-    <label className={cn("flex cursor-pointer items-start gap-2", disabled && "cursor-default opacity-60")}>
-      <input
-        type="checkbox"
-        className="sr-only"
-        checked={checked}
-        disabled={disabled}
-        onChange={(e) => onChange(e.target.checked)}
-      />
-      <span className={cn("shrink-0 whitespace-pre", checked ? "text-primary" : "text-muted-foreground")} aria-hidden>
-        {checked ? "[x]" : "[ ]"}
-      </span>
-      <span>{children}</span>
-    </label>
   );
 }
 

@@ -2,6 +2,7 @@ import { Fragment, type ReactNode, useCallback, useEffect, useState } from "reac
 
 import { Hotkey, Shell } from "@/components/Shell";
 import { Button } from "@/components/ui/button";
+import { Check } from "@/components/ui/check";
 import { Panel } from "@/components/ui/panel";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
@@ -18,8 +19,9 @@ import {
   type Rule,
   type Severity,
 } from "@/lib/api";
+import { agentApi, saveChatId } from "@/lib/agent";
 import { t, tn } from "@/lib/i18n";
-import { href, type Route } from "@/lib/router";
+import { href, navigate, type Route } from "@/lib/router";
 import { cn } from "@/lib/utils";
 
 const fieldCls =
@@ -154,20 +156,76 @@ const diagState: Record<string, string> = {
   skipped: "skipped",
 };
 
-function DiagnosisRow({ d, cols }: { d: NonNullable<Alert["diagnosis"]>; cols: number }) {
+// Opens the agent chat that continues the diagnosis (created on first use).
+async function openDiagnosisChat(a: Alert) {
+  const c = await agentApi.alertChat(a.id);
+  saveChatId(c.server_id, c.id);
+  navigate(href.agent(c.server_id));
+}
+
+function DiagnosisRow({ a, d, cols }: { a: Alert; d: NonNullable<Alert["diagnosis"]>; cols: number }) {
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
   const status = d.state === "done" ? "" : t(diagState[d.state] ?? d.state);
+  const text = d.text.trim();
+  // Only a finished diagnosis is worth folding: a status line is short.
+  const foldable = d.state === "done" && text !== "";
+  const chat = async () => {
+    setBusy(true);
+    setErr("");
+    try {
+      await openDiagnosisChat(a);
+    } catch (e) {
+      setErr(errorMessage(e, t("could not open the chat")));
+      setBusy(false);
+    }
+  };
   return (
     <tr className="align-top">
       <td />
       <td colSpan={cols - 1} className="pb-2 pr-3">
         <div className="border-l-2 border-primary/60 pl-2.5 text-sm">
-          <div className="text-xs text-muted-foreground">
-            🩺 {t("AI diagnosis")}
-            {d.trigger === "manual" ? ` · ${t("manual")}` : ""}
-            {d.tools > 0 ? ` · ${tn(d.tools, "{n} command", "{n} commands")}` : ""}
-            {status && <span className={d.state === "error" ? "text-crit" : "text-warn"}> · {status}</span>}
+          <div className="flex flex-wrap items-center gap-x-3 text-xs text-muted-foreground">
+            <button
+              type="button"
+              className={cn("text-left", foldable ? "hover:text-hi" : "cursor-default")}
+              onClick={() => foldable && setOpen(!open)}
+              aria-expanded={foldable ? open : undefined}
+              disabled={!foldable}
+            >
+              {foldable && <span className="whitespace-pre text-primary">{open ? "[-] " : "[+] "}</span>}
+              🩺 {t("AI diagnosis")}
+              {d.trigger === "manual" ? ` · ${t("manual")}` : ""}
+              {d.tools > 0 ? ` · ${tn(d.tools, "{n} command", "{n} commands")}` : ""}
+              {status && <span className={d.state === "error" ? "text-crit" : "text-warn"}> · {status}</span>}
+            </button>
+            {foldable && (
+              <button
+                type="button"
+                className="text-primary hover:underline disabled:opacity-60"
+                disabled={busy}
+                title={t("ask the agent about this alert, starting from the diagnosis")}
+                onClick={() => void chat()}
+              >
+                {busy ? t("opening…") : `${t("continue in chat")} →`}
+              </button>
+            )}
+            {err && <span className="text-crit">{err}</span>}
           </div>
-          {d.text && <div className="whitespace-pre-wrap break-words text-tx">{d.text}</div>}
+          {text &&
+            (open || !foldable ? (
+              <div className="whitespace-pre-wrap break-words text-tx">{text}</div>
+            ) : (
+              <button
+                type="button"
+                className="block w-full truncate text-left text-tx/80 hover:text-tx"
+                title={t("expand")}
+                onClick={() => setOpen(true)}
+              >
+                {text.split("\n").find((l) => l.trim()) ?? text}
+              </button>
+            ))}
         </div>
       </td>
     </tr>
@@ -235,7 +293,7 @@ function AlertRow({ a, onChange }: { a: Alert; onChange: () => void }) {
           {err && <div className="pt-1 text-xs text-crit">{err}</div>}
         </td>
       </tr>
-      {a.diagnosis && <DiagnosisRow d={a.diagnosis} cols={6} />}
+      {a.diagnosis && <DiagnosisRow a={a} d={a.diagnosis} cols={6} />}
     </>
   );
 }
@@ -763,13 +821,10 @@ function HeartbeatPanel() {
             onChange={(e) => setUrl(e.target.value)}
           />
         </div>
-        <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" checked={fail} onChange={(e) => setFail(e.target.checked)} />
-          <span>
-            {t("report problems to")} <span className="text-hi">URL/fail</span>{" "}
-            <span className="text-muted-foreground">{t("(healthchecks.io; off: skip the ping instead)")}</span>
-          </span>
-        </label>
+        <Check className="text-sm" checked={fail} onChange={setFail}>
+          {t("report problems to")} <span className="text-hi">URL/fail</span>{" "}
+          <span className="text-muted-foreground">{t("(healthchecks.io; off: skip the ping instead)")}</span>
+        </Check>
         <div className="text-sm">
           <span className="text-muted-foreground">{t("status")}</span> {status}
           {hb.last_ping && <span className="text-muted-foreground"> · {t("last ping")} {when(hb.last_ping)}</span>}
@@ -1113,7 +1168,7 @@ export function AlertsPage({ route, version, onLogout }: { route: Route; version
                       </td>
                       <td className="whitespace-nowrap text-right text-sm">{stateText(a)}</td>
                     </tr>
-                    {a.diagnosis && a.state === "resolved" && <DiagnosisRow d={a.diagnosis} cols={5} />}
+                    {a.diagnosis && a.state === "resolved" && <DiagnosisRow a={a} d={a.diagnosis} cols={5} />}
                   </Fragment>
                 ))}
               </tbody>
