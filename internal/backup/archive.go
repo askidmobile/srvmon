@@ -67,6 +67,13 @@ func Create(ctx context.Context, st *store.Store, master *secret.Box, version st
 	if err := st.Snapshot(ctx, dbPath); err != nil {
 		return nil, m, fmt.Errorf("snapshot: %w", err)
 	}
+	// A backup that Open would refuse must fail here, visibly, instead of
+	// replacing restorable copies through the retention.
+	if fi, err := os.Stat(dbPath); err != nil {
+		return nil, m, err
+	} else if fi.Size() > maxDB {
+		return nil, m, fmt.Errorf("the database is %d MB, backups support up to %d MB", fi.Size()>>20, maxDB>>20)
+	}
 	db, err := os.ReadFile(dbPath)
 	if err != nil {
 		return nil, m, err
