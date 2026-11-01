@@ -1,6 +1,7 @@
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { McpPanel } from "@/components/McpPanel";
+import { BackupPanel, EmergencyPanel } from "@/components/Recovery";
 import { Hotkey, Shell } from "@/components/Shell";
 import { Button } from "@/components/ui/button";
 import { Panel } from "@/components/ui/panel";
@@ -626,6 +627,8 @@ export function SettingsPage({ route, version, onLogout }: { route: Route; versi
         <AIPanel />
         <DiagnosePanel />
         <McpPanel />
+        <BackupPanel />
+        <EmergencyPanel />
       </div>
     </Shell>
   );

@@ -20,6 +20,7 @@ import (
 	"github.com/askidmobile/srvmon/internal/aiagent"
 	"github.com/askidmobile/srvmon/internal/alerts"
 	"github.com/askidmobile/srvmon/internal/auth"
+	"github.com/askidmobile/srvmon/internal/backup"
 	"github.com/askidmobile/srvmon/internal/config"
 	"github.com/askidmobile/srvmon/internal/heartbeat"
 	"github.com/askidmobile/srvmon/internal/i18n"
@@ -53,6 +54,8 @@ type Server struct {
 	alerts    *alerts.Engine
 	bot       *telegram.Bot      // nil when its settings cannot be loaded
 	heartbeat *heartbeat.Monitor // nil when its settings cannot be loaded
+	backup    *backup.Runner     // nil without a master key
+	emergency *emergencyState
 
 	ai              *aiagent.Client // nil: agent disabled
 	agent           *agentState
@@ -121,6 +124,7 @@ func New(o Options) *Server {
 		diag:            newDiagnoser(),
 		notify:          o.Notify,
 		onActionPending: o.OnActionPending,
+		emergency:       newEmergencyState(),
 	}
 	// The interface language is one setting for the whole installation:
 	// Telegram, alerts and the agent use it too.
@@ -129,6 +133,12 @@ func New(o Options) *Server {
 	}
 	srv.alerts = alerts.New(o.Store, srv.latest, o.Log)
 	srv.alerts.OnFire(srv.onAlertFired)
+	if o.Secrets != nil {
+		srv.backup = backup.NewRunner(o.Store, o.Secrets, o.Log, o.Version)
+		srv.backup.OnFailure = func(ctx context.Context, msg string) {
+			srv.alerts.Event(ctx, store.KindBackup, 0, "", "", i18n.T("panel backup failed: %s", msg))
+		}
+	}
 	bot, err := telegram.New(context.Background(), telegram.Options{
 		Store: o.Store, Secrets: o.Secrets, Engine: srv.alerts, Latest: srv.latest, Log: o.Log, API: o.TelegramAPI,
 	})
@@ -168,6 +178,9 @@ func (s *Server) Start(ctx context.Context, fail2banEvents, hostName string) {
 	go s.alerts.Run(ctx)
 	if s.heartbeat != nil {
 		go s.heartbeat.Run(ctx)
+	}
+	if s.backup != nil {
+		go s.backup.Run(ctx)
 	}
 	if s.bot != nil {
 		go s.bot.Run(ctx)
@@ -235,6 +248,8 @@ func (s *Server) Handler() http.Handler {
 
 	s.alertRoutes(mux)
 	s.mcpRoutes(mux)
+	s.backupRoutes(mux)
+	s.accessRoutes(mux)
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "not_found")
 	})

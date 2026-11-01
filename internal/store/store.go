@@ -97,6 +97,8 @@ var migrations = []string{
 	migrationMCP,
 	// AI diagnoses of alerts (diagnose.go).
 	migrationDiagnoses,
+	// Backups: alert rule for a failed scheduled backup.
+	migrationBackupRule,
 }
 
 func (s *Store) migrate(ctx context.Context) error {
@@ -582,3 +584,20 @@ func (s *Store) ServerExists(ctx context.Context, id int64) (bool, error) {
 	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM servers WHERE id = ?`, id).Scan(&n)
 	return n > 0, err
 }
+
+// Snapshot writes a consistent copy of the database to path (VACUUM INTO),
+// which must not exist yet. Safe while the panel keeps writing.
+func (s *Store) Snapshot(ctx context.Context, path string) error {
+	_, err := s.db.ExecContext(ctx, `VACUUM INTO ?`, path)
+	return err
+}
+
+// SchemaVersion returns the number of applied migrations.
+func (s *Store) SchemaVersion(ctx context.Context) (int, error) {
+	var v int
+	err := s.db.QueryRowContext(ctx, `SELECT v FROM schema_version`).Scan(&v)
+	return v, err
+}
+
+// Migrations returns the number of migrations this build knows.
+func Migrations() int { return len(migrations) }
