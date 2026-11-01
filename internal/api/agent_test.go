@@ -80,6 +80,11 @@ func newFakeSSHD(t *testing.T, clientKey ssh.PublicKey, handler func(cmd string)
 							f.mu.Lock()
 							f.execs = append(f.execs, p.Cmd)
 							f.mu.Unlock()
+							// Read stdin to its end first, like a shell
+							// running "sh -s": closing the channel while
+							// the client still writes a script makes its
+							// Run fail with EOF.
+							_, _ = io.Copy(io.Discard, ch)
 							out, st := handler(p.Cmd)
 							io.WriteString(ch, out)
 							ch.SendRequest("exit-status", false, ssh.Marshal(struct{ S uint32 }{st}))
