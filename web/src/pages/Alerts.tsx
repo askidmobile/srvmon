@@ -54,6 +54,7 @@ const KINDS: Record<
   fail2ban: { name: "fail2ban ban", label: () => t("fail2ban ban on the monitoring server"), dur: null },
   bruteforce: { name: "panel password guessing", label: () => t("panel password guessing"), dur: null },
   login: { name: "panel sign-in", label: () => t("panel sign-in"), dur: null },
+  backup: { name: "panel backup failed", label: () => t("panel backup failed"), dur: null },
 };
 
 const NEW_DEFAULTS: Record<string, Pick<Rule, "threshold" | "duration_sec">> = {
@@ -67,6 +68,7 @@ const NEW_DEFAULTS: Record<string, Pick<Rule, "threshold" | "duration_sec">> = {
   fail2ban: { threshold: 0, duration_sec: 0 },
   bruteforce: { threshold: 0, duration_sec: 0 },
   login: { threshold: 0, duration_sec: 0 },
+  backup: { threshold: 0, duration_sec: 0 },
 };
 
 const sevCls: Record<Severity, string> = { crit: "text-crit", warn: "text-warn", info: "text-tx" };

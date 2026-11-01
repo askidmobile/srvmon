@@ -25,6 +25,7 @@
 - **MCP 服务器。** Claude Desktop、Cursor 和 Claude Code 使用带权限、可撤销的令牌连接 `/mcp`，工具相同，变更同样需要在面板或 Telegram 中确认。
 - **告警与 Telegram。** 代理离线、容器停止或不健康、频繁重启、CPU、磁盘、主机续费提醒、fail2ban 封禁、登录尝试。规则可编辑（阈值、持续时间、级别、渠道：Telegram 或仅面板）。按你的时区设置静默时段（严重告警仍会发送），支持确认与临时静音，保留 90 天历史，严重告警附带 AI 诊断。机器人命令：`/status`、`/server`、`/alerts`、`/ack`、`/bills`、`/ask`。
 - **面板心跳（dead man's switch）。** 面板每分钟自检一次并 ping 一个外部 URL，例如 [healthchecks.io](https://healthchecks.io)。如果面板宕机，ping 会停止，该服务会通过邮件或其自身渠道提醒您。
+- **备份与应急访问。** 按计划将面板数据库加密备份到任意 S3 兼容存储（AWS、Yandex Object Storage、R2、B2、MinIO），支持保留份数，失败时 Telegram 告警；主密钥需凭 TOTP 验证码单独导出。您自己的 SSH 公钥会保存在每台服务器的 `authorized_keys` 中，面板丢失也不会被锁在服务器外。详见 [docs/backup.md](docs/backup.md)。
 - **安全。** 密码（argon2id）+ TOTP 或备用码，无需用户名。限流、审计日志，以及面板和 sshd 的 fail2ban 规则。
 
 ## 截图
@@ -81,7 +82,7 @@ sudo docker compose exec -it server /srvmon-server init   # 设置密码并显�
 
 如果主机上已有 nginx（或其他代理）占用 80/443，在 `.env` 中设置 `SRVMON_PROXY=external`：此时不启动 Caddy，srvmon 监听 `127.0.0.1:8088`（`SRVMON_HTTP_BIND`），在你的 nginx 中引入 [deploy/nginx/srvmon.conf](deploy/nginx/srvmon.conf)。
 
-请将 `/data` 卷与 `/data/master.key` 一同备份：没有主密钥就无法解密已保存的 SSH 密钥。
+备份：在「设置 → 备份」中配置 S3 兼容存储，并在同一处导出主密钥（或运行 `docker compose exec server /srvmon-server master-key`），离线保存。备份用它加密且从不包含它。恢复步骤与应急 SSH 密钥见 [docs/backup.md](docs/backup.md)。
 
 ## 从你的 fork 自动部署
 

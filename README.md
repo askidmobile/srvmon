@@ -25,6 +25,7 @@ The interface is a dark TUI-style dashboard (btop-like) with a green accent. The
 - **MCP server.** Claude Desktop, Cursor and Claude Code connect to `/mcp` with revocable tokens that carry scopes. They get the same tools and the same confirmation of changes in the panel or Telegram.
 - **Alerts and Telegram.** Agent offline, container down/unhealthy, restart loops, CPU, disk, upcoming hosting payments, fail2ban bans, login attempts. Rules are editable (threshold, duration, level, channel: Telegram or panel only). Quiet hours in your time zone (critical alerts still go through), ack and mute, 90-day history, an AI diagnosis attached to critical alerts. The bot answers `/status`, `/server`, `/alerts`, `/ack`, `/bills`, `/ask`.
 - **Panel heartbeat (dead man's switch).** Once a minute the panel checks itself and pings an external URL such as [healthchecks.io](https://healthchecks.io). If the panel dies, the pings stop and that service alerts you by email or its own channels.
+- **Backups and emergency access.** Scheduled encrypted backups of the panel database to any S3-compatible storage (AWS, Yandex Object Storage, R2, B2, MinIO) with retention and a Telegram alert on failure; the master key is exported separately behind a TOTP code. Your own SSH public keys are kept in `authorized_keys` on every server, so losing the panel never locks you out. See [docs/backup.md](docs/backup.md).
 - **Security.** Password (argon2id) + TOTP or backup code, no username. Rate limiting, an audit log and fail2ban jails for the panel and sshd.
 
 ## Screenshots
@@ -81,7 +82,7 @@ Open `https://<your domain>`, enter the password, then the TOTP code. The monito
 
 If the host already runs nginx (or another proxy) on 80/443, set `SRVMON_PROXY=external` in `.env`: Caddy is not started, srvmon listens on `127.0.0.1:8088` (`SRVMON_HTTP_BIND`), and you include [deploy/nginx/srvmon.conf](deploy/nginx/srvmon.conf) in your nginx.
 
-Back up the `/data` volume together with `/data/master.key`: without the master key the stored SSH keys cannot be decrypted.
+Backups: set up S3-compatible storage in settings → backup, then export the master key there (or `docker compose exec server /srvmon-server master-key`) and keep it offline. Backups are encrypted with it and never contain it. Restore steps and emergency SSH keys: [docs/backup.md](docs/backup.md).
 
 ## Continuous deployment from your fork
 

@@ -488,6 +488,13 @@ func (s *Server) runOnboard(ctx context.Context, j *job, req onboardReq, login l
 		return
 	}
 	j.log(sshgw.StepOK, login.forgotten())
+	if keys, err := s.emergencyKeys(bg); err == nil && len(keys) > 0 {
+		if err := s.applyEmergency(id); err != nil {
+			j.log(sshgw.StepWarn, i18n.T("emergency keys are not added: %s", err.Error()))
+		} else {
+			j.log(sshgw.StepOK, i18n.T("emergency keys added to authorized_keys of %s: %d", sshUser, len(keys)))
+		}
+	}
 
 	if tokenHash != "" {
 		if !res.AgentInstalled {

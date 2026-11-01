@@ -4,12 +4,15 @@ package secret
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 
 	"golang.org/x/crypto/chacha20poly1305"
+	"golang.org/x/crypto/hkdf"
 )
 
 // Box seals and opens values with the master key.
@@ -84,4 +87,42 @@ func (b *Box) Open(ciphertext, aad []byte) ([]byte, error) {
 		return nil, errors.New("secret: decrypt failed")
 	}
 	return pt, nil
+}
+
+// Derive returns a box under a subkey of the master key for one purpose
+// (HKDF-SHA256 with label as info), so e.g. backups never share a key with
+// the values sealed in the database.
+func (b *Box) Derive(label string) *Box {
+	k := make([]byte, chacha20poly1305.KeySize)
+	if _, err := io.ReadFull(hkdf.New(sha256.New, b.key, nil, []byte(label)), k); err != nil {
+		panic(err) // hkdf cannot fail for 32 bytes
+	}
+	return &Box{key: k}
+}
+
+// ReadKeyFile reads a master key file (32 raw bytes).
+func ReadKeyFile(path string) ([]byte, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	if len(b) != chacha20poly1305.KeySize {
+		return nil, fmt.Errorf("secret: %s is not a master key (%d bytes)", path, len(b))
+	}
+	return b, nil
+}
+
+// WriteKeyFile replaces the master key file atomically (mode 0600).
+func WriteKeyFile(path string, key []byte) error {
+	if len(key) != chacha20poly1305.KeySize {
+		return fmt.Errorf("secret: key must be %d bytes", chacha20poly1305.KeySize)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	tmp := path + ".new"
+	if err := os.WriteFile(tmp, key, 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
 }

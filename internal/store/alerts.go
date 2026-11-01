@@ -20,18 +20,19 @@ const (
 	KindFail2ban          = "fail2ban"
 	KindBruteforce        = "bruteforce"
 	KindLogin             = "login"
+	KindBackup            = "backup" // a scheduled backup failed
 )
 
 // EventKind reports whether a rule kind fires on events, not on state.
 func EventKind(kind string) bool {
-	return kind == KindFail2ban || kind == KindBruteforce || kind == KindLogin
+	return kind == KindFail2ban || kind == KindBruteforce || kind == KindLogin || kind == KindBackup
 }
 
 // KnownKind reports whether kind is a supported rule kind.
 func KnownKind(kind string) bool {
 	switch kind {
 	case KindAgentSilent, KindCPU, KindMem, KindDisk, KindContainerDown, KindContainerRestarts,
-		KindPaymentDue, KindFail2ban, KindBruteforce, KindLogin:
+		KindPaymentDue, KindFail2ban, KindBruteforce, KindLogin, KindBackup:
 		return true
 	}
 	return false
@@ -105,6 +106,10 @@ const migrationAlerts = `CREATE TABLE alert_rules (
 		('fail2ban', 1, 0, 0, 'warn', 'tg'),
 		('bruteforce', 1, 0, 0, 'warn', 'tg'),
 		('login', 1, 0, 0, 'info', 'tg');`
+
+// migrationBackupRule: a failed scheduled backup alerts by default.
+const migrationBackupRule = `INSERT INTO alert_rules (kind, enabled, threshold, duration_sec, severity, channel)
+	VALUES ('backup', 1, 0, 0, 'crit', 'tg');`
 
 // Rule is one alert rule. Threshold is percent for cpu/mem/disk, a restart
 // count for container_restarts and days for payment_due. Duration is how long
