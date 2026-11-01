@@ -23,7 +23,8 @@ The interface is a dark TUI-style dashboard (btop-like) with a green accent. The
 - **Web terminal.** xterm.js ↔ WebSocket ↔ SSH client inside `srvmon-server` ↔ sshd. Tabs, resize, `docker exec` into a container. The AI agent panel sits next to the terminal (`F9` shows or hides it) and works in the context of that server. Private keys never leave the monitoring server; they are encrypted at rest (XChaCha20-Poly1305).
 - **AI agent.** Built on the [pi](https://pi.dev) SDK, any provider (DeepSeek, Anthropic, OpenAI, OpenRouter, Google, Ollama, any OpenAI- or Anthropic-compatible endpoint). Read-only commands run immediately; anything that changes a server waits for your explicit approval. The policy is enforced by `srvmon-server`, not by the model. Each server has its own chat context, chats keep their history, and the model can be picked per chat. Scheduled tasks (cron) report to Telegram, and you can ask the agent from Telegram with `/ask`.
 - **MCP server.** Claude Desktop, Cursor and Claude Code connect to `/mcp` with revocable tokens that carry scopes. They get the same tools and the same confirmation of changes in the panel or Telegram.
-- **Alerts and Telegram.** Agent offline, container down/unhealthy, restart loops, CPU, disk, upcoming hosting payments, fail2ban bans, login attempts. Rules are editable (threshold, duration, level, channel: Telegram or panel only). Quiet hours in your time zone (critical alerts still go through), ack and mute, 90-day history, an AI diagnosis attached to critical alerts. The bot answers `/status`, `/server`, `/alerts`, `/ack`, `/bills`, `/ask`.
+- **Alerts and Telegram.** Agent offline, container down/unhealthy, restart loops, CPU, disk, upcoming hosting payments, fail2ban bans, login attempts. Rules are editable (threshold, duration, level, channel: notify or panel only). Quiet hours in your time zone (critical alerts still go through), ack and mute, 90-day history, an AI diagnosis attached to critical alerts. The bot answers `/status`, `/server`, `/alerts`, `/ack`, `/bills`, `/ask`.
+- **More notification channels.** Besides Telegram, alerts can go to email, ntfy, Discord, Gotify, Slack, Matrix, Pushover, generic webhooks and other services supported by [Shoutrrr](https://shoutrrr.nickfedor.com/), each with its own minimum severity.
 - **Panel heartbeat (dead man's switch).** Once a minute the panel checks itself and pings an external URL such as [healthchecks.io](https://healthchecks.io). If the panel dies, the pings stop and that service alerts you by email or its own channels.
 - **Backups and emergency access.** Scheduled encrypted backups of the panel database to any S3-compatible storage (AWS, Yandex Object Storage, R2, B2, MinIO) with retention and a Telegram alert on failure; the master key is exported separately behind a TOTP code. Your own SSH public keys are kept in `authorized_keys` on every server, so losing the panel never locks you out. See [docs/backup.md](docs/backup.md).
 - **Security.** Password (argon2id) + TOTP or backup code, no username. Rate limiting, an audit log and fail2ban jails for the panel and sshd.
@@ -120,8 +121,8 @@ SRVMON_URL=https://mon.example.com SRVMON_TOKEN=a_... docker compose up -d
 The `[5] alerts` screen (`#/alerts`) shows active alerts with "ack" and "mute 1h", the rules, the Telegram bot, quiet hours and a 90-day history.
 
 - Default rules: agent silent for more than 2 min (crit), container down or unhealthy for 1 min (crit), more than 2 container restarts per hour, CPU > 90% for 5 min, memory > 95% for 5 min (off by default, panel only), disk > 85%, hosting payment due in 3 days or less, plus events: a fail2ban ban on the monitoring server, password guessing on the panel, a panel sign-in.
-- Every rule can be switched off, edited (threshold, duration, level crit/warn/info) or sent to a channel: `tg` (Telegram and panel) or `web` (panel only). `+ rule` adds a new one. Containers that stopped with exit code 0 do not count as alerts.
-- Quiet hours (for example 01:00–07:00 in `Europe/Moscow`) hold back Telegram notifications until they end; critical alerts are always sent.
+- Every rule can be switched off, edited (threshold, duration, level crit/warn/info) or sent to a channel: `notify` (panel, Telegram and the notification channels) or `web` (panel only). `+ rule` adds a new one. Containers that stopped with exit code 0 do not count as alerts.
+- Quiet hours (for example 01:00–07:00 in `Europe/Moscow`) hold back notifications until they end; critical alerts are always sent.
 
 Bot setup:
 
@@ -131,6 +132,22 @@ Bot setup:
 4. "Send test".
 
 If the monitoring server cannot reach `api.telegram.org` (Russian hosting, corporate networks), run a tiny Cloudflare Worker proxy and set `SRVMON_TELEGRAM_API`: see [docs/telegram-proxy.md](docs/telegram-proxy.md).
+
+### Notification channels (Shoutrrr)
+
+The "notification channels" panel on the same screen adds more places for alerts, using [Shoutrrr](https://shoutrrr.nickfedor.com/) URLs:
+
+| Service | URL |
+|---|---|
+| email | `smtp://user:password@smtp.example.com:587/?from=srvmon@example.com&to=me@example.com` |
+| ntfy | `ntfy://ntfy.sh/my-secret-topic` |
+| Discord | `discord://token@webhook-id` |
+| Gotify | `gotify://gotify.example.com/app-token` |
+| webhook | `generic+https://hooks.example.com/srvmon` |
+
+- Each channel has a minimum severity: `crit+` (only critical), `warn+` or everything. An alert with the `notify` channel goes to Telegram and to every enabled channel it qualifies for; quiet hours and mutes apply to all of them.
+- The URL holds credentials, so it is stored encrypted with the master key and the panel shows only the service and host. "test" sends a test message; the last send time or error is shown next to the channel, and the header shows `ch: N` with failing channels in red.
+- Failed sends are retried three times. Agent task alarms go to the channels as well.
 
 ### Panel heartbeat (dead man's switch)
 

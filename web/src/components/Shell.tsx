@@ -54,6 +54,12 @@ function AlertBadge() {
         <span className="text-muted-foreground">{t("no alerts")}</span>
       )}
       <span className={tg}>tg: {sum.telegram === "ok" ? "ok" : sum.telegram === "off" ? t("off") : t("error")}</span>
+      {sum.channels > 0 && (
+        <span className={sum.channels_failing > 0 ? "text-crit" : "text-muted-foreground"}>
+          ch: {sum.channels}
+          {sum.channels_failing > 0 ? ` (${sum.channels_failing} ✕)` : ""}
+        </span>
+      )}
     </a>
   );
 }

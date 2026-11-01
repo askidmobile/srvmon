@@ -250,4 +250,13 @@ var ru = map[string]string{
 	"panel backup failed: %s":                                                          "бэкап панели не удался: %s",
 	"the master key was exported from the panel (IP %s)":                               "мастер-ключ выгружен из панели (IP %s)",
 	"this is a private key: paste the public one (.pub)":                               "это приватный ключ: вставьте публичный (.pub)",
+	// Notification channels (Shoutrrr).
+	"srvmon test": "srvmon: проверка",
+	"Test message from srvmon: the channel “%s” works.": "Тестовое сообщение от srvmon: канал «%s» работает.",
+	"a channel needs a name of up to %d characters":     "у канала должно быть имя до %d символов",
+	"minimum severity: crit, warn or info":              "минимальная важность: crit, warn или info",
+	"enter the channel URL":                             "укажите URL канала",
+	"the URL is too long":                               "URL слишком длинный",
+	"the URL is not valid: %s":                          "URL не подходит: %s",
+	"at most %d notification channels":                  "не больше %d каналов уведомлений",
 }

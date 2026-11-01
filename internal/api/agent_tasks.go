@@ -86,7 +86,7 @@ func taskPrompt(t store.AgentTask) string {
 	}
 	b.WriteString("The reply is saved as the task result")
 	if t.Notify == "telegram" {
-		b.WriteString(" and goes to Telegram if it starts with a line ALERT")
+		b.WriteString(" and goes to Telegram and the other notification channels if it starts with a line ALERT")
 	}
 	b.WriteString(". Be brief: the outcome in 1–5 lines. If all is well, say so in one line.\n\n")
 	b.WriteString(t.Prompt)

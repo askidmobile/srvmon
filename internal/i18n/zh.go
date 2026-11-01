@@ -250,4 +250,13 @@ var zh = map[string]string{
 	"panel backup failed: %s":                                                          "面板备份失败：%s",
 	"the master key was exported from the panel (IP %s)":                               "主密钥已从面板导出（IP %s）",
 	"this is a private key: paste the public one (.pub)":                               "这是私钥：请粘贴公钥（.pub）",
+	// Notification channels (Shoutrrr).
+	"srvmon test": "srvmon 测试",
+	"Test message from srvmon: the channel “%s” works.": "来自 srvmon 的测试消息：通道“%s”工作正常。",
+	"a channel needs a name of up to %d characters":     "通道名称不能为空，最多 %d 个字符",
+	"minimum severity: crit, warn or info":              "最低级别：crit、warn 或 info",
+	"enter the channel URL":                             "请输入通道 URL",
+	"the URL is too long":                               "URL 太长",
+	"the URL is not valid: %s":                          "URL 无效：%s",
+	"at most %d notification channels":                  "最多 %d 个通知通道",
 }
