@@ -43,7 +43,8 @@ type serverState struct {
 	inventory *protocol.Inventory
 	smart     []protocol.DiskHealth
 	smartAt   time.Time
-	logs      []protocol.LogLine // oldest first
+	smartGood map[string]protocol.DiskHealth // last successful read per device
+	logs      []protocol.LogLine             // oldest first
 	logKeys   map[logKey]struct{}
 	ring      []Point
 	prevNet   *netSample
@@ -101,6 +102,14 @@ func (l *Latest) Put(serverID int64, reports ...protocol.Report) {
 		}
 		if len(r.Smart) > 0 {
 			st.smart, st.smartAt = r.Smart, r.Timestamp
+			if st.smartGood == nil {
+				st.smartGood = map[string]protocol.DiskHealth{}
+			}
+			for _, d := range r.Smart {
+				if d.Error == "" {
+					st.smartGood[d.Device] = d
+				}
+			}
 		}
 		st.addPoint(r)
 	}
@@ -213,6 +222,8 @@ func (l *Latest) Details(serverID int64, limit int) Details {
 }
 
 // Smart returns the last S.M.A.R.T. read of a server and when it was taken.
+// A disk that could not be read this time (asleep, error) is given with its
+// last successful state, so its health is unknown rather than fine.
 func (l *Latest) Smart(serverID int64) ([]protocol.DiskHealth, time.Time) {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
@@ -220,7 +231,14 @@ func (l *Latest) Smart(serverID int64) ([]protocol.DiskHealth, time.Time) {
 	if !ok {
 		return nil, time.Time{}
 	}
-	return st.smart, st.smartAt
+	out := make([]protocol.DiskHealth, len(st.smart))
+	for i, d := range st.smart {
+		if g, ok := st.smartGood[d.Device]; ok && d.Error != "" {
+			d = g
+		}
+		out[i] = d
+	}
+	return out, st.smartAt
 }
 
 // smartStale: older S.M.A.R.T. data is asked for again (the agent reads

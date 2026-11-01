@@ -19,9 +19,9 @@ const (
 	// forecastWindow is the growth window: the slope is a linear regression
 	// over it (the same one predict_linear uses).
 	forecastWindow = "6h"
-	// forecastMinSamples: a filesystem needs about an hour of data (at the
-	// default 5 s interval) before it gets a forecast.
-	forecastMinSamples = 720
+	// forecastMinCoverage: a filesystem needs this much history in the
+	// window before it gets a forecast, whatever the agent's interval.
+	forecastMinCoverage = time.Hour
 	// ForecastHorizon: forecasts further out than this are dropped.
 	ForecastHorizon = 30 * 24 * time.Hour
 )
@@ -30,8 +30,8 @@ const (
 // until it is full at its growth rate over forecastWindow.
 var diskForecastQuery = fmt.Sprintf(
 	`(srvmon_disk_total_bytes - srvmon_disk_used_bytes) / (deriv(srvmon_disk_used_bytes[%[1]s]) > 0)`+
-		` and count_over_time(srvmon_disk_used_bytes[%[1]s]) > %[2]d`,
-	forecastWindow, forecastMinSamples)
+		` and (time() - tfirst_over_time(srvmon_disk_used_bytes[%[1]s])) > %[2]d`,
+	forecastWindow, int(forecastMinCoverage.Seconds()))
 
 // Forecasts holds the latest disk fill forecasts: hours until full per
 // server name and mount point. Filesystems that are not growing are absent.

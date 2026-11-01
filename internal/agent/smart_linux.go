@@ -78,11 +78,17 @@ func openDisk(dev string) (*os.File, error) {
 }
 
 func ioctl(fd uintptr, req uintptr, arg unsafe.Pointer) error {
-	if _, _, e := syscall.Syscall(syscall.SYS_IOCTL, fd, req, uintptr(arg)); e != 0 {
+	r, _, e := syscall.Syscall(syscall.SYS_IOCTL, fd, req, uintptr(arg))
+	if e != 0 {
 		if e == syscall.EPERM || e == syscall.EACCES {
 			return errSmartPermission
 		}
 		return e
+	}
+	if r != 0 {
+		// NVMe passthrough returns the command's status code here when the
+		// controller rejects it; the buffer then holds nothing valid.
+		return fmt.Errorf("%w: device status %#x", errSmartUnsupported, r)
 	}
 	return nil
 }

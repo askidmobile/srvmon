@@ -1,8 +1,11 @@
 package agent
 
 import (
+	"context"
 	"encoding/binary"
+	"log/slog"
 	"testing"
+	"time"
 
 	"github.com/askidmobile/srvmon/internal/protocol"
 )
@@ -99,5 +102,36 @@ func TestReadSmartDiscovery(t *testing.T) {
 		if d.Error == "" {
 			t.Fatalf("%s: no error", d.Device)
 		}
+	}
+}
+
+func TestSmartLoopDoesNotBlock(t *testing.T) {
+	release := make(chan struct{})
+	s := newSmartLoop(true, "/", slog.New(slog.DiscardHandler))
+	s.read = func(string) []protocol.DiskHealth {
+		<-release
+		return []protocol.DiskHealth{{Device: "sda"}}
+	}
+	ctx := context.Background()
+	now := time.Now()
+	if got := s.collect(ctx, now); got != nil {
+		t.Fatalf("first call returned %v", got)
+	}
+	// The read is still running: reports go on without it.
+	if got := s.collect(ctx, now.Add(5*time.Second)); got != nil {
+		t.Fatalf("blocked read returned %v", got)
+	}
+	close(release)
+	var got []protocol.DiskHealth
+	for i := 0; i < 100 && got == nil; i++ {
+		time.Sleep(10 * time.Millisecond)
+		got = s.collect(ctx, now.Add(10*time.Second))
+	}
+	if len(got) != 1 {
+		t.Fatalf("result = %v", got)
+	}
+	// Not due again for SmartEvery.
+	if s.collect(ctx, now.Add(time.Minute)); s.running {
+		t.Fatal("read restarted before SmartEvery")
 	}
 }

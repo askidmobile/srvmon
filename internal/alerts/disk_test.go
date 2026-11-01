@@ -77,6 +77,12 @@ func TestSmartRule(t *testing.T) {
 	if len(openOf(te, t, store.KindSmart)) != 2 {
 		t.Fatal("resolved by a report without SMART data")
 	}
+	// A disk that went to sleep keeps its alert: its health is unknown.
+	te.push(protocol.Report{Host: host(1), Smart: []protocol.DiskHealth{{Device: "sda", Error: "standby"}}})
+	te.eval(t)
+	if open := openOf(te, t, store.KindSmart); len(open) != 1 || open[0].Subject != "sda" {
+		t.Fatalf("after standby: %+v", open)
+	}
 	te.push(protocol.Report{Host: host(1), Smart: []protocol.DiskHealth{{Device: "sda", Passed: &ok, Pending: &zero}}})
 	te.eval(t)
 	if len(openOf(te, t, store.KindSmart)) != 0 {

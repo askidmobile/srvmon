@@ -25,26 +25,46 @@ var (
 	errSmartPermission  = errors.New("permission")
 )
 
-// smartLoop reads S.M.A.R.T. of all disks every SmartEvery.
+// smartLoop reads S.M.A.R.T. of all disks every SmartEvery. Reads run in
+// their own goroutine (a slow disk may take seconds per command), so they
+// never hold up the regular reports; a finished read rides the next one.
 type smartLoop struct {
 	enabled  bool
 	hostRoot string
 	log      *slog.Logger
-	at       time.Time
+	read     func(hostRoot string) []protocol.DiskHealth
+	at       time.Time // start of the last read
+	running  bool
+	done     chan []protocol.DiskHealth
 	warned   bool
 }
 
 func newSmartLoop(enabled bool, hostRoot string, log *slog.Logger) *smartLoop {
-	return &smartLoop{enabled: enabled, hostRoot: hostRoot, log: log}
+	return &smartLoop{enabled: enabled, hostRoot: hostRoot, log: log, read: ReadSmart,
+		done: make(chan []protocol.DiskHealth, 1)}
 }
 
-// collect returns the disks' state when a read is due, nil otherwise.
+// collect starts a read when one is due and returns the result of a read
+// that has finished since the last call, nil otherwise.
 func (s *smartLoop) collect(ctx context.Context, now time.Time) []protocol.DiskHealth {
-	if !s.enabled || now.Sub(s.at) < SmartEvery || ctx.Err() != nil {
+	if !s.enabled {
 		return nil
 	}
-	s.at = now
-	out := ReadSmart(s.hostRoot)
+	select {
+	case out := <-s.done:
+		s.running = false
+		s.checkAccess(out)
+		return out
+	default:
+	}
+	if !s.running && now.Sub(s.at) >= SmartEvery && ctx.Err() == nil {
+		s.at, s.running = now, true
+		go func() { s.done <- s.read(s.hostRoot) }()
+	}
+	return nil
+}
+
+func (s *smartLoop) checkAccess(out []protocol.DiskHealth) {
 	denied := len(out) > 0
 	for _, d := range out {
 		if d.Error != errSmartPermission.Error() {
@@ -55,13 +75,12 @@ func (s *smartLoop) collect(ctx context.Context, now time.Time) []protocol.DiskH
 		s.log.Warn("S.M.A.R.T.: no access to disks; the agent container needs --cap-add SYS_RAWIO --cap-add SYS_ADMIN and read access to block devices")
 		s.warned = true
 	}
-	return out
 }
 
-// request makes the next report read the disks, unless they were read in
-// the last few minutes (the panel asks after its own restart).
+// request makes the next report start a read, unless one started in the
+// last few minutes (the panel asks after its own restart).
 func (s *smartLoop) request(now time.Time) {
-	if s.enabled && now.Sub(s.at) > smartMinGap {
+	if s.enabled && !s.running && now.Sub(s.at) > smartMinGap {
 		s.at = time.Time{}
 	}
 }
