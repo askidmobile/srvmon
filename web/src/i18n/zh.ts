@@ -719,7 +719,7 @@ export const zh: Dict = {
   "token for a manual install": "用于手动安装的令牌",
   "written to the server: the agent switches to it within a minute": "已写入服务器：代理将在一分钟内切换",
   "not written to the server: {error}": "未写入服务器：{error}",
-  "The token is shown once. Without docker (Proxmox VE) use the first command, as root.": "令牌只显示一次。没有 docker（Proxmox VE）时请以 root 运行第一条命令。",
   "systemd service, no docker": "systemd 服务，无 docker",
   "the agent runs as a systemd service without docker: containers are not collected": "代理以 systemd 服务运行，无 docker：不收集容器",
+  "The token is shown once. Without docker (Proxmox VE) run the first command as root; in the panel terminal (user srvmon) put sudo before SRVMON_TOKEN.": "令牌只显示一次。没有 docker（Proxmox VE）时请以 root 运行第一条命令；在面板终端（用户 srvmon）中请在 SRVMON_TOKEN 前加上 sudo。",
 };

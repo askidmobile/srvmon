@@ -135,3 +135,29 @@ func TestServerHasAgent(t *testing.T) {
 		t.Fatal("revoked token counted")
 	}
 }
+
+// The AI agent learns how each server's agent runs.
+func TestToolViewAgent(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	id, _ := e.st.CreateServer(ctx, store.Server{Name: "pve"})
+	view := func() string {
+		srv, _ := e.st.GetServer(ctx, id)
+		return e.srv.toolView(srv).Agent
+	}
+	if v := view(); v != "none" {
+		t.Errorf("no token: %q", v)
+	}
+	_ = e.st.AddAgentToken(ctx, id, auth.HashToken("a_pve"))
+	if v := view(); v != "waiting" {
+		t.Errorf("token, no push: %q", v)
+	}
+	e.ingest(t, "a_pve", protocol.Report{Hostname: "pve", AgentMode: "systemd"})
+	if v := view(); v != "systemd" {
+		t.Errorf("systemd agent: %q", v)
+	}
+	e.ingest(t, "a_pve", protocol.Report{Hostname: "pve"})
+	if v := view(); v != "docker" {
+		t.Errorf("agent without mode: %q", v)
+	}
+}

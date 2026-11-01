@@ -72,6 +72,10 @@ type toolServerView struct {
 	MemUsedPct  *float64 `json:"mem_used_percent,omitempty"`
 	DiskMaxPct  *float64 `json:"disk_max_used_percent,omitempty"`
 	Containers  string   `json:"containers,omitempty"` // "12 running / 13, 1 unhealthy"
+	// Agent is how srvmon-agent runs: docker, systemd (no docker on the
+	// host), native; "none" for an SSH-only server, "waiting" for a token
+	// no agent has pushed with yet, "silent" for an agent gone quiet.
+	Agent string `json:"agent"`
 }
 
 func pct(a, b uint64) *float64 {
@@ -94,6 +98,18 @@ func (s *Server) toolView(srv store.Server) toolServerView {
 		v.LastSeen = srv.LastSeen.Format(time.RFC3339)
 	}
 	snap, ok := s.latest.Get(srv.ID)
+	switch {
+	case ok && snap.Report.AgentMode != "":
+		v.Agent = snap.Report.AgentMode
+	case ok:
+		v.Agent = "docker" // agents before agent_mode ran only in docker
+	case srv.LastSeen != nil:
+		v.Agent = "silent"
+	case srv.HasAgent:
+		v.Agent = "waiting"
+	default:
+		v.Agent = "none"
+	}
 	if !ok {
 		return v
 	}
