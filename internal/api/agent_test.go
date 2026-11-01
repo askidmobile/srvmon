@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -32,15 +33,32 @@ type fakeSSHD struct {
 	addr    string
 	hostKey ssh.PublicKey
 	mu      sync.Mutex
-	execs   []string
+	execs   []fakeExec
+	deny    func(user string) bool // refuses the key for this user
 }
 
+type fakeExec struct{ user, cmd, stdin string }
+
 func newFakeSSHD(t *testing.T, clientKey ssh.PublicKey, handler func(cmd string) (string, uint32)) *fakeSSHD {
+	return newFakeSSHDFull(t, clientKey, func(_, cmd, _ string) (string, string, uint32) {
+		out, st := handler(cmd)
+		return out, "", st
+	})
+}
+
+// newFakeSSHDFull is newFakeSSHD with the user, the exec's stdin and stderr.
+func newFakeSSHDFull(t *testing.T, clientKey ssh.PublicKey, handler func(user, cmd, stdin string) (string, string, uint32)) *fakeSSHD {
 	t.Helper()
 	_, priv, _ := ed25519.GenerateKey(rand.Reader)
 	signer, _ := ssh.NewSignerFromKey(priv)
 	f := &fakeSSHD{hostKey: signer.PublicKey()}
-	cfg := &ssh.ServerConfig{PublicKeyCallback: func(_ ssh.ConnMetadata, k ssh.PublicKey) (*ssh.Permissions, error) {
+	cfg := &ssh.ServerConfig{PublicKeyCallback: func(m ssh.ConnMetadata, k ssh.PublicKey) (*ssh.Permissions, error) {
+		f.mu.Lock()
+		deny := f.deny
+		f.mu.Unlock()
+		if deny != nil && deny(m.User()) {
+			return nil, fmt.Errorf("denied")
+		}
 		if bytes.Equal(k.Marshal(), clientKey.Marshal()) {
 			return nil, nil
 		}
@@ -77,16 +95,17 @@ func newFakeSSHD(t *testing.T, clientKey ssh.PublicKey, handler func(cmd string)
 							if req.Type != "exec" {
 								continue
 							}
-							f.mu.Lock()
-							f.execs = append(f.execs, p.Cmd)
-							f.mu.Unlock()
 							// Read stdin to its end first, like a shell
 							// running "sh -s": closing the channel while
 							// the client still writes a script makes its
 							// Run fail with EOF.
-							_, _ = io.Copy(io.Discard, ch)
-							out, st := handler(p.Cmd)
+							in, _ := io.ReadAll(ch)
+							f.mu.Lock()
+							f.execs = append(f.execs, fakeExec{sc.User(), p.Cmd, string(in)})
+							f.mu.Unlock()
+							out, errOut, st := handler(sc.User(), p.Cmd, string(in))
 							io.WriteString(ch, out)
+							io.WriteString(ch.Stderr(), errOut)
 							ch.SendRequest("exit-status", false, ssh.Marshal(struct{ S uint32 }{st}))
 							return
 						}
@@ -98,10 +117,45 @@ func newFakeSSHD(t *testing.T, clientKey ssh.PublicKey, handler func(cmd string)
 	return f
 }
 
+// isResolve reports the panel's symlink resolution script (secretTarget).
+func isResolve(stdin string) bool { return strings.HasPrefix(stdin, "p=$(readlink -f") }
+
+// resolved is a fake answer to the resolution script: one path per line,
+// hex-encoded as od prints it.
+func resolved(paths ...string) string {
+	var b strings.Builder
+	b.WriteString("#resolved\n")
+	for _, p := range paths {
+		b.WriteString(hex.EncodeToString([]byte(p)) + "\n")
+	}
+	return b.String()
+}
+
+// commands are the commands that ran, without the panel's symlink
+// resolution before a read-only one.
 func (f *fakeSSHD) commands() []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return append([]string(nil), f.execs...)
+	var out []string
+	for _, e := range f.execs {
+		if !isResolve(e.stdin) {
+			out = append(out, e.cmd)
+		}
+	}
+	return out
+}
+
+// users are the users of the commands, in order.
+func (f *fakeSSHD) users() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []string
+	for _, e := range f.execs {
+		if !isResolve(e.stdin) {
+			out = append(out, e.user)
+		}
+	}
+	return out
 }
 
 // agentEnv is an env with a server reachable over (fake) SSH and the tool
@@ -115,6 +169,17 @@ type agentEnv struct {
 
 func newAgentEnv(t *testing.T, aiURL string) *agentEnv {
 	t.Helper()
+	return newAgentEnvWith(t, aiURL, func(_, cmd, _ string) (string, string, uint32) {
+		if strings.Contains(cmd, "fail") {
+			return "boom\n", "", 3
+		}
+		return "out of " + cmd + "\n", "", 0
+	})
+}
+
+// newAgentEnvWith is newAgentEnv with the server's answers from handler.
+func newAgentEnvWith(t *testing.T, aiURL string, handler func(user, cmd, stdin string) (string, string, uint32)) *agentEnv {
+	t.Helper()
 	e := newEnv(t)
 	e.loginSSH(t)
 	e.srv.cfg.AIToken = testAIToken
@@ -124,11 +189,13 @@ func newAgentEnv(t *testing.T, aiURL string) *agentEnv {
 		t.Fatal(err)
 	}
 	signer, _ := ssh.ParsePrivateKey(kp.Private)
-	sshd := newFakeSSHD(t, signer.PublicKey(), func(cmd string) (string, uint32) {
-		if strings.Contains(cmd, "fail") {
-			return "boom\n", 3
+	sshd := newFakeSSHDFull(t, signer.PublicKey(), func(user, cmd, stdin string) (string, string, uint32) {
+		out, errOut, code := handler(user, cmd, stdin)
+		if isResolve(stdin) && !strings.HasPrefix(out, "#resolved\n") {
+			// The handler does not model symlinks: nothing resolves.
+			return strings.Repeat("\n", strings.Count(stdin, "\n")), "", 0
 		}
-		return "out of " + cmd + "\n", 0
+		return strings.TrimPrefix(out, "#resolved\n"), errOut, code
 	})
 	ctx := context.Background()
 	id, err := e.st.CreateServer(ctx, store.Server{Name: "prod-api-01"})

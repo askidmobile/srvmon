@@ -35,6 +35,9 @@
 //	write-sudoers U  a one-off container of the panel: writes stdin as the
 //	                 sudoers file of user U into SUDOERS_DIR (the host's
 //	                 /etc/sudoers.d), or removes it when stdin is empty
+//	host-sh          a one-off container of the panel: chroots into
+//	                 HOST_SH_ROOT (default /host, the host's / mounted) and
+//	                 runs the host's /bin/sh with the script on stdin
 package main
 
 import (
@@ -64,6 +67,8 @@ func main() {
 			os.Exit(runDockerProxy(log))
 		case "write-token":
 			os.Exit(runWriteToken(os.Args[2:], os.Stdin))
+		case "host-sh":
+			os.Exit(runHostSh(os.Args[2:], getenv("HOST_SH_ROOT", "/host")))
 		case "write-sudoers":
 			os.Exit(runWriteSudoers(os.Args[2:], os.Stdin, getenv("SUDOERS_DIR", "/sudoers.d")))
 		}

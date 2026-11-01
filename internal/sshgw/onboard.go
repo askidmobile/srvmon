@@ -220,6 +220,14 @@ func Onboard(ctx context.Context, p OnboardParams, log Logger) (Result, error) {
 	}
 	log(StepOK, i18n.T("key sign-in check: ok"))
 
+	// The AI agent's read-only commands run as ReaderUser: no groups, no
+	// sudo. Not fatal: the panel sets it up again before the first one.
+	if out, errOut, err := pr.run(ctx, readerRootScript(p.Key.Public)); err != nil || !strings.Contains(out, "reader-ok") {
+		log(StepWarn, i18n.T("read-only account %s not set up: %s", ReaderUser, firstLine(errOut, err)))
+	} else {
+		log(StepOK, i18n.T("read-only account %s for the AI agent (no groups, no sudo)", ReaderUser))
+	}
+
 	if p.Commit != nil {
 		if err := p.Commit(ctx); err != nil {
 			return res, err

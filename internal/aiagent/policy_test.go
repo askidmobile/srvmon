@@ -1,6 +1,8 @@
 package aiagent
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 )
@@ -254,5 +256,65 @@ func TestSchedule(t *testing.T) {
 		if _, err := ParseSchedule(bad); err == nil {
 			t.Errorf("%q: want error", bad)
 		}
+	}
+}
+
+func TestPathWordsHasNoCap(t *testing.T) {
+	var b strings.Builder
+	b.WriteString("cat")
+	for i := 0; i < 40; i++ {
+		fmt.Fprintf(&b, " /srv/f%d", i)
+	}
+	b.WriteString(" /srv/app/settings.conf --file=/x/y -n")
+	w := PathWords(b.String())
+	if len(w) != 44 || w[40] != "/srv/app/settings.conf" || w[42] != "/x/y" {
+		t.Fatalf("%d %q", len(w), w)
+	}
+}
+
+func TestPathWordsAttachedShortValues(t *testing.T) {
+	w := PathWords("date -f/tmp/settings.conf")
+	found := false
+	for _, x := range w {
+		if x == "/tmp/settings.conf" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("%q", w)
+	}
+	if w := PathWords("ls -la"); len(w) != 2 || w[0] != "-la" || w[1] != "a" {
+		t.Fatalf("%q", w)
+	}
+}
+
+// A newline inside quotes is one operand to the shell but two lines to the
+// server-side symlink check: such commands are not read-only.
+func TestQuotedControlCharacters(t *testing.T) {
+	for _, cmd := range []string{"cat '/tmp/a\n/srv/.env'", "cat \"/tmp/a\r\"", "grep 'x\x00' /tmp/a"} {
+		if ro, _ := Classify(cmd); ro {
+			t.Fatalf("%q classified read-only", cmd)
+		}
+		if w := PathWords(cmd); len(w) != 0 {
+			t.Fatalf("%q: %q", cmd, w)
+		}
+	}
+	if ro, why := Classify("cut -d'\t' -f1 /tmp/a"); !ro {
+		t.Fatalf("tab inside quotes: %s", why)
+	}
+}
+
+// After "--" a dash-prefixed word is a file name: every option word is also
+// resolved whole.
+func TestPathWordsAfterTerminator(t *testing.T) {
+	w := PathWords("cat -- --settings.conf")
+	found := false
+	for _, x := range w {
+		if x == "--settings.conf" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("%q", w)
 	}
 }

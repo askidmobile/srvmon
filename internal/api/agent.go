@@ -33,10 +33,13 @@ type agentState struct {
 	mu      sync.Mutex
 	runs    map[int64]context.CancelFunc // chat id -> abort
 	waiters map[int64]chan string        // action id -> decided state
+	readers map[int64]readerState        // server id -> read-only account state
+	setup   map[int64]*sync.Mutex        // server id -> reader provisioning, one at a time
 }
 
 func newAgentState() *agentState {
-	return &agentState{runs: map[int64]context.CancelFunc{}, waiters: map[int64]chan string{}}
+	return &agentState{runs: map[int64]context.CancelFunc{}, waiters: map[int64]chan string{},
+		readers: map[int64]readerState{}, setup: map[int64]*sync.Mutex{}}
 }
 
 func (s *Server) agentEnabled(w http.ResponseWriter) bool {

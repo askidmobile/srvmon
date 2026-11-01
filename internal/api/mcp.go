@@ -548,17 +548,15 @@ func (s *Server) mcpRun(ctx context.Context, who, server, command, reason string
 		return mcpText(true, "internal error")
 	}
 
+	forced := "" // a read-only command whose target is a secret file
 	ro, why := aiagent.Classify(command)
 	if ro {
-		code, out, err := s.runOnServer(ctx, access, command, mcpReadTimeout)
-		_ = s.store.Audit(context.Background(), who, "agent_exec", srv.Name+": "+truncate(command, 500))
-		res := execResult{Status: "ok", ReadOnly: true, ExitCode: &code, Output: out}
-		if err != nil {
-			res.Status, res.Note, res.ExitCode = "error", err.Error(), nil
-		} else if code != 0 {
-			res.Status = "error"
+		code, out, confirm, err := s.runReadOnly(ctx, access, command, mcpReadTimeout)
+		if confirm == "" {
+			_ = s.store.Audit(context.Background(), who, "agent_exec", srv.Name+": "+truncate(command, 500))
+			return mcpJSON(readResult(code, out, err))
 		}
-		return mcpJSON(res)
+		why, forced = confirm, confirm
 	}
 
 	s.mcp.mu.Lock()
@@ -573,6 +571,9 @@ func (s *Server) mcpRun(ctx context.Context, who, server, command, reason string
 	reason = strings.TrimSpace(reason)
 	if reason == "" {
 		reason = why
+	}
+	if forced != "" && reason != forced {
+		reason = forced + " · " + reason
 	}
 	action, err := s.store.CreateAgentAction(ctx, store.AgentAction{
 		ServerID: srv.ID, ServerName: srv.Name, Command: command, Reason: truncate(reason, 500), Source: who,
@@ -648,7 +649,9 @@ type mcpActionView struct {
 	Command  string `json:"command"`
 	ExitCode *int   `json:"exit_code,omitempty"`
 	Output   string `json:"output,omitempty"`
-	Note     string `json:"note,omitempty"`
+	// OutputNote labels Output as untrusted (see outputNote).
+	OutputNote string `json:"output_note,omitempty"`
+	Note       string `json:"note,omitempty"`
 }
 
 // mcpActionStatus waits up to mcpWait for an MCP action to finish and
@@ -677,6 +680,9 @@ func (s *Server) mcpActionStatus(ctx context.Context, id int64) map[string]any {
 		}
 	}
 	v := mcpActionView{ActionID: a.ID, Status: a.State, Server: a.ServerName, Command: a.Command, ExitCode: a.ExitCode, Output: a.Output}
+	if v.Output != "" {
+		v.OutputNote = outputNote
+	}
 	switch a.State {
 	case store.ActionPending:
 		v.Note = "waiting for the owner to approve it in the srvmon panel or Telegram (up to 15 minutes from " +

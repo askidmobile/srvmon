@@ -78,6 +78,9 @@ func splitPipeline(cmd string) ([][]string, error) {
 			if j < 0 {
 				return nil, errors.New(i18n.T("unclosed quote"))
 			}
+			if hasControl(cmd[i+1 : i+1+j]) {
+				return nil, errors.New(i18n.T("control character"))
+			}
 			cur.WriteString(cmd[i+1 : i+1+j])
 			inWord = true
 			i += j + 1
@@ -89,6 +92,9 @@ func splitPipeline(cmd string) ([][]string, error) {
 			body := cmd[i+1 : i+1+j]
 			if strings.ContainsAny(body, "$`\\") {
 				return nil, errors.New(i18n.T("substitution inside quotes"))
+			}
+			if hasControl(body) {
+				return nil, errors.New(i18n.T("control character"))
 			}
 			cur.WriteString(body)
 			inWord = true
@@ -118,6 +124,18 @@ func splitPipeline(cmd string) ([][]string, error) {
 	flush()
 	segs = append(segs, words)
 	return segs, nil
+}
+
+// hasControl reports a control character other than tab. A newline inside
+// quotes is one operand to the shell but several lines to everything that
+// checks it afterwards (the symlink check resolves operands line by line).
+func hasControl(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if (s[i] < 0x20 && s[i] != '\t') || s[i] == 0x7f {
+			return true
+		}
+	}
+	return false
 }
 
 // anyArgs: programs that only read whatever their arguments are.
@@ -660,4 +678,55 @@ func checkGetent(words []string) string {
 		}
 	}
 	return ""
+}
+
+// SecretPath reports whether p names a file that usually holds secrets
+// (the same check Classify applies to the words of a command). The panel
+// runs it on paths resolved on the server, so a symlink to a secret file
+// needs confirmation too.
+func SecretPath(p string) bool { return secretPath(p) }
+
+// PathWords returns all operand words of a command that Classify accepts
+// (the value of --opt=VALUE and every possible attached value of a short
+// option included) for resolving on the server: any of
+// them may be a file or a symlink. There is no cap: a word left unchecked
+// would run unchecked.
+func PathWords(cmd string) []string {
+	segs, err := splitPipeline(cmd)
+	if err != nil {
+		return nil
+	}
+	seen := map[string]bool{}
+	var out []string
+	for _, words := range segs {
+		if len(words) == 0 {
+			continue
+		}
+		add := func(w string) {
+			if w == "" || seen[w] {
+				return
+			}
+			seen[w] = true
+			out = append(out, w)
+		}
+		for _, w := range words[1:] {
+			// The word itself may be a file too: after "--" (cat -- --x),
+			// or for programs that take no options.
+			add(w)
+			switch {
+			case strings.HasPrefix(w, "--"):
+				if i := strings.IndexByte(w, '='); i >= 0 {
+					add(w[i+1:])
+				}
+			case strings.HasPrefix(w, "-"):
+				// A short option may carry its value attached (-f/tmp/x,
+				// -nf/tmp/x), and which letters take one depends on the
+				// program: resolve every tail after a letter.
+				for j := 2; j < len(w); j++ {
+					add(w[j:])
+				}
+			}
+		}
+	}
+	return out
 }
