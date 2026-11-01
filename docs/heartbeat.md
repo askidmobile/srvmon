@@ -15,7 +15,7 @@
 5. Тариф: хватит **Free** (10 heartbeats, 10 мониторов, уведомления на почту и в Slack).
 6. В левом меню Uptime откройте **Heartbeats** → **Create heartbeat**. В поле **What service will this heartbeat track?** впишите `srvmon panel`. **Expect a heartbeat every**: `1` и единицу **minutes**, по умолчанию стоит **day**, обязательно смените. **with a grace period of**: 5 minutes.
 7. В блоке **How should we notify the primary responder?** оставьте **E-mail**. Звонки и SMS есть только на платном тарифе. Нажмите **Create heartbeat**.
-8. Скопируйте URL вида `https://uptime.betterstack.com/api/v1/heartbeat/<token>`.
+8. Скопируйте URL вида `https://incidents.betterstack.com/api/v1/heartbeat/<token>`.
 9. В панели: **алерты → пульс панели** → вставьте URL → **сохранить** → **пинг сейчас**. Статус должен стать «● ок», а в Better Stack heartbeat перейдёт в Up.
 
 Галку «сообщать о проблемах на URL/fail» оставьте включённой: Better Stack принимает `<url>/fail` и сразу отмечает heartbeat как упавший.
