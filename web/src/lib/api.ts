@@ -174,6 +174,7 @@ export const api = {
   alerts: () => request<AlertsView>("GET", "/api/alerts"),
   alertSummary: () => request<AlertSummary>("GET", "/api/alerts/summary"),
   ackAlert: (id: number) => request<Alert>("POST", `/api/alerts/${id}/ack`),
+  diagnoseAlert: (id: number) => request<Diagnosis>("POST", `/api/alerts/${id}/diagnose`),
   silenceAlert: (id: number, minutes: number) =>
     request<{ alert: Alert; until: string }>("POST", `/api/alerts/${id}/silence`, { minutes }),
   rules: () => request<Rule[]>("GET", "/api/alert-rules"),
@@ -210,6 +211,18 @@ export interface Alert {
   acked_at?: string;
   resolved_at?: string;
   notified: boolean;
+  diagnosis?: Diagnosis;
+}
+
+// The AI agent's read-only investigation of an alert.
+export interface Diagnosis {
+  alert_id: number;
+  state: "queued" | "running" | "done" | "error" | "skipped";
+  trigger: "auto" | "manual";
+  text: string;
+  tools: number;
+  started_at: string;
+  finished_at?: string;
 }
 
 export interface AlertsView {

@@ -211,6 +211,8 @@ type Alert struct {
 	AckedAt    *time.Time `json:"acked_at,omitempty"`
 	ResolvedAt *time.Time `json:"resolved_at,omitempty"`
 	Notified   bool       `json:"notified"`
+	// Diagnosis is filled by AttachDiagnoses, not by the alert queries.
+	Diagnosis *Diagnosis `json:"diagnosis,omitempty"`
 }
 
 // Open reports whether the alert is firing or acknowledged.

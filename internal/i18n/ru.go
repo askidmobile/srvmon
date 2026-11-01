@@ -229,4 +229,16 @@ var ru = map[string]string{
 	"srvmon %s: problems:":       "srvmon %s: проблемы:",
 	"the ping URL starts with http:// or https:// and has no spaces": "URL пинга начинается с http:// или https:// и без пробелов",
 	"set the ping URL first": "сначала укажите URL пинга",
+	// AI diagnosis of alerts.
+	"AI diagnosis":                                                "AI-диагноз",
+	"diagnoses per hour: 1–60":                                    "диагнозов в час: 1–60",
+	"diagnoses per day: 1–500":                                    "диагнозов в сутки: 1–500",
+	"the hourly limit cannot exceed the daily one":                "лимит в час не может быть больше суточного",
+	"model id is too long":                                        "слишком длинный id модели",
+	"skipped: the limit of %d diagnoses per hour is reached":      "пропущен: достигнут лимит %d диагнозов в час",
+	"skipped: the limit of %d diagnoses per day is reached":       "пропущен: достигнут лимит %d диагнозов в сутки",
+	"skipped: too many diagnoses at once":                         "пропущен: слишком много диагнозов одновременно",
+	"the agent gave no answer":                                    "агент не дал ответа",
+	"pick a model from the list in the AI settings":               "выберите модель из списка в настройках AI",
+	"this alert is not about a server state: nothing to diagnose": "этот алерт не о состоянии сервера: диагностировать нечего",
 }
