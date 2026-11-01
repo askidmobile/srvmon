@@ -138,8 +138,11 @@ type Process struct {
 	Cmd        string  `json:"cmd,omitempty"`
 	User       string  `json:"user,omitempty"`
 	CPUPercent float64 `json:"cpu"` // percent of one core, like top
-	MemBytes   uint64  `json:"mem"`
-	Container  string  `json:"container,omitempty"`
+	// CPUUnknown: the agent could not read this process's CPU time
+	// without a ptrace access check its LSM profile denies.
+	CPUUnknown bool   `json:"cpu_na,omitempty"`
+	MemBytes   uint64 `json:"mem"`
+	Container  string `json:"container,omitempty"`
 }
 
 // LogLine is one warn-or-worse line from syslog or a container.

@@ -345,6 +345,7 @@ export const zh: Dict = {
   "sign-in method": "登录方式",
   "soon": "即将推出",
   "sort: {sort} · {total} total · top {top}": "排序：{sort} · 共 {total} · 前 {top}",
+  "CPU time is not readable for this process": "无法读取此进程的 CPU 时间",
   "source": "来源",
   "source:": "来源：",
   "srvmon-ai is unavailable": "srvmon-ai 不可用",

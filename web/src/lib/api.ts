@@ -382,6 +382,9 @@ export interface Process {
   cmd?: string;
   user?: string;
   cpu: number;
+  // The agent cannot read this process's CPU time without a ptrace check
+  // its AppArmor profile denies.
+  cpu_na?: boolean;
   mem: number;
   container?: string;
 }

@@ -345,6 +345,7 @@ export const ru: Dict = {
   "sign-in method": "способ входа",
   "soon": "скоро",
   "sort: {sort} · {total} total · top {top}": "сорт: {sort} · {total} всего · топ {top}",
+  "CPU time is not readable for this process": "время CPU этого процесса недоступно",
   "source": "источник",
   "source:": "источник:",
   "srvmon-ai is unavailable": "srvmon-ai недоступен",

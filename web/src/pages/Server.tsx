@@ -400,9 +400,15 @@ function ProcessPanel({ data, filterRef }: { data: ServerDetailView; filterRef: 
                   <td className="max-w-[72px] truncate px-1.5 text-muted-foreground" title={p.container}>
                     {p.container || "─"}
                   </td>
-                  <td className="px-1.5 text-right whitespace-nowrap" style={{ color: levelColor(p.cpu / Math.max(1, d.cores.length) * 4) }}>
-                    {p.cpu.toFixed(1)}
-                  </td>
+                  {p.cpu_na ? (
+                    <td className="px-1.5 text-right whitespace-nowrap text-muted-foreground" title={t("CPU time is not readable for this process")}>
+                      —
+                    </td>
+                  ) : (
+                    <td className="px-1.5 text-right whitespace-nowrap" style={{ color: levelColor(p.cpu / Math.max(1, d.cores.length) * 4) }}>
+                      {p.cpu.toFixed(1)}
+                    </td>
+                  )}
                   <td className="px-1.5 text-right whitespace-nowrap">{formatBytes(p.mem)}</td>
                 </tr>
               ))}

@@ -27,8 +27,19 @@ const (
 )
 
 var (
-	errRe  = regexp.MustCompile(`(?i)\b(emerg|alert|panic|fatal|crit|critical|err|error|errors|exception|failed|failure|segfault|oom|out of memory|killed process)\b`)
-	warnRe = regexp.MustCompile(`(?i)\b(warn|warning|timeout|timed out|denied|refused|invalid user|retry|deprecated)\b`)
+	errRe = regexp.MustCompile(`(?i)\b(emerg|alert|panic|fatal|crit|critical|err|error|errors|exception|failed|failure|segfault|oom|out of memory|killed process)\b`)
+	// excRe is an exception class or a Python traceback: ValueError: ...,
+	// java.io.IOException, Traceback (most recent call last).
+	excRe  = regexp.MustCompile(`\b[A-Z][A-Za-z0-9]*(?:Error|Exception)\b|^Traceback \(most recent call last\)`)
+	warnRe = regexp.MustCompile(`(?i)\b(warn|warning|timeout|timed out|denied|refused|invalid user|retry|deprecated|degraded)\b`)
+
+	// emptyErrRe is an error field with no error in it: JSON "error": null
+	// or "errors": [], logfmt error=<nil> or errors=0. Unquoted "key: 0"
+	// is left alone ("connect failed: 0 bytes sent" is an error).
+	emptyErrRe = regexp.MustCompile(`(?i)(?:["'](?:err|error|errors|exception|exceptions|failure|failures|failed)["']\s*:\s*(?:null|none|""|''|\[\s*\]|\{\s*\}|false|0)|\b(?:err|error|errors|failures|failed)=(?:null|none|nil|<nil>|""|0))(?:[\s,;})\]]|$)`)
+	// negatedErrRe is a count of zero: "no 10002 errors", "0 failures",
+	// "without errors". At most two words may sit between.
+	negatedErrRe = regexp.MustCompile(`(?i)\b(?:no|zero|0|without|never)\s+(?:[\w.,/-]+\s+){0,2}?(?:errors?|failures?|exceptions?|failed)\b`)
 )
 
 // logfmtRe walks a logfmt line: quoted strings are matched (and skipped) as
@@ -39,10 +50,20 @@ var logfmtRe = regexp.MustCompile(`"(?:[^"\\]|\\.)*"|(?:^|\s)(?:level|lvl|severi
 var (
 	jsonPrefixRe = regexp.MustCompile(`^\s*(?:[\w.\-/]+(?:\[\d+\])?:\s*)?$`)
 	logfmtMsgRe  = regexp.MustCompile(`(?:^|\s)msg=`)
+	// textLevelRe finds level words for textLevel to vet.
+	textLevelRe = regexp.MustCompile(`(?i)\b(emerg|emergency|alert|crit|critical|fatal|panic|severe|error|err|warning|warn|notice|info|debug|trace)\b`)
+	// stampRe is what may come before a bare level word: a timestamp,
+	// a pid, spaces.
+	stampRe = regexp.MustCompile(`^[\d\s\-:.,TZ+/]*$`)
 )
 
-// explicitLevel returns the level field of a structured line: a JSON object
-// ("level", "lvl" or "severity") or logfmt. ok is false for free text.
+// textLevelScan is how far into a free-text line a level marker is looked
+// for; later words are message content.
+const textLevelScan = 100
+
+// explicitLevel returns the level the application wrote: a field of a
+// structured line (JSON "level"/"lvl"/"severity", logfmt) or a level
+// marker of a text log format. ok is false when there is none.
 func explicitLevel(msg string) (string, bool) {
 	// JSON counts only when the whole line is the object, optionally after a
 	// syslog tag ("app[12]: {...}"); a JSON payload at the end of free text
@@ -50,7 +71,7 @@ func explicitLevel(msg string) (string, bool) {
 	if i := strings.IndexByte(msg, '{'); i >= 0 && jsonPrefixRe.MatchString(msg[:i]) && strings.HasSuffix(strings.TrimSpace(msg), "}") {
 		var obj map[string]any
 		if json.Unmarshal([]byte(msg[i:]), &obj) == nil {
-			for _, k := range []string{"level", "lvl", "severity"} {
+			for _, k := range []string{"level", "lvl", "severity", "levelname"} {
 				if v, ok := obj[k].(string); ok {
 					return strings.ToLower(v), true
 				}
@@ -60,38 +81,101 @@ func explicitLevel(msg string) (string, bool) {
 	}
 	// logfmt: only lines that carry a msg= field, so "ERROR x: level=info"
 	// in free text is not taken for structured.
-	if !logfmtMsgRe.MatchString(msg) {
-		return "", false
-	}
-	for _, m := range logfmtRe.FindAllStringSubmatch(msg, -1) {
-		if m[1] != "" {
-			return strings.ToLower(m[1]), true
+	if logfmtMsgRe.MatchString(msg) {
+		for _, m := range logfmtRe.FindAllStringSubmatch(msg, -1) {
+			if m[1] != "" {
+				return strings.ToLower(m[1]), true
+			}
 		}
+	}
+	return textLevel(msg)
+}
+
+// textLevel finds the level marker of common text formats near the start of
+// a line: "[WARNING] ...", "nginx: [error] ...", "WARNING:root:...",
+// "... - name - ERROR - ...", "2026-11-01 10:00:00 WARN 12 --- ...",
+// "ts\tWARN\tmsg", "WARN[0000] ...". A bare word counts only in capitals,
+// a bracketed one in any case; the first marker wins.
+func textLevel(msg string) (string, bool) {
+	head := msg
+	if len(head) > textLevelScan {
+		head = head[:textLevelScan]
+	}
+	for _, m := range textLevelRe.FindAllStringIndex(head, -1) {
+		w := head[m[0]:m[1]]
+		var before, after byte
+		if m[0] > 0 {
+			before = head[m[0]-1]
+		}
+		if m[1] < len(head) {
+			after = head[m[1]]
+		}
+		if before == '[' && after == ']' {
+			return strings.ToLower(w), true
+		}
+		if w != strings.ToUpper(w) {
+			continue
+		}
+		switch {
+		case after == ':' || after == '[':
+		case before == '\t' && (after == '\t' || after == 0):
+		case strings.HasSuffix(head[:m[0]], " - ") && strings.HasPrefix(head[m[1]:], " - "),
+			strings.HasSuffix(head[:m[0]], " | ") && strings.HasPrefix(head[m[1]:], " | "):
+		case (after == ' ' || after == '\t' || after == 0) && stampRe.MatchString(head[:m[0]]):
+		default:
+			continue
+		}
+		return strings.ToLower(w), true
 	}
 	return "", false
 }
 
-// logLevel classifies a log line; "" means info and is dropped. An explicit
-// level wins over words in the message, so dockerd's
-// level=warning msg="... failed ..." stays a warning.
+// levelName maps a level word to ERR, WARN or "" (info and below); known is
+// false for words that are no level.
+func levelName(lvl string) (out string, known bool) {
+	switch lvl {
+	case "emerg", "emergency", "alert", "panic", "fatal", "crit", "critical", "severe", "err", "error":
+		return "ERR", true
+	case "warn", "warning":
+		return "WARN", true
+	case "info", "notice", "debug", "trace":
+		return "", true
+	}
+	return "", false
+}
+
+// logLevel classifies a line from a source without a priority of its own
+// (the syslog file, docker logs); "" means info and is dropped. A level
+// the application wrote wins over words in the message, so dockerd's
+// level=warning msg="... failed ..." stays a warning and "INFO ... error=x"
+// stays info. Without one, keywords decide, after zero counts and empty
+// error fields ("no 10002 errors", "error": null) are taken out.
 func logLevel(msg string) string {
 	if lvl, ok := explicitLevel(msg); ok {
-		switch lvl {
-		case "emerg", "alert", "panic", "fatal", "crit", "critical", "err", "error":
-			return "ERR"
-		case "warn", "warning":
-			return "WARN"
-		case "info", "notice", "debug", "trace":
-			return ""
+		if out, known := levelName(lvl); known {
+			return out
 		}
 	}
+	text := emptyErrRe.ReplaceAllString(msg, " ")
+	text = negatedErrRe.ReplaceAllString(text, " ")
 	switch {
-	case errRe.MatchString(msg):
+	case errRe.MatchString(text), excRe.MatchString(text):
 		return "ERR"
-	case warnRe.MatchString(msg):
+	case warnRe.MatchString(text):
 		return "WARN"
 	}
 	return ""
+}
+
+// severity orders ERR > WARN > "".
+func severity(lvl string) int {
+	switch lvl {
+	case "ERR":
+		return 2
+	case "WARN":
+		return 1
+	}
+	return 0
 }
 
 // LogTailer collects new warn-or-worse lines from the host syslog file and
