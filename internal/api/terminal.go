@@ -178,6 +178,11 @@ func (s *Server) handleTerminal(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 	out.rec = rec
+	// Before the shell starts, so the notice comes ahead of any output; if
+	// the shell fails the connection is closed right after.
+	if rec != nil {
+		out.control(map[string]any{"type": "rec", "on": true, "id": rec.id})
+	}
 	sess.Stdout = out
 	sess.Stderr = out
 	if container != "" {
@@ -196,9 +201,6 @@ func (s *Server) handleTerminal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	started = true
-	if rec != nil {
-		out.control(map[string]any{"type": "rec", "on": true, "id": rec.id})
-	}
 	_ = s.store.Audit(context.Background(), ip, "terminal_open", target)
 	s.log.Info("terminal open", "server", target, "ip", ip)
 	opened := time.Now()
