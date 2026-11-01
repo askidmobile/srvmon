@@ -190,31 +190,43 @@ func (s *Server) dockerBridge(reader *ssh.Client, a store.SSHAccess) (stop func(
 	_, _ = rand.Read(b)
 	sock = "/tmp/srvmon-docker-" + hex.EncodeToString(b) + ".sock"
 	var (
-		mu sync.Mutex
-		up *ssh.Client
+		mu     sync.Mutex
+		up     *ssh.Client
+		closed bool
 	)
 	dial := func(ctx context.Context) (net.Conn, error) {
 		mu.Lock()
-		defer mu.Unlock()
+		if closed {
+			mu.Unlock()
+			return nil, errors.New("docker bridge closed")
+		}
 		if up == nil {
+			// Bounded by the SSH dial timeout.
 			c, err := s.dialServer(ctx, a)
 			if err != nil {
+				mu.Unlock()
 				return nil, err
 			}
 			up = c
 		}
-		return up.Dial("unix", "/var/run/docker.sock")
+		c := up
+		mu.Unlock()
+		// The channel open has no context: it runs without the lock, so
+		// stop can close the connection and end it.
+		return c.Dial("unix", "/var/run/docker.sock")
 	}
 	stopBridge, err := sshgw.DockerBridge(reader, sock, sshgw.NewDockerReadHandler(dial, s.log))
 	if err != nil {
 		return nil, ""
 	}
 	return func() {
-		stopBridge()
 		mu.Lock()
-		if up != nil {
-			up.Close()
-		}
+		closed = true
+		c := up
 		mu.Unlock()
+		if c != nil {
+			c.Close()
+		}
+		stopBridge()
 	}, sock
 }

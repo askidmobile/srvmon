@@ -26,15 +26,17 @@ func runHostSh(args []string, root string) int {
 }
 
 func hostSh(root string) error {
-	st, err := os.Stat(root + "/bin/sh")
-	if err != nil || st.IsDir() {
-		return errors.New(root + "/bin/sh not found: mount the host's / there")
-	}
 	if err := syscall.Chroot(root); err != nil {
 		return fmt.Errorf("chroot %s: %w", root, err)
 	}
 	if err := os.Chdir("/"); err != nil {
 		return err
+	}
+	// Checked inside the host root: /bin/sh is often an absolute symlink
+	// (-> /bin/busybox, /usr/bin/dash) that only resolves there.
+	st, err := os.Stat("/bin/sh")
+	if err != nil || st.IsDir() {
+		return errors.New(root + "/bin/sh not found: mount the host's / there")
 	}
 	env := []string{"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", "LC_ALL=C"}
 	return syscall.Exec("/bin/sh", []string{"sh", "-s"}, env)

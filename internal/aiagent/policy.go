@@ -668,9 +668,10 @@ func checkGetent(words []string) string {
 // needs confirmation too.
 func SecretPath(p string) bool { return secretPath(p) }
 
-// PathWords returns the operand words of a command that Classify accepts
-// (the value of --opt=VALUE included), at most 32, for resolving on the
-// server: any of them may be a file or a symlink.
+// PathWords returns all operand words of a command that Classify accepts
+// (the value of --opt=VALUE included) for resolving on the server: any of
+// them may be a file or a symlink. There is no cap: a word left unchecked
+// would run unchecked.
 func PathWords(cmd string) []string {
 	segs, err := splitPipeline(cmd)
 	if err != nil {
@@ -695,9 +696,6 @@ func PathWords(cmd string) []string {
 			}
 			seen[w] = true
 			out = append(out, w)
-			if len(out) == 32 {
-				return out
-			}
 		}
 	}
 	return out

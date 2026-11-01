@@ -1,6 +1,8 @@
 package aiagent
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 )
@@ -254,5 +256,18 @@ func TestSchedule(t *testing.T) {
 		if _, err := ParseSchedule(bad); err == nil {
 			t.Errorf("%q: want error", bad)
 		}
+	}
+}
+
+func TestPathWordsHasNoCap(t *testing.T) {
+	var b strings.Builder
+	b.WriteString("cat")
+	for i := 0; i < 40; i++ {
+		fmt.Fprintf(&b, " /srv/f%d", i)
+	}
+	b.WriteString(" /srv/app/settings.conf --file=/x/y -n")
+	w := PathWords(b.String())
+	if len(w) != 42 || w[40] != "/srv/app/settings.conf" || w[41] != "/x/y" {
+		t.Fatalf("%d %q", len(w), w)
 	}
 }
