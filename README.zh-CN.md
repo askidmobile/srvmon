@@ -163,6 +163,8 @@ SRVMON_URL=https://mon.example.com SRVMON_TOKEN=a_... docker compose up -d
 
 当某项自检连续 3 分钟失败时，面板会把问题发送到 `<url>/fail`，healthchecks.io 会立即告警并显示出错内容。对于其他接收方（Uptime Kuma 推送监控、你自己的第二台服务器），取消勾选“将问题报告到 URL/fail”：此时面板在出问题期间只是跳过 ping。URL 使用主密钥加密存储。
 
+分步设置说明（包括 healthchecks.io 注册邮件收不到时改用 [Better Stack](https://betterstack.com)）：[docs/heartbeat.md](docs/heartbeat.md)。
+
 ## AI 代理
 
 `srvmon-ai` 容器（pi SDK，`ai/`）只带有 srvmon 工具：列出服务器和容器、读取指标和日志、通过 SSH 网关在服务器上执行命令、管理定时任务。它没有自己的 SSH 密钥。代理有两个入口：`[3] 终端` 右侧的面板（`F9` 显示或隐藏）和带确认日志的 `[4] 代理` 页面。
