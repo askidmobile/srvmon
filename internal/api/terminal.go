@@ -50,22 +50,35 @@ func clampSize(cols, rows int) (int, int) {
 	return cols, rows
 }
 
-// wsWriter sends terminal output as binary frames.
+// wsWriter sends terminal output as binary frames and, when the session is
+// recorded, to the recording.
 type wsWriter struct {
 	mu   sync.Mutex
 	ctx  context.Context
 	conn *websocket.Conn
+	rec  *termRec // set before the shell starts
 }
 
 func (w *wsWriter) Write(p []byte) (int, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	w.rec.Output(p)
 	ctx, cancel := context.WithTimeout(w.ctx, termWriteTimeout)
 	defer cancel()
 	if err := w.conn.Write(ctx, websocket.MessageBinary, p); err != nil {
 		return 0, err
 	}
 	return len(p), nil
+}
+
+// control sends a JSON control message to the browser as a text frame.
+func (w *wsWriter) control(v any) {
+	b, _ := json.Marshal(v)
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	ctx, cancel := context.WithTimeout(w.ctx, termWriteTimeout)
+	defer cancel()
+	_ = w.conn.Write(ctx, websocket.MessageText, b)
 }
 
 func (w *wsWriter) msg(text string) { _, _ = w.Write([]byte("\r\n\x1b[33m" + text + "\x1b[0m\r\n")) }
@@ -151,6 +164,20 @@ func (s *Server) handleTerminal(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		return
 	}
+	recTarget := access.User + "@" + access.Name
+	if container != "" {
+		recTarget = target
+	}
+	rec := s.startRecording(access, recTarget, ip, cols, rows)
+	started := false
+	defer func() {
+		if started {
+			rec.finish()
+		} else {
+			rec.discard()
+		}
+	}()
+	out.rec = rec
 	sess.Stdout = out
 	sess.Stderr = out
 	if container != "" {
@@ -167,6 +194,10 @@ func (s *Server) handleTerminal(w http.ResponseWriter, r *http.Request) {
 		out.msg(i18n.T("the server did not answer in time"))
 		conn.Close(websocket.StatusNormalClosure, "setup timeout")
 		return
+	}
+	started = true
+	if rec != nil {
+		out.control(map[string]any{"type": "rec", "on": true, "id": rec.id})
 	}
 	_ = s.store.Audit(context.Background(), ip, "terminal_open", target)
 	s.log.Info("terminal open", "server", target, "ip", ip)
@@ -190,6 +221,7 @@ func (s *Server) handleTerminal(w http.ResponseWriter, r *http.Request) {
 			if json.Unmarshal(data, &c) == nil && c.Type == "resize" {
 				cc, rr := clampSize(c.Cols, c.Rows)
 				_ = sess.WindowChange(rr, cc)
+				rec.Resize(cc, rr)
 			}
 		}
 	}()

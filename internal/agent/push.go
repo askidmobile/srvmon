@@ -29,6 +29,10 @@ type Config struct {
 	DockerSock     string
 	Version        string
 	MaxBuffer      int // reports kept while the panel is unreachable; default 720 (1h at 5s)
+	// Smart enables S.M.A.R.T. reads of the host's disks. The container
+	// then needs CAP_SYS_RAWIO, CAP_SYS_ADMIN and read access to the block
+	// devices (see deploy/agent/docker-compose.yml).
+	Smart bool
 }
 
 // Run collects and pushes until ctx is done.
@@ -48,18 +52,27 @@ func Run(ctx context.Context, cfg Config, log *slog.Logger) error {
 	hostname := readHostname(cfg.HostRoot)
 	col := &Collector{HostProc: cfg.HostProc, HostRoot: cfg.HostRoot}
 	var dock *Docker
-	if cfg.DockerSock != "" {
+	// The socket may appear after the start (srvmon-dockerproxy starting
+	// next to the agent): it is looked up again before every report.
+	findDocker := func() {
+		if dock != nil || cfg.DockerSock == "" {
+			return
+		}
 		if _, err := os.Stat(cfg.DockerSock); err == nil {
 			dock = NewDocker(cfg.DockerSock)
-		} else {
-			log.Warn("docker socket not available, containers will not be reported", "sock", cfg.DockerSock)
 		}
+	}
+	findDocker()
+	if dock == nil && cfg.DockerSock != "" {
+		log.Warn("docker socket not available yet, containers are not reported until it appears", "sock", cfg.DockerSock)
 	}
 	client := &http.Client{Timeout: 15 * time.Second}
 	endpoint := strings.TrimRight(cfg.URL, "/") + "/api/ingest"
 
 	det := &DetailCollector{HostProc: cfg.HostProc, HostRoot: cfg.HostRoot}
 	logs := &LogTailer{HostRoot: cfg.HostRoot, Docker: dock}
+	cg := &CgroupUsage{HostRoot: cfg.HostRoot}
+	smart := newSmartLoop(cfg.Smart, cfg.HostRoot, log)
 	restarts := map[string]int{}
 	var restartsAt, logsAt, invAt time.Time
 	var detailUntil time.Time
@@ -84,6 +97,12 @@ func Run(ctx context.Context, cfg Config, log *slog.Logger) error {
 			timer.Reset(cfg.Interval)
 		}
 
+		if dock == nil && cfg.DockerSock != "" {
+			if findDocker(); dock != nil {
+				logs.Docker = dock
+				log.Info("docker socket available", "sock", cfg.DockerSock)
+			}
+		}
 		rep := protocol.Report{Hostname: hostname, AgentVersion: cfg.Version, Timestamp: now.UTC()}
 		h, err := col.Collect()
 		if err != nil {
@@ -100,9 +119,31 @@ func Run(ctx context.Context, cfg Config, log *slog.Logger) error {
 				rep.Containers, rep.DockerOK = cs, true
 			}
 		}
+		// Container CPU and memory from cgroups on every report, so the
+		// history has them even when nobody watches the server screen.
+		var running []string
+		for _, c := range rep.Containers {
+			if c.State == "running" {
+				running = append(running, c.ID)
+			}
+		}
+		cgUsage := cg.Usage(running, now)
+		for i := range rep.Containers {
+			c := &rep.Containers[i]
+			if u, ok := cgUsage[c.ID]; ok {
+				m := u.MemBytes
+				c.MemBytes = &m
+				if !u.noCPU {
+					v := u.CPUPercent
+					c.CPUPercent = &v
+				}
+			}
+		}
+		rep.Smart = smart.collect(ctx, now)
 		if now.Sub(invAt) >= time.Minute {
 			ictx, cancel := context.WithTimeout(ctx, 3*time.Second)
 			rep.Inventory = Inventory(ictx, cfg.HostProc, cfg.HostRoot, dock)
+			rep.Inventory.Smart = cfg.Smart
 			cancel()
 			invAt = now
 		}
@@ -127,7 +168,8 @@ func Run(ctx context.Context, cfg Config, log *slog.Logger) error {
 				if n, ok := restarts[c.ID]; ok {
 					c.Restarts = &n
 				}
-				if c.State == "running" {
+				if _, ok := cgUsage[c.ID]; !ok && c.State == "running" {
+					// No cgroup found (unusual driver): sum the processes.
 					u := usage[c.Name]
 					c.CPUPercent, c.MemBytes = &u.CPUPercent, &u.MemBytes
 				}
@@ -157,6 +199,9 @@ func Run(ctx context.Context, cfg Config, log *slog.Logger) error {
 			continue
 		}
 		buf = buf[len(batch):]
+		if resp.Smart {
+			smart.request(time.Now())
+		}
 		if resp.Detail {
 			if !detail {
 				// Switch to the fast cadence right away and refresh the

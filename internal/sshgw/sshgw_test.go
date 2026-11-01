@@ -181,7 +181,7 @@ func testOnboard(t *testing.T, hasDocker bool) {
 	var log []string
 	res, err := Onboard(context.Background(), OnboardParams{
 		Addr: ts.addr, User: "root", Password: "S3cr3t!pw", HostKey: ts.hostKey,
-		Key: key, SSHUser: "srvmon", Sudo: true, DisablePassword: true,
+		Key: key, SSHUser: "srvmon", SudoMode: SudoFull, DisablePassword: true,
 		Agent: &AgentInstall{Image: "ghcr.io/x/agent:latest", URL: "https://mon", Token: "a_tok"},
 	}, func(state, text string) { log = append(log, state+" "+text) })
 	if err != nil {
@@ -194,16 +194,21 @@ func testOnboard(t *testing.T, hasDocker bool) {
 	if strings.Contains(all, "S3cr3t") {
 		t.Fatal("password leaked into log")
 	}
-	want := 3
+	want := 4
 	if !hasDocker {
-		want = 4
+		want = 5
 	}
 	if len(scripts) != want {
-		t.Fatalf("want %d scripts (user, [docker,] agent, sshd), got %d", want, len(scripts))
+		t.Fatalf("want %d scripts (user, [docker,] agent, sshd, sudo), got %d", want, len(scripts))
+	}
+	// sudo goes last: a narrower mode must not cut the login's own sudo
+	// before the agent install and the sshd change.
+	if last := scripts[len(scripts)-1]; !strings.Contains(last, "NOPASSWD:ALL") || strings.Contains(scripts[0], "sudoers") {
+		t.Fatalf("sudo rules must be the last script:\n%s", last)
 	}
 	if !hasDocker {
 		if !strings.Contains(scripts[1], "get.docker.com") || !strings.Contains(scripts[1], "U='srvmon'") ||
-			!strings.Contains(scripts[2], "docker run") {
+			!strings.Contains(scripts[2], "--name srvmon-agent ") {
 			t.Fatalf("docker must be installed right before the agent:\n%s", scripts[1])
 		}
 	}
@@ -328,7 +333,7 @@ func TestOnboardCancelBeforeCommit(t *testing.T) {
 // An existing account's password hash must survive onboarding: only an
 // account created by the script gets the "*" (key-only) password.
 func TestUserScriptKeepsExistingPassword(t *testing.T) {
-	s := userScript("srvmon", "ssh-ed25519 AAAA test", false)
+	s := userScript("srvmon", "ssh-ed25519 AAAA test")
 	create := strings.Index(s, `if ! id -u "$U"`)
 	end := strings.Index(s[create:], "\nfi\n") + create
 	for _, cmd := range []string{"usermod -p", "chpasswd"} {
@@ -491,5 +496,26 @@ func TestAgentUpdateScriptMatchesInstall(t *testing.T) {
 	a := AgentInstall{Image: "ghcr.io/x/srvmon-agent:sha-1", URL: "https://mon"}
 	if in, up := flags(agentScript(a)), flags(agentUpdateScript(a)); in != up {
 		t.Errorf("install:\n%s\nupdate:\n%s", in, up)
+	}
+}
+
+func TestAgentScriptsSmart(t *testing.T) {
+	on, off := true, false
+	if s := agentScript(AgentInstall{Image: "img", Smart: &on}); !strings.Contains(s, "SM=1\n") || !strings.Contains(s, `"$@" "$IMG"`) {
+		t.Fatalf("install with smart:\n%s", s)
+	}
+	if s := agentScript(AgentInstall{Image: "img"}); !strings.Contains(s, "SM=0\n") {
+		t.Fatal("install defaults to smart on")
+	}
+	if s := agentUpdateScript(AgentInstall{Image: "img"}); !strings.Contains(s, "SM=keep\n") || !strings.Contains(s, "grep -qx 'SRVMON_SMART=1'") {
+		t.Fatal("update does not keep the smart setting")
+	}
+	if s := agentUpdateScript(AgentInstall{Image: "img", Smart: &off}); !strings.Contains(s, "SM=0\n") {
+		t.Fatal("update cannot turn smart off")
+	}
+	for _, want := range []string{"--cap-add SYS_RAWIO", "--cap-add SYS_ADMIN", "'b 8:* r'", "'b 259:* r'"} {
+		if !strings.Contains(smartScript, want) {
+			t.Errorf("smart args miss %s", want)
+		}
 	}
 }

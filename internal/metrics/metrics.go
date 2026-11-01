@@ -112,7 +112,8 @@ func Encode(server string, r protocol.Report) []byte {
 				up = 1
 			}
 			line("srvmon_container_up", [][2]string{{"container", c.Name}, {"image", c.Image}, {"health", c.Health}}, up)
-			// Usage is known only while the server screen is open.
+			// Usage comes from the container's cgroup on every report
+			// (older agents: only while the server screen is open).
 			if c.CPUPercent != nil {
 				line("srvmon_container_cpu_percent", [][2]string{{"container", c.Name}}, *c.CPUPercent)
 			}
@@ -128,6 +129,34 @@ func Encode(server string, r protocol.Report) []byte {
 		for _, k := range keys {
 			line("srvmon_containers", [][2]string{{"state", k}}, float64(states[k]))
 		}
+	}
+	for _, d := range r.Smart {
+		if d.Error != "" {
+			continue
+		}
+		l := [][2]string{{"device", d.Device}, {"model", d.Model}}
+		if d.Passed != nil {
+			v := 0.0
+			if *d.Passed {
+				v = 1
+			}
+			line("srvmon_smart_passed", l, v)
+		}
+		opt := func(name string, v *uint64) {
+			if v != nil {
+				line(name, l, float64(*v))
+			}
+		}
+		if d.TempC != nil {
+			line("srvmon_smart_temp_celsius", l, *d.TempC)
+		}
+		opt("srvmon_smart_power_on_hours", d.PowerOnHours)
+		opt("srvmon_smart_reallocated_sectors", d.Reallocated)
+		opt("srvmon_smart_pending_sectors", d.Pending)
+		opt("srvmon_smart_uncorrectable_sectors", d.Uncorrectable)
+		opt("srvmon_smart_percent_used", d.PercentUsed)
+		opt("srvmon_smart_available_spare", d.AvailableSpare)
+		opt("srvmon_smart_media_errors", d.MediaErrors)
 	}
 	return b.Bytes()
 }

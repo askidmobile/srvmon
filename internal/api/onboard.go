@@ -276,13 +276,15 @@ type onboardReq struct {
 	// (the owner's private key, used once and never stored) or "panel_key"
 	// (the owner added the panel key from /setup-key to User's
 	// authorized_keys). With a key, Password is only the sudo password.
-	Method          string `json:"method"`
-	Password        string `json:"password"`
-	PrivateKey      string `json:"private_key"`
-	Passphrase      string `json:"passphrase"`
-	SetupKey        string `json:"setup_key"`
-	HostKey         string `json:"host_key"` // from probe, confirmed by the owner
-	Sudo            bool   `json:"sudo"`
+	Method     string `json:"method"`
+	Password   string `json:"password"`
+	PrivateKey string `json:"private_key"`
+	Passphrase string `json:"passphrase"`
+	SetupKey   string `json:"setup_key"`
+	HostKey    string `json:"host_key"` // from probe, confirmed by the owner
+	// SudoMode is the sudo of the panel's user: "none", "limited"
+	// (default) or "full".
+	SudoMode        string `json:"sudo_mode"`
 	DisablePassword bool   `json:"disable_password"`
 	InstallAgent    bool   `json:"install_agent"`
 }
@@ -300,6 +302,13 @@ func (s *Server) handleOnboard(w http.ResponseWriter, r *http.Request) {
 	req.User = strings.TrimSpace(req.User)
 	if req.User == "" || len(req.User) > 64 || strings.ContainsAny(req.User, " \t\r\n") {
 		writeError(w, http.StatusBadRequest, "bad_user")
+		return
+	}
+	if req.SudoMode == "" {
+		req.SudoMode = sshgw.SudoLimited
+	}
+	if !sshgw.ValidSudoMode(req.SudoMode) {
+		writeError(w, http.StatusBadRequest, "bad_sudo_mode")
 		return
 	}
 	login, code := s.loginFor(&req)
@@ -426,7 +435,7 @@ func (s *Server) runOnboard(ctx context.Context, j *job, req onboardReq, login l
 		HostKey:         hostKey,
 		Key:             key,
 		SSHUser:         sshUser,
-		Sudo:            req.Sudo,
+		SudoMode:        req.SudoMode,
 		DisablePassword: req.DisablePassword,
 	}
 	// The commit point: the key login works, nothing optional has run yet.
@@ -488,6 +497,13 @@ func (s *Server) runOnboard(ctx context.Context, j *job, req onboardReq, login l
 		return
 	}
 	j.log(sshgw.StepOK, login.forgotten())
+	if keys, err := s.emergencyKeys(bg); err == nil && len(keys) > 0 {
+		if err := s.applyEmergency(id); err != nil {
+			j.log(sshgw.StepWarn, i18n.T("emergency keys are not added: %s", err.Error()))
+		} else {
+			j.log(sshgw.StepOK, i18n.T("emergency keys added to authorized_keys of %s: %d", sshUser, len(keys)))
+		}
+	}
 
 	if tokenHash != "" {
 		if !res.AgentInstalled {
@@ -594,6 +610,7 @@ func (s *Server) handleDeleteServer(w http.ResponseWriter, r *http.Request) {
 	}
 	s.latest.Forget(id)
 	s.alerts.Forget(id)
+	s.files.drop(id)
 	if _, err := s.checks.Reload(context.WithoutCancel(r.Context())); err != nil {
 		s.log.Error("checks: reload", "err", err)
 	}

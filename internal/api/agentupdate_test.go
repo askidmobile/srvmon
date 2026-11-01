@@ -43,7 +43,7 @@ func TestAutoUpdateOncePerImage(t *testing.T) {
 	id, _ := e.st.CreateServer(context.Background(), store.Server{Name: "self"})
 	// No SSH key: nothing starts and the image is not marked as tried, so
 	// the update still happens once SSH access is added.
-	s.updateAgent(id, "", true)
+	s.updateAgent(id, "", true, nil)
 	if _, ok := s.updates.get(id); ok {
 		t.Errorf("state set for a server without ssh")
 	}

@@ -48,6 +48,7 @@ func (f *fakeAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		result = map[string]any{"id": 1, "username": "srvmon_test_bot"}
 	case "sendMessage":
 		f.sent = append(f.sent, params)
+		result = map[string]any{"message_id": 1000 + len(f.sent)}
 	case "getUpdates":
 		// Like Telegram, keep updates until a later offset confirms them: a
 		// poll cancelled mid-flight (the bot reloading) must not lose them.

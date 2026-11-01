@@ -119,12 +119,24 @@ type Bot struct {
 	reload  chan struct{}
 	out     chan outMsg
 	started time.Time
+	// sent maps alert ids to their notification message, so a diagnosis
+	// arrives as a reply to it. In memory only, the newest maxSent.
+	sent      map[int64]sentMsg
+	sentOrder []int64
 }
 
 type outMsg struct {
 	text     string
 	keyboard [][]button
+	alertID  int64 // a firing notification: remember its message
+	replyTo  int64 // reply to the notification of this alert
 }
+
+type sentMsg struct {
+	chat, id int64
+}
+
+const maxSent = 500
 
 type button struct {
 	Text string `json:"text"`
@@ -492,9 +504,18 @@ func (b *Bot) Notify(n alerts.Notification) bool {
 	if token == "" || chat == 0 {
 		return false
 	}
-	text, kb := b.alertText(n)
+	var m outMsg
+	switch {
+	case n.Diagnosis != "":
+		m = outMsg{text: diagnosisText(n.Alert, n.Diagnosis), replyTo: n.Alert.ID}
+	case n.Resolved:
+		m.text, m.keyboard = b.alertText(n)
+	default:
+		m.text, m.keyboard = b.alertText(n)
+		m.alertID = n.Alert.ID
+	}
 	select {
-	case b.out <- outMsg{text: text, keyboard: kb}:
+	case b.out <- m:
 		return true
 	default:
 		b.log.Warn("telegram: queue full, notification dropped", "alert", n.Alert.ID)
@@ -527,8 +548,14 @@ func (b *Bot) sender(ctx context.Context) {
 				if token == "" || chat == 0 {
 					break
 				}
-				err := b.send(ctx, token, chat, m.text, m.keyboard)
-				if err == nil || ctx.Err() != nil {
+				id, err := b.sendMsg(ctx, token, chat, m)
+				if err == nil {
+					if m.alertID > 0 {
+						b.remember(m.alertID, sentMsg{chat: chat, id: id})
+					}
+					break
+				}
+				if ctx.Err() != nil {
 					break
 				}
 				b.log.Warn("telegram: send failed", "err", err)
@@ -556,8 +583,38 @@ func (b *Bot) Test(ctx context.Context) error {
 	return b.send(ctx, token, chat, "✅ "+i18n.T("<b>srvmon</b>: a test message. Notifications will arrive here."), nil)
 }
 
+func (b *Bot) remember(alertID int64, m sentMsg) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.sent == nil {
+		b.sent = map[int64]sentMsg{}
+	}
+	if _, ok := b.sent[alertID]; !ok {
+		b.sentOrder = append(b.sentOrder, alertID)
+	}
+	b.sent[alertID] = m
+	for len(b.sentOrder) > maxSent {
+		delete(b.sent, b.sentOrder[0])
+		b.sentOrder = b.sentOrder[1:]
+	}
+}
+
 func (b *Bot) send(ctx context.Context, token string, chat int64, text string, kb [][]button) error {
+	_, err := b.sendMsg(ctx, token, chat, outMsg{text: text, keyboard: kb})
+	return err
+}
+
+func (b *Bot) sendMsg(ctx context.Context, token string, chat int64, m outMsg) (int64, error) {
+	text, kb := m.text, m.keyboard
 	req := map[string]any{"chat_id": chat, "link_preview_options": map[string]bool{"is_disabled": true}}
+	if m.replyTo > 0 {
+		b.mu.Lock()
+		orig, ok := b.sent[m.replyTo]
+		b.mu.Unlock()
+		if ok && orig.chat == chat {
+			req["reply_parameters"] = map[string]any{"message_id": orig.id, "allow_sending_without_reply": true}
+		}
+	}
 	if len(text) > 4000 {
 		// Cutting may break a tag or an entity: send it as plain text.
 		req["text"] = truncate(html.UnescapeString(stripTags(text)), 4000)
@@ -567,14 +624,19 @@ func (b *Bot) send(ctx context.Context, token string, chat int64, text string, k
 	if len(kb) > 0 {
 		req["reply_markup"] = map[string]any{"inline_keyboard": kb}
 	}
-	if err := b.call(ctx, token, "sendMessage", req, nil); err != nil {
-		return err
+	var raw json.RawMessage
+	if err := b.call(ctx, token, "sendMessage", req, &raw); err != nil {
+		return 0, err
 	}
+	var sent struct {
+		ID int64 `json:"message_id"`
+	}
+	_ = json.Unmarshal(raw, &sent) // sent anyway: a reply just will not thread
 	now := b.now().UTC()
 	b.mu.Lock()
 	b.status.LastSent = &now
 	b.mu.Unlock()
-	return nil
+	return sent.ID, nil
 }
 
 // truncate cuts s to at most n bytes on a rune boundary, adding "…".

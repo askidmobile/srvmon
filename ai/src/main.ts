@@ -150,7 +150,14 @@ export function createApp(cfg: AgentConfig) {
       const isRun = req.method === "POST" && ((chat && chat[2]) || url.pathname === "/v1/run");
       if (!isRun) return json(res, 404, { error: "not_found" });
       if (!st.ready) return json(res, 503, { error: st.error ?? "not_ready" });
-      const body = (await readBody(req)) as { text?: string; server?: string; task_id?: number; model?: string; lang?: string };
+      const body = (await readBody(req)) as {
+        text?: string;
+        server?: string;
+        task_id?: number;
+        diagnose_id?: number;
+        model?: string;
+        lang?: string;
+      };
       const text = (body.text ?? "").trim();
       if (!text) return json(res, 400, { error: "bad_text" });
       if (chat) {
@@ -158,6 +165,13 @@ export function createApp(cfg: AgentConfig) {
         return await stream(req, res, (emit, signal) =>
           agents.runChat(id, text, body.server || undefined, body.model ?? "", emit, signal, replyLang(body.lang)),
         );
+      }
+      const diagnoseId = Number(body.diagnose_id ?? 0);
+      if (Number.isInteger(diagnoseId) && diagnoseId > 0) {
+        return await stream(req, res, async (emit, signal) => {
+          await agents.runDiagnosis(diagnoseId, text, body.server || undefined, body.model ?? "", emit, signal, replyLang(body.lang));
+          return true;
+        });
       }
       return await stream(req, res, async (emit, signal) => {
         await agents.runTask(body.task_id ?? 0, text, emit, signal, replyLang(body.lang));

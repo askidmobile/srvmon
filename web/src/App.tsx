@@ -13,6 +13,7 @@ import { ServerScreen } from "@/pages/Server";
 import { SettingsPage } from "@/pages/Settings";
 
 // xterm.js is heavy: load the terminal page on demand.
+const RecordingsPage = lazy(() => import("@/pages/Recordings").then((m) => ({ default: m.RecordingsPage })));
 const TerminalPage = lazy(() => import("@/pages/Terminal").then((m) => ({ default: m.TerminalPage })));
 
 export function App() {
@@ -81,6 +82,12 @@ function Screen({ route, version, onLogout }: { route: Route; version: string; o
       return (
         <Suspense fallback={<p className="p-6 text-muted-foreground">{t("loading the terminal…")}</p>}>
           <TerminalPage serverId={route.id} route={route} version={version} onLogout={onLogout} />
+        </Suspense>
+      );
+    case "recordings":
+      return (
+        <Suspense fallback={<p className="p-6 text-muted-foreground">{t("loading…")}</p>}>
+          <RecordingsPage key={route.id ?? 0} id={route.id} route={route} version={version} onLogout={onLogout} />
         </Suspense>
       );
   }

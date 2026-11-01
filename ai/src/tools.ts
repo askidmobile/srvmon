@@ -10,6 +10,8 @@ export interface ToolContext {
   token: string;
   chatId?: number;
   taskId?: number;
+  /** A read-only diagnosis of this alert: no task tools, srvmon refuses changing commands. */
+  diagnoseId?: number;
 }
 
 const MAX_RESULT = 24_000;
@@ -48,7 +50,7 @@ function text(v: unknown) {
 }
 
 interface ExecResult {
-  status: "ok" | "error" | "rejected" | "expired";
+  status: "ok" | "error" | "rejected" | "expired" | "refused";
   read_only: boolean;
   exit_code?: number;
   output?: string;
@@ -63,6 +65,8 @@ export function formatExec(r: ExecResult): string {
       return `The owner REJECTED the command (action #${r.action_id}). Do not repeat it without a new request; offer an alternative or ask.`;
     case "expired":
       return `Nobody confirmed the command in time (action #${r.action_id}); it did NOT run.`;
+    case "refused":
+      return `The command did NOT run: ${r.note ?? "refused by srvmon"}.`;
   }
   head.push(r.read_only ? "ran at once (read-only)" : `ran after confirmation (action #${r.action_id})`);
   if (r.exit_code !== undefined) head.push(`exit code ${r.exit_code}`);
@@ -103,6 +107,7 @@ export function srvmonTools(ctx: ToolContext): ToolDefinition[] {
       "Read-only commands (docker ps/logs/inspect, df, free, journalctl, systemctl status, cat, grep, pipelines with | and so on) run at once. " +
       "Any other command (restart, up -d, rm, sudo, writing files, ; && > and so on) waits for the owner's confirmation in the panel, up to 15 minutes, and runs only after it. " +
       "Unquoted name patterns (* ? [) also need confirmation: to read, use find -name '*.log' or exact paths. " +
+      "sudo of srvmon may be limited (systemctl, service, journalctl, docker) or absent: if sudo asks for a password, the server's sudo mode does not allow the command; the owner changes it in the server passport. " +
       "Timeout: 60 s for reads, 10 minutes for confirmed commands. Output is cut to 32 KB.",
     promptSnippet: "srvmon_exec: a command on a server (changes only after the owner confirms)",
     promptGuidelines: [
@@ -120,7 +125,14 @@ export function srvmonTools(ctx: ToolContext): ToolDefinition[] {
         ctx,
         "POST",
         "/tools/exec",
-        { server: p.server, command: p.command, reason: p.reason ?? "", chat_id: ctx.chatId ?? 0, task_id: ctx.taskId ?? 0 },
+        {
+          server: p.server,
+          command: p.command,
+          reason: p.reason ?? "",
+          chat_id: ctx.chatId ?? 0,
+          task_id: ctx.taskId ?? 0,
+          diagnose_id: ctx.diagnoseId ?? 0,
+        },
         signal,
       )) as ExecResult;
       const out = text(formatExec(r));
@@ -177,7 +189,11 @@ export function srvmonTools(ctx: ToolContext): ToolDefinition[] {
     },
   });
 
+  if (ctx.diagnoseId) return [servers, server, exec] as ToolDefinition[];
   return [servers, server, exec, tasks, taskCreate, taskDelete] as ToolDefinition[];
 }
 
 export const toolNames = ["srvmon_servers", "srvmon_server", "srvmon_exec", "srvmon_tasks", "srvmon_task_create", "srvmon_task_delete"];
+
+/** The tools of a read-only diagnosis run. */
+export const diagnoseToolNames = ["srvmon_servers", "srvmon_server", "srvmon_exec"];

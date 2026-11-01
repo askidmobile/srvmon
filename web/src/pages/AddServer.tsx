@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Hotkey, Shell } from "@/components/Shell";
 import { Button } from "@/components/ui/button";
+import { Check } from "@/components/ui/check";
+import { SUDO_MODES, SudoPicker } from "@/components/SudoMode";
 import { Panel } from "@/components/ui/panel";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
@@ -10,6 +12,7 @@ import {
   type OnboardLine,
   type ProbeResult,
   type SetupKey,
+  type SudoMode as SudoModeT,
   type NewServerCard,
   type ServerView,
 } from "@/lib/api";
@@ -80,34 +83,6 @@ function Field({ label, htmlFor, children }: { label: string; htmlFor: string; c
       </label>
       {children}
     </div>
-  );
-}
-
-function Check({
-  checked,
-  onChange,
-  disabled,
-  children,
-}: {
-  checked: boolean;
-  onChange: (v: boolean) => void;
-  disabled?: boolean;
-  children: React.ReactNode;
-}) {
-  return (
-    <label className={cn("flex cursor-pointer items-start gap-2", disabled && "cursor-default opacity-60")}>
-      <input
-        type="checkbox"
-        className="sr-only"
-        checked={checked}
-        disabled={disabled}
-        onChange={(e) => onChange(e.target.checked)}
-      />
-      <span className={cn("shrink-0 whitespace-pre", checked ? "text-primary" : "text-muted-foreground")} aria-hidden>
-        {checked ? "[x]" : "[ ]"}
-      </span>
-      <span>{children}</span>
-    </label>
   );
 }
 
@@ -216,7 +191,7 @@ export function AddServer({
   const [passphrase, setPassphrase] = useState("");
   const [setupKey, setSetupKey] = useState<SetupKey | null>(null);
   const [copied, setCopied] = useState(false);
-  const [sudo, setSudo] = useState(true);
+  const [sudoMode, setSudoMode] = useState<SudoModeT>("limited");
   const [disablePassword, setDisablePassword] = useState(true);
   const [installAgent, setInstallAgent] = useState(true);
   const [probe, setProbe] = useState<ProbeResult | null>(null);
@@ -329,7 +304,7 @@ export function AddServer({
         passphrase: method === "key" ? pp : "",
         setup_key: method === "panel_key" ? (setupKey?.id ?? "") : "",
         host_key: probe.host_key,
-        sudo,
+        sudo_mode: sudoMode,
         disable_password: disablePassword,
         install_agent: installAgent,
       });
@@ -786,9 +761,14 @@ export function AddServer({
                 <Check checked={installAgent} onChange={setInstallAgent} disabled={locked}>
                   {t("install srvmon-agent")}
                 </Check>
-                <Check checked={sudo} onChange={setSudo} disabled={locked}>
-                  {t("passwordless sudo for srvmon")} <span className="text-xs text-muted-foreground">({t("root in the terminal")})</span>
-                </Check>
+                <div className="flex flex-col gap-1">
+                  <span className="text-muted-foreground">{t("sudo for srvmon")}</span>
+                  <SudoPicker value={sudoMode} onChange={setSudoMode} disabled={locked} />
+                  <span className="text-xs text-muted-foreground">
+                    {t(SUDO_MODES.find((m) => m.v === sudoMode)?.hint ?? "")}
+                    {sudoMode !== "none" && <> · {t("can be changed later in the server passport")}</>}
+                  </span>
+                </div>
                 <Check checked={disablePassword} onChange={setDisablePassword} disabled={locked}>
                   {t("turn off password sign-in")}
                 </Check>

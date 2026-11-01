@@ -33,12 +33,20 @@ const (
 	keepHistory = 90 * 24 * time.Hour
 	// eventRetry: how long an undelivered event is still worth sending.
 	eventRetry = 12 * time.Hour
+	// forecastStale: disk forecasts older than this are not evaluated
+	// (VictoriaMetrics unreachable).
+	forecastStale = 3 * metrics.ForecastEvery
+	// smartStale: agents read S.M.A.R.T. every 30 minutes.
+	smartStale = 2 * time.Hour
 )
 
 // Notification is an alert that fired, resolved or an event.
 type Notification struct {
 	Alert    store.Alert
 	Resolved bool
+	// Diagnosis, when set, is the AI agent's read-only diagnosis of an alert
+	// already notified: a follow-up to that notification.
+	Diagnosis string
 }
 
 // Notifier delivers notifications. Notify must not block; it returns false
@@ -74,10 +82,12 @@ type Engine struct {
 	pending  map[condKey]time.Time
 	started  time.Time
 	notifier Notifier
+	onFire   func(store.Alert)
 
-	restarts *restartTracker
-	checks   CheckSource
-	lastEval atomic.Int64 // unix nanos of the last successful Evaluate in Run
+	restarts  *restartTracker
+	forecasts *metrics.Forecasts
+	checks    CheckSource
+	lastEval  atomic.Int64 // unix nanos of the last successful Evaluate in Run
 }
 
 // CheckSource gives the latest results of the HTTP/TCP checks of a server.
@@ -107,6 +117,47 @@ func New(st *store.Store, latest *metrics.Latest, log *slog.Logger) *Engine {
 func (e *Engine) SetNotifier(n Notifier) {
 	e.mu.Lock()
 	e.notifier = n
+	e.mu.Unlock()
+}
+
+// OnFire sets a hook called for every new firing alert (after its
+// notification was handed over). It runs under the engine lock: it must not
+// block or call back into the engine.
+func (e *Engine) OnFire(f func(store.Alert)) {
+	e.mu.Lock()
+	e.onFire = f
+	e.mu.Unlock()
+}
+
+// NotifyDiagnosis sends the AI diagnosis of an alert where its notification
+// went. Nothing is sent when the alert was not notified (web only, silenced,
+// held back), the silence started meanwhile, or quiet hours hold back a
+// noncritical one.
+func (e *Engine) NotifyDiagnosis(ctx context.Context, alertID int64, text string) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	a, err := e.st.GetAlert(ctx, alertID)
+	if err != nil || !a.Notified || a.Channel != store.ChanTelegram || e.notifier == nil {
+		return false
+	}
+	until, err := e.st.SilencedUntil(ctx, store.SilenceKey{RuleID: a.RuleID, ServerID: a.ServerID, Subject: a.Subject}, e.now())
+	if err != nil || !until.IsZero() {
+		return false
+	}
+	// Quiet hours hold back everything but critical alerts; a diagnosis is
+	// not worth waking up for either (it stays in the panel).
+	if a.Severity != store.SevCrit {
+		if q, err := LoadQuiet(ctx, e.st); err != nil || q.Active(e.now()) {
+			return false
+		}
+	}
+	return e.notifier.Notify(Notification{Alert: a, Diagnosis: text})
+}
+
+// SetForecasts sets where disk fill forecasts come from (rule disk_fill).
+func (e *Engine) SetForecasts(f *metrics.Forecasts) {
+	e.mu.Lock()
+	e.forecasts = f
 	e.mu.Unlock()
 }
 
@@ -291,6 +342,9 @@ func (e *Engine) Evaluate(ctx context.Context) error {
 				}
 				e.log.Info("alert firing", "id", a.ID, "kind", a.Kind, "server", a.ServerName, "subject", a.Subject)
 				e.notify(ctx, a, false)
+				if e.onFire != nil {
+					e.onFire(a)
+				}
 			}
 		}
 	}
@@ -421,6 +475,35 @@ func (e *Engine) check(r store.Rule, srv store.Server, now time.Time) ([]cond, b
 			}
 		}
 		return out, true
+	case store.KindDiskFill:
+		hours, at := e.forecasts.Server(srv.Name)
+		if at.IsZero() || now.Sub(at) > forecastStale || !fresh {
+			return nil, false
+		}
+		var out []cond
+		for mount, h := range hours {
+			if h < r.Threshold {
+				out = append(out, cond{subject: mount, message: i18n.T("disk %s will be full in about %s at the current growth rate",
+					mount, FormatDuration(time.Duration(h*float64(time.Hour))))})
+			}
+		}
+		return out, true
+	case store.KindSmart:
+		disks, at := e.latest.Smart(srv.ID)
+		if at.IsZero() || now.Sub(at) > smartStale {
+			return nil, false
+		}
+		var out []cond
+		for _, d := range disks {
+			if why := SmartProblem(d); why != "" {
+				name := d.Device
+				if d.Model != "" {
+					name += " (" + d.Model + ")"
+				}
+				out = append(out, cond{subject: d.Device, message: i18n.T("disk %s: %s", name, why)})
+			}
+		}
+		return out, true
 	case store.KindContainerDown:
 		if !fresh || !rep.DockerOK {
 			return nil, false
@@ -462,6 +545,35 @@ func (e *Engine) check(r store.Rule, srv store.Server, now time.Time) ([]cond, b
 		return e.checkTargets(r, srv, now)
 	}
 	return nil, false
+}
+
+// SmartProblem returns why a disk's S.M.A.R.T. data is alarming, or "".
+// Reallocated sectors alone do not count: many healthy disks carry a few
+// for years; pending and uncorrectable sectors mean data at risk now.
+func SmartProblem(d protocol.DiskHealth) string {
+	if d.Error != "" {
+		return ""
+	}
+	var why []string
+	if d.Passed != nil && !*d.Passed {
+		why = append(why, i18n.T("S.M.A.R.T. self-assessment FAILED"))
+	}
+	if d.CriticalWarning != 0 {
+		why = append(why, i18n.T("NVMe critical warning 0x%02x", d.CriticalWarning))
+	}
+	if d.Pending != nil && *d.Pending > 0 {
+		why = append(why, i18n.T("%d pending sectors", *d.Pending))
+	}
+	if d.Uncorrectable != nil && *d.Uncorrectable > 0 {
+		why = append(why, i18n.T("%d uncorrectable sectors", *d.Uncorrectable))
+	}
+	if d.PercentUsed != nil && *d.PercentUsed >= 100 {
+		why = append(why, i18n.T("endurance used %d%%", *d.PercentUsed))
+	}
+	if d.AvailableSpare != nil && d.SpareThreshold != nil && *d.SpareThreshold > 0 && *d.AvailableSpare <= *d.SpareThreshold {
+		why = append(why, i18n.T("spare capacity %d%% (threshold %d%%)", *d.AvailableSpare, *d.SpareThreshold))
+	}
+	return strings.Join(why, ", ")
 }
 
 // checkTargets evaluates the rules over the HTTP/TCP checks of a server.

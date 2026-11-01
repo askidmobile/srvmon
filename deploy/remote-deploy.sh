@@ -38,7 +38,7 @@ fi
 # Optional value passed from GitHub (vars.SRVMON_DOMAIN). Store it in .env
 # and drop it from the environment: an exported (even empty) variable would
 # override .env for every compose call.
-for key in SRVMON_DOMAIN SRVMON_PROXY SRVMON_HTTP_BIND SRVMON_AI_PROVIDER SRVMON_AI_MODEL; do
+for key in SRVMON_DOMAIN SRVMON_PROXY SRVMON_HTTP_BIND SRVMON_AI_PROVIDER SRVMON_AI_MODEL SRVMON_SMART; do
   if [[ -n "${!key:-}" ]]; then
     set_env "$key" "${!key}"
   fi
@@ -65,6 +65,15 @@ case "${PROXY:-caddy}" in
 esac
 PROXY="${PROXY:-caddy}"
 echo "proxy: $PROXY"
+
+# S.M.A.R.T. of the host's disks: the agent needs device access, added by an
+# override file only when asked for (SRVMON_SMART=1).
+if grep -q '^SRVMON_SMART=1$' .env; then
+  set_env COMPOSE_FILE docker-compose.yml:docker-compose.smart.yml
+  echo "smart: on"
+else
+  sed -i '/^COMPOSE_FILE=/d' .env
+fi
 
 # fail2ban runs in the compose stack (service fail2ban). Its ban chain follows
 # the proxy mode; sshd is watched only when the host writes /var/log/auth.log.

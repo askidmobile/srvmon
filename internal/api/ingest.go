@@ -58,7 +58,10 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 	if len(reports) > 0 {
 		s.maybeAutoUpdate(serverID, reports[len(reports)-1].AgentVersion)
 	}
-	writeJSON(w, http.StatusOK, protocol.IngestResponse{Detail: s.latest.Watching(serverID)})
+	writeJSON(w, http.StatusOK, protocol.IngestResponse{
+		Detail: s.latest.Watching(serverID),
+		Smart:  s.latest.WantsSmart(serverID),
+	})
 }
 
 type serverView struct {
@@ -70,7 +73,10 @@ type serverView struct {
 	AgentOutdated bool             `json:"agent_outdated,omitempty"`
 	AgentLatest   string           `json:"agent_latest,omitempty"`
 	AgentUpdate   *agentUpdateView `json:"agent_update,omitempty"`
-	Checks        *checkSummary    `json:"checks,omitempty"`
+	// DiskFull is hours until a growing filesystem is full, by mount
+	// point, when that is within metrics.ForecastHorizon.
+	DiskFull map[string]float64 `json:"disk_full_hours,omitempty"`
+	Checks   *checkSummary      `json:"checks,omitempty"`
 }
 
 func (s *Server) handleServers(w http.ResponseWriter, r *http.Request) {

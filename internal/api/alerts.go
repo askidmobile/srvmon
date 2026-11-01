@@ -11,6 +11,7 @@ import (
 	"github.com/askidmobile/srvmon/internal/alerts"
 	"github.com/askidmobile/srvmon/internal/heartbeat"
 	"github.com/askidmobile/srvmon/internal/i18n"
+	"github.com/askidmobile/srvmon/internal/notify"
 	"github.com/askidmobile/srvmon/internal/store"
 	"github.com/askidmobile/srvmon/internal/telegram"
 )
@@ -31,6 +32,10 @@ func (s *Server) alertRoutes(mux *http.ServeMux) {
 	h("PUT /api/notify/quiet", s.handleQuietSave)
 	h("PUT /api/notify/heartbeat", s.handleHeartbeatSave)
 	h("POST /api/notify/heartbeat/test", s.handleHeartbeatTest)
+	h("POST /api/notify/channels", s.handleChannelCreate)
+	h("PUT /api/notify/channels/{id}", s.handleChannelUpdate)
+	h("DELETE /api/notify/channels/{id}", s.handleChannelDelete)
+	h("POST /api/notify/channels/{id}/test", s.handleChannelTest)
 }
 
 func pathID(r *http.Request) (int64, bool) {
@@ -65,6 +70,10 @@ func (s *Server) handleAlerts(w http.ResponseWriter, r *http.Request) {
 		s.internalError(w, "count alerts", err)
 		return
 	}
+	if err := s.store.AttachDiagnoses(r.Context(), open, recent); err != nil {
+		s.internalError(w, "alert diagnoses", err)
+		return
+	}
 	writeJSON(w, http.StatusOK, alertsView{Open: open, Recent: recent, Last24h: n})
 }
 
@@ -74,7 +83,9 @@ type alertSummary struct {
 	Crit     int           `json:"crit"`
 	Last24h  int           `json:"last24h"`
 	Telegram string        `json:"telegram"` // off | ok | error
-	Latest   []store.Alert `json:"latest"`   // newest open alerts, up to 5
+	Channels int           `json:"channels"` // enabled Shoutrrr channels
+	Failing  int           `json:"channels_failing"`
+	Latest   []store.Alert `json:"latest"` // newest open alerts, up to 5
 }
 
 func (s *Server) telegramState() string {
@@ -105,6 +116,9 @@ func (s *Server) handleAlertSummary(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out := alertSummary{Open: len(open), Last24h: n, Telegram: s.telegramState(), Latest: open[:min(5, len(open))]}
+	if s.hub != nil {
+		out.Channels, out.Failing = s.hub.Health()
+	}
 	for _, a := range open {
 		if a.Severity == store.SevCrit {
 			out.Crit++
@@ -191,6 +205,11 @@ func validateRule(r *store.Rule) string {
 		if r.DurationSec < 60 {
 			return i18n.T("the restart counting window is at least 1 minute")
 		}
+	case store.KindDiskFill:
+		if r.Threshold < 1 || r.Threshold > 24*30 {
+			return i18n.T("threshold: from 1 hour to 30 days (720 hours)")
+		}
+		r.DurationSec = 0
 	case store.KindPaymentDue:
 		if r.Threshold < 0 || r.Threshold > 60 || r.Threshold != float64(int(r.Threshold)) {
 			return i18n.T("threshold: from 0 to 60 days")
@@ -307,6 +326,11 @@ type notifyView struct {
 	Telegram  telegram.Status   `json:"telegram"`
 	Quiet     alerts.Quiet      `json:"quiet"`
 	Heartbeat *heartbeat.Status `json:"heartbeat,omitempty"`
+	Channels  []notify.View     `json:"channels"`
+	// Services are the URL schemes Shoutrrr knows; ChannelsOK is false
+	// without a master key to seal channel URLs.
+	Services   []string `json:"services"`
+	ChannelsOK bool     `json:"channels_ok"`
 }
 
 func (s *Server) handleNotify(w http.ResponseWriter, r *http.Request) {
@@ -315,13 +339,16 @@ func (s *Server) handleNotify(w http.ResponseWriter, r *http.Request) {
 		s.internalError(w, "load quiet", err)
 		return
 	}
-	v := notifyView{Quiet: q}
+	v := notifyView{Quiet: q, Channels: []notify.View{}, Services: notify.Services()}
 	if s.bot != nil {
 		v.Telegram = s.bot.Status()
 	}
 	if s.heartbeat != nil {
 		hb := s.heartbeat.Status()
 		v.Heartbeat = &hb
+	}
+	if s.hub != nil {
+		v.Channels, v.ChannelsOK = s.hub.List(), s.hub.Configured()
 	}
 	writeJSON(w, http.StatusOK, v)
 }
@@ -404,4 +431,121 @@ func (s *Server) handleQuietSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, q)
+}
+
+// --- Shoutrrr channels ---
+
+type channelReq struct {
+	Name        string  `json:"name"`
+	URL         *string `json:"url"` // absent or "" on update: keep
+	MinSeverity string  `json:"min_severity"`
+	Enabled     bool    `json:"enabled"`
+}
+
+func (c channelReq) input() notify.Input {
+	return notify.Input{Name: c.Name, URL: c.URL, MinSeverity: c.MinSeverity, Enabled: c.Enabled}
+}
+
+// channelError writes the response for a hub error; it reports false on nil.
+func (s *Server) channelError(w http.ResponseWriter, what string, err error) bool {
+	var ve *notify.ValidationError
+	switch {
+	case err == nil:
+		return false
+	case errors.As(err, &ve):
+		s.writeValidation(w, ve.Msg)
+	case errors.Is(err, notify.ErrNotFound):
+		writeError(w, http.StatusNotFound, "not_found")
+	case errors.Is(err, notify.ErrNoSecrets):
+		writeError(w, http.StatusServiceUnavailable, "no_master_key")
+	case errors.Is(err, notify.ErrTooMany):
+		s.writeValidation(w, i18n.T("at most %d notification channels", notify.MaxChannels))
+	default:
+		s.internalError(w, what, err)
+	}
+	return true
+}
+
+func (s *Server) hubOr503(w http.ResponseWriter) bool {
+	if s.hub == nil {
+		writeError(w, http.StatusServiceUnavailable, "notify_unavailable")
+		return false
+	}
+	return true
+}
+
+func (s *Server) handleChannelCreate(w http.ResponseWriter, r *http.Request) {
+	if !s.hubOr503(w) {
+		return
+	}
+	var req channelReq
+	if err := readJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request")
+		return
+	}
+	v, err := s.hub.Add(r.Context(), req.input())
+	if s.channelError(w, "add channel", err) {
+		return
+	}
+	_ = s.store.Audit(r.Context(), s.clientIP(r), "notify_channel_add", fmt.Sprintf("%d %s %s", v.ID, v.Service, v.Name))
+	writeJSON(w, http.StatusCreated, v)
+}
+
+func (s *Server) handleChannelUpdate(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(r)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "bad_id")
+		return
+	}
+	if !s.hubOr503(w) {
+		return
+	}
+	var req channelReq
+	if err := readJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request")
+		return
+	}
+	v, err := s.hub.Update(r.Context(), id, req.input())
+	if s.channelError(w, "update channel", err) {
+		return
+	}
+	_ = s.store.Audit(r.Context(), s.clientIP(r), "notify_channel_update", fmt.Sprintf("%d %s %s", v.ID, v.Service, v.Name))
+	writeJSON(w, http.StatusOK, v)
+}
+
+func (s *Server) handleChannelDelete(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(r)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "bad_id")
+		return
+	}
+	if !s.hubOr503(w) {
+		return
+	}
+	if s.channelError(w, "delete channel", s.hub.Delete(r.Context(), id)) {
+		return
+	}
+	_ = s.store.Audit(r.Context(), s.clientIP(r), "notify_channel_delete", strconv.FormatInt(id, 10))
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+func (s *Server) handleChannelTest(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(r)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "bad_id")
+		return
+	}
+	if !s.hubOr503(w) {
+		return
+	}
+	err := s.hub.Test(r.Context(), id)
+	if errors.Is(err, notify.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "not_found")
+		return
+	}
+	if err != nil {
+		s.writeValidation(w, i18n.T("not sent: %s", err.Error()))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }

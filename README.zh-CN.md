@@ -16,17 +16,22 @@
 ## 功能
 
 - **总览。** 一张表展示所有服务器：CPU、内存和磁盘条形图，运行/总容器数（失败的会标出），运行时间，内存大小，下次主机续费金额及日期，以及最新告警。可按分组筛选，一键打开终端。快捷键：`1` 总览、`3` 终端、`4` 代理、`5` 告警、`6` 设置。
-- **指标与容器。** 每台服务器上运行一个小型 Go 代理（`srvmon-agent`），从 `/proc` 读取 CPU、内存、swap、负载、磁盘、网络和运行时间，通过 docker socket（只读）读取容器信息并推送到面板。面板不可达时最多缓存一小时。指标存储在 VictoriaMetrics 中。
-- **服务器详情页。** 按核心的 CPU、内存、磁盘、网络、进程、容器状态/健康检查/重启次数、syslog 与 docker 日志，页面打开期间实时刷新。
+- **指标与容器。** 每台服务器上运行一个小型 Go 代理（`srvmon-agent`），从 `/proc` 读取 CPU、内存、swap、负载、磁盘、网络和运行时间，通过 `srvmon-dockerproxy`（经过过滤的只读 Docker API：不能写入，也看不到容器的环境变量）读取容器信息并推送到面板。面板不可达时最多缓存一小时。指标存储在 VictoriaMetrics 中。
+- **服务器详情页。** 按核心的 CPU、内存、磁盘、网络、进程、容器状态/健康检查/重启次数、syslog 与 docker 日志，页面打开期间实时刷新。点击容器可查看其 CPU 和内存历史（1 小时到 7 天；每次推送都从容器的 cgroup 读取用量，因此即使无人查看也会记录历史）。每个磁盘都会显示基于最近 6 小时线性回归的写满预测（“约 13 小时后写满”）。
+- **磁盘健康（S.M.A.R.T.）。** 可选，按服务器开启：PASSED/FAILED、温度、通电时间、重映射/待映射/不可纠正扇区（SATA），或磨损、备用空间和介质错误（NVMe）。代理每 30 分钟自行读取一次，不会唤醒休眠的磁盘。由于需要对磁盘的原始读取权限，默认关闭。可在服务器页面一键开启（面板通过 SSH 以 `CAP_SYS_RAWIO`、`CAP_SYS_ADMIN` 和 SATA/NVMe 块设备只读权限重建代理容器）；监控服务器本身用 `SRVMON_SMART=1`（GitHub 变量或 `.env`）；手动安装则取消 `deploy/agent/docker-compose.yml` 中相应注释。
 - **服务器档案与续费。** 每台服务器有一份档案：描述、项目、分组、标签、提供商、套餐、费用（含币种）和下次付款日期。续费信息显示在总览中、Telegram（`/bills`）里，并会在到期前几天发出告警。
 - **网站、端口与证书检查。** 在服务器页面添加其 URL 和端口；面板每分钟从自身网络检查一次（HTTP 状态、TCP 连接、TLS 握手），在目标无法访问、TLS 证书或域名注册即将到期时发出告警。域名到期日期（RDAP，没有 RDAP 的后缀用 WHOIS）显示在档案中的续费信息旁和 `/bills` 中。
 - **添加向导。** 校验 SSH 主机密钥，用密码或你自己的私钥登录一次。srvmon 创建 `srvmon` 用户及其 ed25519 密钥，安装代理，并可关闭密码登录。一次性密码或密钥不会被保存。
-- **Web 终端。** xterm.js ↔ WebSocket ↔ `srvmon-server` 内的 SSH 客户端 ↔ sshd。支持多标签、窗口缩放、`docker exec` 进入容器。终端旁边是 AI 代理面板（`F9` 显示或隐藏），在该服务器的上下文中工作。私钥从不离开监控服务器，并以 XChaCha20-Poly1305 加密存储。
+- **Web 终端。** xterm.js ↔ WebSocket ↔ `srvmon-server` 内的 SSH 客户端 ↔ sshd。支持多标签、分屏（最多四个会话并排或上下排列）、窗口缩放、`docker exec` 进入容器。终端旁边是 AI 代理面板（`F9` 显示或隐藏），在该服务器的上下文中工作。私钥从不离开监控服务器，并以 XChaCha20-Poly1305 加密存储。
+- **SFTP 文件。** 终端旁边的文件面板（`F8`）：浏览、下载、上传（支持拖放）、新建文件夹、重命名和删除，权限与 `srvmon` 用户相同。每次修改和下载都会写入审计日志。
+- **会话录制。** 每个网页终端会话都以 [asciinema](https://asciinema.org) 格式录制，可在面板中回放（暂停、拖动进度、1–8 倍速）或下载为 `.cast` 文件。只记录输出和窗口大小变化，不记录按键，因此在隐藏提示符下输入的密码不会被录入。输出中仍可能包含机密，因此录像用主密钥加密，并在保留期满后删除（默认 30 天）。可以在 `[6] 设置` 中关闭录制、修改保留期和单个会话的大小上限。
 - **AI 代理。** 基于 [pi](https://pi.dev) SDK，支持任意提供商（DeepSeek、Anthropic、OpenAI、OpenRouter、Google、Ollama，以及任何 OpenAI / Anthropic 兼容接口）。只读命令直接执行；任何会修改服务器的命令都必须经你明确批准，策略由 `srvmon-server` 而非模型执行。每台服务器有独立的对话上下文，对话保留历史，每个对话可单独选择模型。定时任务（cron）结果可发送到 Telegram，也可以在 Telegram 中用 `/ask` 向代理提问。
 - **MCP 服务器。** Claude Desktop、Cursor 和 Claude Code 使用带权限、可撤销的令牌连接 `/mcp`，工具相同，变更同样需要在面板或 Telegram 中确认。
-- **告警与 Telegram。** 代理离线、容器停止或不健康、频繁重启、CPU、磁盘、网站和端口无法访问、证书和域名即将到期、主机续费提醒、fail2ban 封禁、登录尝试。规则可编辑（阈值、持续时间、级别、渠道：Telegram 或仅面板）。按你的时区设置静默时段（严重告警仍会发送），支持确认与临时静音，保留 90 天历史。机器人命令：`/status`、`/server`、`/alerts`、`/ack`、`/bills`、`/ask`。
+- **告警与 Telegram。** 代理离线、容器停止或不健康、频繁重启、CPU、磁盘、磁盘即将写满、S.M.A.R.T. 异常、网站和端口无法访问、证书和域名即将到期、主机续费提醒、fail2ban 封禁、登录尝试。规则可编辑（阈值、持续时间、级别、渠道：通知或仅面板）。按你的时区设置静默时段（严重告警仍会发送），支持确认与临时静音，保留 90 天历史，严重告警附带 AI 诊断。机器人命令：`/status`、`/server`、`/alerts`、`/ack`、`/bills`、`/ask`。
+- **更多通知通道。** 除 Telegram 外，告警还可以发送到邮件、ntfy、Discord、Gotify、Slack、Matrix、Pushover、Webhook 以及 [Shoutrrr](https://shoutrrr.nickfedor.com/) 支持的其他服务，每个通道可设置最低级别。
 - **面板心跳（dead man's switch）。** 面板每分钟自检一次并 ping 一个外部 URL，例如 [healthchecks.io](https://healthchecks.io)。如果面板宕机，ping 会停止，该服务会通过邮件或其自身渠道提醒您。
-- **安全。** 密码（argon2id）+ TOTP 或备用码，无需用户名。限流、审计日志，以及面板和 sshd 的 fail2ban 规则。
+- **备份与应急访问。** 按计划将面板数据库加密备份到任意 S3 兼容存储（AWS、Yandex Object Storage、R2、B2、MinIO），支持保留份数，失败时 Telegram 告警；主密钥需凭 TOTP 验证码单独导出。您自己的 SSH 公钥会保存在每台服务器的 `authorized_keys` 中，面板丢失也不会被锁在服务器外。详见 [docs/backup.md](docs/backup.md)。
+- **安全。** 密码（argon2id）+ TOTP 或备用码，无需用户名。限流、审计日志，以及面板和 sshd 的 fail2ban 规则。在服务器上只有 `srvmon-dockerproxy` 容器能访问 docker socket，`srvmon` 用户默认只有受限 sudo（见[服务器访问权限](#服务器访问权限)）。
 
 ## 截图
 
@@ -82,14 +87,14 @@ sudo docker compose exec -it server /srvmon-server init   # 设置密码并显�
 
 如果主机上已有 nginx（或其他代理）占用 80/443，在 `.env` 中设置 `SRVMON_PROXY=external`：此时不启动 Caddy，srvmon 监听 `127.0.0.1:8088`（`SRVMON_HTTP_BIND`），在你的 nginx 中引入 [deploy/nginx/srvmon.conf](deploy/nginx/srvmon.conf)。
 
-请将 `/data` 卷与 `/data/master.key` 一同备份：没有主密钥就无法解密已保存的 SSH 密钥。
+备份：在「设置 → 备份」中配置 S3 兼容存储，并在同一处导出主密钥（或运行 `docker compose exec server /srvmon-server master-key`），离线保存。备份用它加密且从不包含它。恢复步骤与应急 SSH 密钥见 [docs/backup.md](docs/backup.md)。
 
 ## 从你的 fork 自动部署
 
 1. 按上文准备主机（`install-host.sh`）并解析域名。
 2. 在 GitHub：Settings → Environments → `production`：
    - secrets：`DEPLOY_HOST`、`DEPLOY_USER`、`DEPLOY_SSH_KEY`（部署私钥）、`DEPLOY_KNOWN_HOSTS`（`ssh-keyscan <host>` 的输出），可选 `DEPLOY_PORT`、`GHCR_PULL_TOKEN`、`AI_API_KEY`；
-   - variables：`SRVMON_DOMAIN`，可选 `SRVMON_PROXY`、`SRVMON_HTTP_BIND`、`DEPLOY_PATH`（默认 `/opt/srvmon`）；
+   - variables：`SRVMON_DOMAIN`，可选 `SRVMON_PROXY`、`SRVMON_HTTP_BIND`、`SRVMON_SMART`（`1`：为监控服务器开启 S.M.A.R.T.）、`DEPLOY_PATH`（默认 `/opt/srvmon`）；
    - 将该环境限制为仅 `main` 分支可部署（Deployment branches）。
 3. 每次推送到 `main`：CI → Release（镜像 `ghcr.io/<owner>/srvmon-server|agent|ai`，标签 `sha-xxxxxxx` 和 `latest`）→ Deploy（`docker compose pull && up -d`，等待健康检查，失败则回滚到上一个标签）。未设置 `DEPLOY_HOST` 时跳过部署。
 4. 首次部署后执行一次：`cd /opt/srvmon && docker compose exec -it server /srvmon-server init`。
@@ -98,7 +103,7 @@ sudo docker compose exec -it server /srvmon-server init   # 设置密码并显�
 
 ## 添加服务器
 
-面板中的向导（`#/add`）：填写名称、`host:port`、项目、分组、标签；校验并确认主机密钥指纹；选择一次性登录方式（密码、你自己的私钥，或把面板公钥加入 `authorized_keys`）。随后 srvmon 创建 `srvmon` 用户、验证密钥登录、以 `/etc/srvmon/agent.token`（0600）中的令牌启动 `srvmon-agent` 容器，并可选择关闭 `PasswordAuthentication`。
+面板中的向导（`#/add`）：填写名称、`host:port`、项目、分组、标签；校验并确认主机密钥指纹；选择一次性登录方式（密码、你自己的私钥，或把面板公钥加入 `authorized_keys`）。随后 srvmon 创建 `srvmon` 用户（docker 组，sudo 模式可选，见下文）、验证密钥登录、以 `/etc/srvmon/agent.token`（0600）中的令牌启动 `srvmon-agent` 容器，并可选择关闭 `PasswordAuthentication`。
 
 不使用向导时：
 
@@ -124,13 +129,21 @@ SRVMON_URL=https://mon.example.com SRVMON_TOKEN=a_... docker compose up -d
 - 域名到期时间每天通过 RDAP（IANA 引导文件）查询两次，没有 RDAP 的后缀（如 `.ru`、`.рф`）使用 WHOIS。监控服务器需要能访问外网 HTTPS 和 TCP 43 端口。
 - 告警规则：“网站 / 端口无法访问”持续 2 分钟（crit），“证书 ≤ 14 天内到期”和“域名 ≤ 30 天内到期”（warn）。阈值可在告警页面修改。
 
+## 服务器访问权限
+
+面板在受管服务器上能做什么、不能做什么：
+
+- **代理。** `srvmon-agent` 不接触 docker socket。socket 由单独的 `srvmon-dockerproxy` 容器持有（同一镜像，无网络、无 capabilities、只读根文件系统），它只向代理提供 `GET /_ping`、`/version`、`/containers/json`、`/containers/{id}/json` 和 `/containers/{id}/logs`；容器 inspect 结果中的 `Env` 会被删除，环境变量中的密钥不会离开服务器。主机的 `/run`（docker 和 containerd 的 socket）在代理的 `/host` 中被隐藏。面板更新代理时会自动把旧代理迁移到这种结构。
+- **`srvmon` 的 sudo。** 三种模式，在向导中选择，并可在服务器档案中切换：**无 sudo**；**受限**（默认：`systemctl status/start/stop/restart/reload/…`、`journalctl`、`service`、`docker`；不能 `sudo -i`，不能编辑或启用 unit）；**完整**（`NOPASSWD:ALL`，终端中为 root）。面板通过 `sudo -n -l` 实时读取当前模式；此前添加的服务器保持完整 sudo，直到你手动切换。
+- **边界说明。** `srvmon` 仍在 `docker` 组中，而 docker 权限等同于 root。受限 sudo 防的是误操作（你自己的，或你批准的 AI 智能体命令），而不是已经控制面板的人。也正因如此，面板可以重新放宽 sudo：它先在服务器上用 `visudo -c` 检查文件，再通过代理镜像的一次性容器写入 `/etc/sudoers.d/srvmon`。
+
 ## 告警与 Telegram
 
 `[5] 告警` 页面（`#/alerts`）显示活动告警（可“确认”或“静音 1 小时”）、规则、Telegram 机器人、静默时段和 90 天历史。
 
-- 默认规则：代理静默超过 2 分钟（crit），容器停止或不健康 1 分钟（crit），每小时重启超过 2 次，CPU > 90% 持续 5 分钟，内存 > 95% 持续 5 分钟（默认关闭，仅面板），磁盘 > 85%，3 天内需续费，网站或端口无法访问 2 分钟（crit），TLS 证书 14 天内到期，域名 30 天内到期；以及事件：监控服务器上的 fail2ban 封禁、面板密码爆破、面板登录。
-- 每条规则都可以关闭、修改（阈值、持续时间、级别 crit/warn/info）或指定渠道：`tg`（Telegram 和面板）或 `web`（仅面板）。`+ 规则` 可添加新规则。以退出码 0 停止的容器不算告警。
-- 静默时段（例如 `Europe/Moscow` 时区 01:00–07:00）内 Telegram 通知会延后到时段结束；严重告警始终发送。
+- 默认规则：代理静默超过 2 分钟（crit），容器停止或不健康 1 分钟（crit），每小时重启超过 2 次，CPU > 90% 持续 5 分钟，内存 > 95% 持续 5 分钟（默认关闭，仅面板），磁盘 > 85%，按当前增长速度 24 小时内写满，S.M.A.R.T. 异常（自检失败、待映射或不可纠正扇区、NVMe 严重警告、备用空间或寿命耗尽；crit），3 天内需续费，网站或端口无法访问 2 分钟（crit），TLS 证书 14 天内到期，域名 30 天内到期；以及事件：监控服务器上的 fail2ban 封禁、面板密码爆破、面板登录。
+- 每条规则都可以关闭、修改（阈值、持续时间、级别 crit/warn/info）或指定渠道：`notify`（面板、Telegram 和通知通道）或 `web`（仅面板）。`+ 规则` 可添加新规则。以退出码 0 停止的容器不算告警。
+- 静默时段（例如 `Europe/Moscow` 时区 01:00–07:00）内通知会延后到时段结束；严重告警始终发送。
 
 机器人设置：
 
@@ -140,6 +153,22 @@ SRVMON_URL=https://mon.example.com SRVMON_TOKEN=a_... docker compose up -d
 4. 发送测试消息。
 
 如果监控服务器无法访问 `api.telegram.org`，可以用 Cloudflare Worker 搭一个代理并设置 `SRVMON_TELEGRAM_API`，见 [docs/telegram-proxy.md](docs/telegram-proxy.md)。
+
+### 通知通道（Shoutrrr）
+
+同一页面的“通知通道”面板可以用 [Shoutrrr](https://shoutrrr.nickfedor.com/) URL 添加更多告警去处：
+
+| 服务 | URL |
+|---|---|
+| 邮件 | `smtp://user:password@smtp.example.com:587/?from=srvmon@example.com&to=me@example.com` |
+| ntfy | `ntfy://ntfy.sh/my-secret-topic` |
+| Discord | `discord://token@webhook-id` |
+| Gotify | `gotify://gotify.example.com/app-token` |
+| Webhook | `generic+https://hooks.example.com/srvmon` |
+
+- 每个通道有最低级别：`crit+`（仅严重）、`warn+` 或全部。渠道为 `notify` 的告警会发送到 Telegram 以及所有符合条件的已启用通道；静默时段和静音对所有通道生效。
+- URL 中包含凭据，因此会用主密钥加密存储，面板只显示服务和主机。“测试”会发送一条测试消息；通道旁显示最后发送时间或错误，页头显示 `ch: N`，失败的通道标红。
+- 发送失败会重试三次。AI 代理任务的告警也会发送到这些通道。
 
 ### 面板心跳（dead man's switch）
 
@@ -160,6 +189,7 @@ SRVMON_URL=https://mon.example.com SRVMON_TOKEN=a_... docker compose up -d
 - **命令确认。** 只读命令（`docker ps/logs/inspect`、`df`、`journalctl`、`systemctl status` …）立即执行。任何会修改服务器的命令都会显示为“⚠ 确认”卡片，只有点击“✓ 执行”后才会运行。由 `srvmon-server`（`internal/aiagent/policy.go`）而不是模型来决定。所有命令及其结果都会记入确认日志。
 - **任务。** 例如“每 15 分钟检查容器重启，如果一小时内超过 2 次就发到 Telegram”会变成 cron 为 `*/15 * * * *`（UTC）的任务。任务显示在“任务”标签页中，带告警的结果发送到 Telegram。
 - **Telegram。** 机器人会把代理的命令连同批准/拒绝按钮发给你确认，`/ask <问题>` 可直接在 Telegram 中向代理提问。
+- **告警诊断。** 严重告警触发时，代理会自行用只读命令（容器日志、`inspect`、`df`、`journalctl` …）排查，并以回复 Telegram 告警消息的方式发送可能的原因、依据和修复建议；诊断结果也显示在 `[5] 告警` 中对应告警下方，那里还有手动运行的“诊断”按钮。`srvmon-server` 会直接拒绝诊断中任何会修改服务器的命令（不请求确认），每次诊断最多 12 条命令、5 分钟，同时只运行一个，同一服务器上的同一告警 6 小时内最多诊断一次，并有每小时和每天的上限（默认 4 和 20）。设置 → 告警的 AI 诊断：开关、是否包括警告、上限以及单独（更便宜）的模型。
 
 在面板设置中启用：选择提供商（pi 目录中的任意一个或自定义兼容地址），填入 API 密钥（加密存储，不会返回给浏览器），加载并勾选模型，然后保存并应用。在面板保存设置之前，`srvmon-ai` 使用 `.env` 中的 `SRVMON_AI_PROVIDER`、`SRVMON_AI_MODEL`、`SRVMON_AI_API_KEY`。
 

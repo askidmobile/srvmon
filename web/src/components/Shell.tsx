@@ -10,7 +10,7 @@ import { cn } from "@/lib/utils";
 const nav: { key: string; label: string; to?: string; match: Route["name"][] }[] = [
   { key: "1", label: "overview", to: href.overview(), match: ["overview"] },
   { key: "2", label: "servers", match: ["server", "add"] },
-  { key: "3", label: "terminal", to: href.terminal(), match: ["terminal"] },
+  { key: "3", label: "terminal", to: href.terminal(), match: ["terminal", "recordings"] },
   { key: "4", label: "agent", to: href.agent(), match: ["agent"] },
   { key: "5", label: "alerts", to: href.alerts(), match: ["alerts"] },
   { key: "6", label: "settings", to: href.settings(), match: ["settings"] },
@@ -54,6 +54,12 @@ function AlertBadge() {
         <span className="text-muted-foreground">{t("no alerts")}</span>
       )}
       <span className={tg}>tg: {sum.telegram === "ok" ? "ok" : sum.telegram === "off" ? t("off") : t("error")}</span>
+      {sum.channels > 0 && (
+        <span className={sum.channels_failing > 0 ? "text-crit" : "text-muted-foreground"}>
+          ch: {sum.channels}
+          {sum.channels_failing > 0 ? ` (${sum.channels_failing} ✕)` : ""}
+        </span>
+      )}
     </a>
   );
 }

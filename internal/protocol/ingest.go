@@ -16,6 +16,37 @@ type Report struct {
 	Detail *Detail `json:"detail,omitempty"`
 	// Inventory is sent with the first report, then about once a minute.
 	Inventory *Inventory `json:"inventory,omitempty"`
+	// Smart is sent only by agents with S.M.A.R.T. enabled, after each
+	// read of the disks (every SmartEvery); other reports leave it nil.
+	Smart []DiskHealth `json:"smart,omitempty"`
+}
+
+// DiskHealth is the S.M.A.R.T. state of one physical disk. Fields the disk
+// does not report are nil.
+type DiskHealth struct {
+	Device string `json:"device"`         // sda, nvme0n1
+	Type   string `json:"type,omitempty"` // ata, nvme
+	Model  string `json:"model,omitempty"`
+	Serial string `json:"serial,omitempty"`
+	// Passed is the drive's overall self-assessment (ATA SMART RETURN
+	// STATUS; for NVMe: no critical warning bits set).
+	Passed       *bool    `json:"passed,omitempty"`
+	TempC        *float64 `json:"temp_c,omitempty"`
+	PowerOnHours *uint64  `json:"power_on_hours,omitempty"`
+	// ATA attributes (raw values): 5, 197, 198.
+	Reallocated   *uint64 `json:"reallocated,omitempty"`
+	Pending       *uint64 `json:"pending,omitempty"`
+	Uncorrectable *uint64 `json:"uncorrectable,omitempty"`
+	// NVMe health log.
+	PercentUsed     *uint64 `json:"percent_used,omitempty"`
+	AvailableSpare  *uint64 `json:"available_spare,omitempty"`
+	SpareThreshold  *uint64 `json:"spare_threshold,omitempty"`
+	MediaErrors     *uint64 `json:"media_errors,omitempty"`
+	CriticalWarning uint8   `json:"critical_warning,omitempty"`
+	// Error says why the disk was not read: "standby" (asleep, not woken
+	// up), "unsupported" (no SMART through this controller), "permission"
+	// (the agent container lacks the capabilities or device access).
+	Error string `json:"error,omitempty"`
 }
 
 // HostMetrics are the basic host-level metrics collected every interval.
@@ -123,6 +154,8 @@ type Inventory struct {
 	CPUModel      string   `json:"cpu_model,omitempty"`
 	DockerVersion string   `json:"docker_version,omitempty"`
 	IPs           []string `json:"ips,omitempty"`
+	// Smart: the agent runs with S.M.A.R.T. reads enabled.
+	Smart bool `json:"smart,omitempty"`
 }
 
 // IngestResponse is returned to the agent.
@@ -130,4 +163,8 @@ type IngestResponse struct {
 	// Detail asks the agent to send detailed data (processes, per-core CPU,
 	// logs) because someone has the server screen open.
 	Detail bool `json:"detail"`
+	// Smart asks an agent with S.M.A.R.T. enabled to read the disks now:
+	// the panel has no recent data (e.g. it was restarted). Agents without
+	// S.M.A.R.T. ignore it.
+	Smart bool `json:"smart,omitempty"`
 }

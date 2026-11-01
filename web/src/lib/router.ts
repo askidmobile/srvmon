@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 // wizard (with an id: give an existing card SSH access), #/term[/<id>] terminal,
 // #/agent[/<id>] AI agent (with an id: chat about that server).
 // #/alerts alerts, rules and Telegram. #/settings panel settings (AI).
+// #/rec[/<id>] terminal recordings (with an id: the player).
 export type Route =
   | { name: "overview" }
   | { name: "server"; id: number }
@@ -11,7 +12,8 @@ export type Route =
   | { name: "add"; id?: number }
   | { name: "agent"; id?: number }
   | { name: "alerts" }
-  | { name: "settings" };
+  | { name: "settings" }
+  | { name: "recordings"; id?: number };
 
 export function parseRoute(hash: string): Route {
   const parts = hash.replace(/^#\/?/, "").split("/").filter(Boolean);
@@ -30,6 +32,8 @@ export function parseRoute(hash: string): Route {
       return { name: "alerts" };
     case "settings":
       return { name: "settings" };
+    case "rec":
+      return Number.isInteger(id) && id > 0 ? { name: "recordings", id } : { name: "recordings" };
   }
   return { name: "overview" };
 }
@@ -55,6 +59,7 @@ export const href = {
   agent: (id?: number) => (id ? `#/agent/${id}` : "#/agent"),
   alerts: () => "#/alerts",
   settings: () => "#/settings",
+  recordings: (id?: number) => (id ? `#/rec/${id}` : "#/rec"),
 };
 
 export function navigate(to: string) {

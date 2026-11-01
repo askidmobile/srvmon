@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { Check } from "@/components/ui/check";
 import { Panel } from "@/components/ui/panel";
 import { ApiError, readBody } from "@/lib/api";
 import { t } from "@/lib/i18n";
@@ -211,12 +212,9 @@ export function McpPanel() {
         </div>
         <div className="flex flex-col gap-1">
           {data.scopes.map((s) => (
-            <label key={s} className="flex items-start gap-2 text-sm">
-              <input type="checkbox" className="mt-1" checked={scopes.includes(s)} onChange={() => toggle(s)} />
-              <span>
-                <span className="text-hi">{s}</span> <span className="text-muted-foreground">· {t(scopeText[s])}</span>
-              </span>
-            </label>
+            <Check key={s} className="text-sm" checked={scopes.includes(s)} onChange={() => toggle(s)}>
+              <span className="text-hi">{s}</span> <span className="text-muted-foreground">· {t(scopeText[s])}</span>
+            </Check>
           ))}
         </div>
         <div className="flex flex-wrap items-center gap-2">

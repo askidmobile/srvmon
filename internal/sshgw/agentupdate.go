@@ -46,7 +46,7 @@ var ErrNoPreviousAgent = errors.New("no previous agent to restore")
 
 // AgentCommit removes the previous agent kept by AgentUpdate.
 func AgentCommit(ctx context.Context, c *ssh.Client) error {
-	_, errOut, err := Run(ctx, c, "sh -s", strings.NewReader(dockerAccess+"$D rm -f srvmon-agent-old >/dev/null 2>&1 || true\n"))
+	_, errOut, err := Run(ctx, c, "sh -s", strings.NewReader(dockerAccess+"$D rm -f srvmon-agent-old srvmon-dockerproxy-old >/dev/null 2>&1 || true\n"))
 	if err != nil {
 		return i18n.Errorf("agent update: %s", firstLine(errOut, err))
 	}
@@ -72,42 +72,52 @@ elif sudo -n docker info >/dev/null 2>&1; then D="sudo -n docker"
 else echo srvmon:no-docker-access >&2; exit 3; fi
 `
 
-// agentRestoreScript replaces srvmon-agent with srvmon-agent-old.
+// agentRestoreScript replaces srvmon-agent with srvmon-agent-old, and the
+// docker proxy with srvmon-dockerproxy-old if the update replaced one. An
+// agent from before the proxy keeps running beside the new proxy, unused.
 const agentRestoreScript = `$D inspect srvmon-agent-old >/dev/null 2>&1 || { echo srvmon:no-old >&2; exit 6; }
 $D rm -f srvmon-agent >/dev/null 2>&1 || true
 $D rename srvmon-agent-old srvmon-agent
+if $D inspect srvmon-dockerproxy-old >/dev/null 2>&1; then
+  $D rm -f srvmon-dockerproxy >/dev/null 2>&1 || true
+  $D rename srvmon-dockerproxy-old srvmon-dockerproxy
+  $D start srvmon-dockerproxy >/dev/null
+fi
 $D start srvmon-agent >/dev/null
 `
 
-// agentUpdateScript must start the container with the same flags as
-// agentScript.
+// agentUpdateScript starts the containers with the same flags as
+// agentScript. An agent installed before srvmon-dockerproxy existed gets
+// the proxy here.
 func agentUpdateScript(a AgentInstall) string {
 	var b strings.Builder
 	b.WriteString(dockerAccess)
-	fmt.Fprintf(&b, "IMG=%s\nDEFURL=%s\nRU=%s\nRT=%s\n",
-		shq(a.Image), shq(a.URL), shq(a.RegistryUser), shq(a.RegistryToken))
+	fmt.Fprintf(&b, "IMG=%s\nDEFURL=%s\nRU=%s\nRT=%s\nSM=%s\n",
+		shq(a.Image), shq(a.URL), shq(a.RegistryUser), shq(a.RegistryToken), smartWanted(a.Smart))
 	b.WriteString(`$D inspect srvmon-agent >/dev/null 2>&1 || { echo srvmon:no-agent >&2; exit 3; }
 ENVS=$($D inspect -f '{{range .Config.Env}}{{println .}}{{end}}' srvmon-agent)
 printf '%s\n' "$ENVS" | grep -qx 'SRVMON_TOKEN_FILE=/etc/srvmon/agent.token' || {
   echo srvmon:not-panel >&2; exit 3; }
 URL=$(printf '%s\n' "$ENVS" | sed -n 's/^SRVMON_URL=//p' | head -n 1)
 [ -n "$URL" ] || URL=$DEFURL
-REG=${IMG%%/*}
+if [ "$SM" = keep ]; then
+  if printf '%s\n' "$ENVS" | grep -qx 'SRVMON_SMART=1'; then SM=1; else SM=0; fi
+fi
+` + smartScript + `REG=${IMG%%/*}
 if [ -n "$RU" ]; then printf '%s' "$RT" | $D login "$REG" -u "$RU" --password-stdin >/dev/null; fi
 pulled=0
 $D pull -q "$IMG" >/dev/null 2>&1 && pulled=1
 if [ -n "$RU" ]; then $D logout "$REG" >/dev/null 2>&1 || true; fi
 [ "$pulled" = 1 ] || { echo srvmon:pull-failed >&2; exit 4; }
-$D rm -f srvmon-agent-old >/dev/null 2>&1 || true
+$D rm -f srvmon-agent-old srvmon-dockerproxy-old >/dev/null 2>&1 || true
 $D rename srvmon-agent srvmon-agent-old
 $D stop srvmon-agent-old >/dev/null 2>&1 || true
-if $D run -d --name srvmon-agent --restart unless-stopped \
-  --network host --pid host --read-only --security-opt no-new-privileges=true \
-  -e SRVMON_URL="$URL" -e SRVMON_TOKEN_FILE=/etc/srvmon/agent.token \
-  -v /etc/srvmon/agent.token:/etc/srvmon/agent.token:ro \
-  -v /proc:/host/proc:ro -v /:/host:ro,rslave \
-  -v /var/run/docker.sock:/var/run/docker.sock:ro \
-  "$IMG" >/dev/null; then
+if $D inspect srvmon-dockerproxy >/dev/null 2>&1; then
+  $D rename srvmon-dockerproxy srvmon-dockerproxy-old
+  $D stop srvmon-dockerproxy-old >/dev/null 2>&1 || true
+fi
+if ` + dockerProxyRun + ` && \
+  ` + agentRun + `; then
   :
 else
 ` + agentRestoreScript + `  echo srvmon:run-failed >&2; exit 5

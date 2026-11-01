@@ -4,6 +4,22 @@
 name: srvmon-agent
 
 services:
+  # The only container with the docker socket: serves the agent a filtered
+  # read-only Docker API (GET containers/version/_ping, no Env in inspect).
+  dockerproxy:
+    image: ghcr.io/askidmobile/srvmon-agent:${SRVMON_TAG:-latest}
+    entrypoint: ["/srvmon-agent", "dockerproxy"]
+    restart: unless-stopped
+    network_mode: none
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges=true
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - dockerproxy:/run/srvmon
+
   agent:
     image: ghcr.io/askidmobile/srvmon-agent:${SRVMON_TAG:-latest}
     restart: unless-stopped
@@ -16,7 +32,22 @@ services:
       SRVMON_URL: ${SRVMON_URL:?set SRVMON_URL}
       SRVMON_TOKEN: ${SRVMON_TOKEN:?set SRVMON_TOKEN}
       SRVMON_INTERVAL: ${SRVMON_INTERVAL:-5s}
+      DOCKER_SOCK: /run/srvmon/docker.sock
     volumes:
       - /proc:/host/proc:ro
       - /:/host:ro,rslave
-      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # Docker API through the dockerproxy service below, read-only calls only.
+      - dockerproxy:/run/srvmon:ro
+    tmpfs:
+      # Hides the host's /run (docker and containerd sockets) from /host.
+      - /host/run:ro,size=64k
+    depends_on:
+      - dockerproxy
+    # Optional S.M.A.R.T. (disk health every 30 min): uncomment. The agent
+    # then gets raw read access to SATA (major 8) and NVMe (259) disks.
+    # environment: SRVMON_SMART: "1"   (add to the environment above)
+    # cap_add: [SYS_RAWIO, SYS_ADMIN]
+    # device_cgroup_rules: ["b 8:* r", "b 259:* r"]
+
+volumes:
+  dockerproxy:

@@ -163,9 +163,22 @@ async function req<T>(method: string, path: string, body?: unknown): Promise<T> 
   return data as T;
 }
 
+// Automatic AI diagnosis of alerts.
+export interface DiagnoseSettings {
+  enabled: boolean;
+  warn: boolean; // warnings too, not only critical alerts
+  per_hour: number;
+  per_day: number;
+  model: string; // "" = the default model
+}
+
 export const agentApi = {
+  diagnoseSettings: () => req<DiagnoseSettings>("GET", "/api/agent/diagnose"),
+  saveDiagnoseSettings: (d: DiagnoseSettings) => req<DiagnoseSettings>("PUT", "/api/agent/diagnose", d),
   status: () => req<AgentStatus>("GET", "/api/agent/status"),
   chats: () => req<AgentChat[]>("GET", "/api/agent/chats"),
+  // A chat about the alert's server that continues its AI diagnosis.
+  alertChat: (alertId: number) => req<AgentChat>("POST", `/api/alerts/${alertId}/chat`),
   newChat: (serverId?: number) => req<AgentChat>("POST", "/api/agent/chats", serverId ? { server_id: serverId } : {}),
   chat: (id: number) => req<{ chat: AgentChat; messages: AgentMessage[] }>("GET", `/api/agent/chats/${id}`),
   deleteChat: (id: number) => req<unknown>("DELETE", `/api/agent/chats/${id}`),
@@ -187,6 +200,27 @@ export const agentApi = {
     req<AIModelList>("POST", "/api/agent/models", s),
   test: (model?: string) => req<AITest>("POST", "/api/agent/test", { model: model ?? "" }),
 };
+
+// The chat open per server context ("all" without one), per browser.
+const chatKey = (serverId?: number) => `srvmon.agent.chat.${serverId ?? "all"}`;
+
+export function loadChatId(serverId?: number): number | undefined {
+  try {
+    const v = Number(localStorage.getItem(chatKey(serverId)));
+    return Number.isInteger(v) && v > 0 ? v : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function saveChatId(serverId: number | undefined, id: number | undefined) {
+  try {
+    if (id) localStorage.setItem(chatKey(serverId), String(id));
+    else localStorage.removeItem(chatKey(serverId));
+  } catch {
+    // private mode: the chat is just not remembered
+  }
+}
 
 /** Sends a message and calls onEvent for each streamed event. */
 export async function runChat(chatId: number, text: string, onEvent: (e: AgentEvent) => void): Promise<void> {

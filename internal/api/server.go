@@ -20,11 +20,13 @@ import (
 	"github.com/askidmobile/srvmon/internal/aiagent"
 	"github.com/askidmobile/srvmon/internal/alerts"
 	"github.com/askidmobile/srvmon/internal/auth"
+	"github.com/askidmobile/srvmon/internal/backup"
 	"github.com/askidmobile/srvmon/internal/checks"
 	"github.com/askidmobile/srvmon/internal/config"
 	"github.com/askidmobile/srvmon/internal/heartbeat"
 	"github.com/askidmobile/srvmon/internal/i18n"
 	"github.com/askidmobile/srvmon/internal/metrics"
+	"github.com/askidmobile/srvmon/internal/notify"
 	"github.com/askidmobile/srvmon/internal/secret"
 	"github.com/askidmobile/srvmon/internal/store"
 	"github.com/askidmobile/srvmon/internal/telegram"
@@ -44,21 +46,27 @@ type Server struct {
 	vm        *metrics.Writer
 	vmRead    *metrics.Reader
 	latest    *metrics.Latest
+	forecasts *metrics.Forecasts
 	web       fs.FS
 	version   string
 	secrets   *secret.Box
 	jobs      *jobs
 	updates   *agentUpdates
 	setupKeys *setupKeys
+	files     *sftpPool
 	csp       string
 	alerts    *alerts.Engine
 	checks    *checks.Runner
 	bot       *telegram.Bot      // nil when its settings cannot be loaded
 	heartbeat *heartbeat.Monitor // nil when its settings cannot be loaded
+	backup    *backup.Runner     // nil without a master key
+	emergency *emergencyState
+	hub       *notify.Hub // nil when its settings cannot be loaded
 
 	ai              *aiagent.Client // nil: agent disabled
 	agent           *agentState
 	mcp             *mcpState
+	diag            *diagnoser
 	notify          func(ctx context.Context, text string) error
 	onActionPending func(store.AgentAction)
 
@@ -79,8 +87,11 @@ type Options struct {
 	Version string
 	Secrets *secret.Box // seals SSH private keys; nil disables the add wizard
 	// Notify sends a critical HTML message for agent tasks; default: the
-	// Telegram bot.
+	// notification hub (Telegram and the Shoutrrr channels).
 	Notify func(ctx context.Context, text string) error
+	// NotifySender delivers to Shoutrrr channels; default: Shoutrrr (tests
+	// put a fake here).
+	NotifySender notify.Sender
 	// OnActionPending is called when the agent asks to run a command that
 	// needs confirmation; default: Telegram approve / reject buttons, which
 	// call Server.DecideAgentAction.
@@ -107,6 +118,7 @@ func New(o Options) *Server {
 		vm:        o.VM,
 		vmRead:    o.VMRead,
 		latest:    metrics.NewLatest(),
+		forecasts: metrics.NewForecasts(),
 		web:       o.Web,
 		version:   o.Version,
 		secrets:   o.Secrets,
@@ -119,15 +131,40 @@ func New(o Options) *Server {
 		ai:              aiagent.NewClient(o.Config.AIURL, o.Config.AIToken),
 		agent:           newAgentState(),
 		mcp:             newMCPState(),
+		diag:            newDiagnoser(),
 		notify:          o.Notify,
 		onActionPending: o.OnActionPending,
+		emergency:       newEmergencyState(),
 	}
 	// The interface language is one setting for the whole installation:
 	// Telegram, alerts and the agent use it too.
 	if v, err := o.Store.GetSetting(context.Background(), i18n.SettingKey); err == nil {
 		i18n.Set(v)
 	}
+	srv.files = newSFTPPool(srv.dialSFTP)
 	srv.alerts = alerts.New(o.Store, srv.latest, o.Log)
+	srv.alerts.OnFire(srv.onAlertFired)
+	if o.Secrets != nil {
+		srv.backup = backup.NewRunner(o.Store, o.Secrets, o.Log, o.Version)
+		srv.backup.OnFailure = func(ctx context.Context, msg string) {
+			srv.alerts.Event(ctx, store.KindBackup, 0, "", "", i18n.T("panel backup failed: %s", msg))
+		}
+	}
+	// Every notification goes through the hub: it hands alerts to the
+	// Telegram bot and to the Shoutrrr channels set up in the panel.
+	hub, err := notify.New(context.Background(), notify.Options{
+		Store: o.Store, Secrets: o.Secrets, Log: o.Log, Sender: o.NotifySender, PanelURL: o.Config.PublicOrigin,
+	})
+	if err != nil {
+		o.Log.Error("notify: load channels", "err", err)
+	} else {
+		srv.hub = hub
+		srv.alerts.SetNotifier(hub)
+		if srv.notify == nil {
+			srv.notify = hub.SendText
+		}
+	}
+	srv.alerts.SetForecasts(srv.forecasts)
 	srv.checks = checks.New(o.Store, o.VM, o.Log)
 	srv.alerts.SetChecks(srv.checks)
 	bot, err := telegram.New(context.Background(), telegram.Options{
@@ -138,7 +175,11 @@ func New(o Options) *Server {
 		o.Log.Error("telegram: load settings", "err", err)
 	} else {
 		srv.bot = bot
-		srv.alerts.SetNotifier(bot)
+		if hub != nil {
+			hub.SetTelegram(bot)
+		} else {
+			srv.alerts.SetNotifier(bot)
+		}
 		srv.wireAgentTelegram(bot)
 	}
 	hb, err := heartbeat.New(context.Background(), heartbeat.Options{
@@ -164,14 +205,23 @@ func New(o Options) *Server {
 	return srv
 }
 
-// Start runs the background work: alert evaluation, the heartbeat, the Telegram bot and,
-// when fail2banEvents is set, following fail2ban bans of the host.
+// Start runs the background work: alert evaluation, notification delivery,
+// the heartbeat, the Telegram bot and, when fail2banEvents is set, following
+// fail2ban bans of the host.
 func (s *Server) Start(ctx context.Context, fail2banEvents, hostName string) {
 	go s.alerts.Run(ctx)
 	go s.checks.Run(ctx)
 	if s.heartbeat != nil {
 		go s.heartbeat.Run(ctx)
 	}
+	if s.backup != nil {
+		go s.backup.Run(ctx)
+	}
+	if s.hub != nil {
+		go s.hub.Run(ctx)
+	}
+	go metrics.RunForecasts(ctx, s.vmRead, s.forecasts, s.log)
+	go s.runRecordingPurge(ctx)
 	if s.bot != nil {
 		go s.bot.Run(ctx)
 	}
@@ -210,8 +260,12 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/servers/{id}/checks", s.requireSession(http.HandlerFunc(s.handleChecks)))
 	mux.Handle("PUT /api/servers/{id}/checks", s.requireSession(http.HandlerFunc(s.handleChecksUpdate)))
 	mux.Handle("GET /api/servers/{id}/history", s.requireSession(http.HandlerFunc(s.handleHistory)))
+	mux.Handle("GET /api/servers/{id}/containers/{name}/history", s.requireSession(http.HandlerFunc(s.handleContainerHistory)))
 	mux.Handle("POST /api/servers/{id}/agent/update", s.requireSession(http.HandlerFunc(s.handleAgentUpdate)))
+	mux.Handle("POST /api/servers/{id}/agent/smart", s.requireSession(http.HandlerFunc(s.handleAgentSmart)))
 	mux.Handle("POST /api/servers/agents/update", s.requireSession(http.HandlerFunc(s.handleAgentUpdateAll)))
+	mux.Handle("GET /api/servers/{id}/sudo", s.requireSession(http.HandlerFunc(s.handleSudo)))
+	mux.Handle("PUT /api/servers/{id}/sudo", s.requireSession(http.HandlerFunc(s.handleSetSudo)))
 
 	agent := func(pattern string, h http.HandlerFunc) { mux.Handle(pattern, s.requireSession(h)) }
 	agent("GET /api/agent/status", s.handleAgentStatus)
@@ -234,9 +288,17 @@ func (s *Server) Handler() http.Handler {
 	agent("PATCH /api/agent/tasks/{id}", s.handleAgentUpdateTask)
 	agent("DELETE /api/agent/tasks/{id}", s.handleAgentDeleteTask)
 	agent("POST /api/agent/tasks/{id}/run", s.handleAgentRunTask)
+	agent("GET /api/agent/diagnose", s.handleDiagnoseSettings)
+	agent("PUT /api/agent/diagnose", s.handleDiagnoseSave)
+	agent("POST /api/alerts/{id}/diagnose", s.handleAlertDiagnose)
+	agent("POST /api/alerts/{id}/chat", s.handleAlertChat)
 
 	s.alertRoutes(mux)
 	s.mcpRoutes(mux)
+	s.backupRoutes(mux)
+	s.accessRoutes(mux)
+	s.recordingRoutes(mux)
+	s.fileRoutes(mux)
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "not_found")
 	})

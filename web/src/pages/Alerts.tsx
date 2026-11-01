@@ -1,7 +1,8 @@
-import { type ReactNode, useCallback, useEffect, useState } from "react";
+import { Fragment, type ReactNode, useCallback, useEffect, useState } from "react";
 
 import { Hotkey, Shell } from "@/components/Shell";
 import { Button } from "@/components/ui/button";
+import { Check } from "@/components/ui/check";
 import { Panel } from "@/components/ui/panel";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
@@ -12,13 +13,15 @@ import {
   type AlertsView,
   type Channel,
   type HeartbeatStatus,
+  type NotifyChannel,
   type NotifyView,
   type Quiet,
   type Rule,
   type Severity,
 } from "@/lib/api";
-import { t } from "@/lib/i18n";
-import { href, type Route } from "@/lib/router";
+import { agentApi, saveChatId } from "@/lib/agent";
+import { t, tn } from "@/lib/i18n";
+import { href, navigate, type Route } from "@/lib/router";
 import { cn } from "@/lib/utils";
 
 const fieldCls =
@@ -38,6 +41,13 @@ const KINDS: Record<
   cpu: { name: "cpu >", label: (v) => `cpu > ${v}%`, unit: "%", dur: "for" },
   mem: { name: "mem >", label: (v) => `mem > ${v}%`, unit: "%", dur: "for" },
   disk: { name: "disk >", label: (v) => `disk > ${v}%`, unit: "%", dur: "for" },
+  disk_fill: {
+    name: "disk full in <",
+    label: (v) => t("disk full in < {n} h", { n: v }),
+    unit: "hours",
+    dur: null,
+  },
+  smart: { name: "disk S.M.A.R.T. problem", label: () => t("disk S.M.A.R.T. problem"), dur: null },
   container_down: { name: "container down / unhealthy", label: () => t("container down / unhealthy"), dur: "for" },
   container_restarts: {
     name: "container restarts >",
@@ -67,6 +77,7 @@ const KINDS: Record<
   fail2ban: { name: "fail2ban ban", label: () => t("fail2ban ban on the monitoring server"), dur: null },
   bruteforce: { name: "panel password guessing", label: () => t("panel password guessing"), dur: null },
   login: { name: "panel sign-in", label: () => t("panel sign-in"), dur: null },
+  backup: { name: "panel backup failed", label: () => t("panel backup failed"), dur: null },
 };
 
 const NEW_DEFAULTS: Record<string, Pick<Rule, "threshold" | "duration_sec">> = {
@@ -74,6 +85,8 @@ const NEW_DEFAULTS: Record<string, Pick<Rule, "threshold" | "duration_sec">> = {
   cpu: { threshold: 95, duration_sec: 600 },
   mem: { threshold: 90, duration_sec: 300 },
   disk: { threshold: 95, duration_sec: 0 },
+  disk_fill: { threshold: 24, duration_sec: 0 },
+  smart: { threshold: 0, duration_sec: 0 },
   container_down: { threshold: 0, duration_sec: 300 },
   container_restarts: { threshold: 5, duration_sec: 3600 },
   payment_due: { threshold: 7, duration_sec: 0 },
@@ -83,6 +96,7 @@ const NEW_DEFAULTS: Record<string, Pick<Rule, "threshold" | "duration_sec">> = {
   fail2ban: { threshold: 0, duration_sec: 0 },
   bruteforce: { threshold: 0, duration_sec: 0 },
   login: { threshold: 0, duration_sec: 0 },
+  backup: { threshold: 0, duration_sec: 0 },
 };
 
 const sevCls: Record<Severity, string> = { crit: "text-crit", warn: "text-warn", info: "text-tx" };
@@ -146,51 +160,157 @@ function durLabel(r: Pick<Rule, "kind" | "duration_sec">): string {
 
 // --- active alerts and history ---
 
+// Alerts about a server state the AI agent can look at.
+function diagnosable(a: Alert): boolean {
+  return a.server_id > 0 && a.kind !== "payment_due";
+}
+
+const diagState: Record<string, string> = {
+  queued: "queued",
+  running: "the agent is looking…",
+  error: "failed",
+  skipped: "skipped",
+};
+
+// Opens the agent chat that continues the diagnosis (created on first use).
+async function openDiagnosisChat(a: Alert) {
+  const c = await agentApi.alertChat(a.id);
+  saveChatId(c.server_id, c.id);
+  navigate(href.agent(c.server_id));
+}
+
+function DiagnosisRow({ a, d, cols }: { a: Alert; d: NonNullable<Alert["diagnosis"]>; cols: number }) {
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const status = d.state === "done" ? "" : t(diagState[d.state] ?? d.state);
+  const text = d.text.trim();
+  // Only a finished diagnosis is worth folding: a status line is short.
+  const foldable = d.state === "done" && text !== "";
+  const chat = async () => {
+    setBusy(true);
+    setErr("");
+    try {
+      await openDiagnosisChat(a);
+    } catch (e) {
+      setErr(errorMessage(e, t("could not open the chat")));
+      setBusy(false);
+    }
+  };
+  return (
+    <tr className="align-top">
+      <td />
+      <td colSpan={cols - 1} className="pb-2 pr-3">
+        <div className="border-l-2 border-primary/60 pl-2.5 text-sm">
+          <div className="flex flex-wrap items-center gap-x-3 text-xs text-muted-foreground">
+            <button
+              type="button"
+              className={cn("text-left", foldable ? "hover:text-hi" : "cursor-default")}
+              onClick={() => foldable && setOpen(!open)}
+              aria-expanded={foldable ? open : undefined}
+              disabled={!foldable}
+            >
+              {foldable && <span className="whitespace-pre text-primary">{open ? "[-] " : "[+] "}</span>}
+              🩺 {t("AI diagnosis")}
+              {d.trigger === "manual" ? ` · ${t("manual")}` : ""}
+              {d.tools > 0 ? ` · ${tn(d.tools, "{n} command", "{n} commands")}` : ""}
+              {status && <span className={d.state === "error" ? "text-crit" : "text-warn"}> · {status}</span>}
+            </button>
+            {foldable && (
+              <button
+                type="button"
+                className="text-primary hover:underline disabled:opacity-60"
+                disabled={busy}
+                title={t("ask the agent about this alert, starting from the diagnosis")}
+                onClick={() => void chat()}
+              >
+                {busy ? t("opening…") : `${t("continue in chat")} →`}
+              </button>
+            )}
+            {err && <span className="text-crit">{err}</span>}
+          </div>
+          {text &&
+            (open || !foldable ? (
+              <div className="whitespace-pre-wrap break-words text-tx">{text}</div>
+            ) : (
+              <button
+                type="button"
+                className="block w-full truncate text-left text-tx/80 hover:text-tx"
+                title={t("expand")}
+                onClick={() => setOpen(true)}
+              >
+                {text.split("\n").find((l) => l.trim()) ?? text}
+              </button>
+            ))}
+        </div>
+      </td>
+    </tr>
+  );
+}
+
 function AlertRow({ a, onChange }: { a: Alert; onChange: () => void }) {
   const [busy, setBusy] = useState(false);
-  const act = async (f: () => Promise<unknown>) => {
+  const [err, setErr] = useState("");
+  const act = async (f: () => Promise<unknown>, fallback = t("failed")) => {
     setBusy(true);
-    await f().catch(() => undefined);
+    setErr("");
+    await f().catch((e) => setErr(errorMessage(e, fallback)));
     setBusy(false);
     onChange();
   };
+  const running = a.diagnosis?.state === "queued" || a.diagnosis?.state === "running";
   return (
-    <tr className="border-t border-border/60 align-top">
-      <td className="py-1.5 pr-3 whitespace-nowrap text-muted-foreground">{when(a.started_at)}</td>
-      <td className={cn("pr-3 uppercase", sevCls[a.severity])}>{a.severity}</td>
-      <td className="pr-3 whitespace-nowrap">
-        {a.server_id ? (
-          <a className="text-hi hover:text-primary" href={href.server(a.server_id)}>
-            {a.server_name}
-          </a>
-        ) : (
-          <span className="text-hi">{a.server_name || t("panel")}</span>
-        )}
-      </td>
-      <td className="pr-3">
-        {a.message}
-        {a.channel === "tg" && <span className="text-muted-foreground">{a.notified ? " → tg" : ""}</span>}
-      </td>
-      <td className="pr-3 whitespace-nowrap text-muted-foreground">
-        {a.state === "acked" ? <span className="text-primary">✓ ack</span> : <span className={sevCls[a.severity]}>●</span>}
-      </td>
-      <td className="whitespace-nowrap text-right">
-        {a.state === "firing" && (
-          <Button size="sm" variant="outline" disabled={busy} onClick={() => act(() => api.ackAlert(a.id))}>
-            ack
+    <>
+      <tr className="border-t border-border/60 align-top">
+        <td className="py-1.5 pr-3 whitespace-nowrap text-muted-foreground">{when(a.started_at)}</td>
+        <td className={cn("pr-3 uppercase", sevCls[a.severity])}>{a.severity}</td>
+        <td className="pr-3 whitespace-nowrap">
+          {a.server_id ? (
+            <a className="text-hi hover:text-primary" href={href.server(a.server_id)}>
+              {a.server_name}
+            </a>
+          ) : (
+            <span className="text-hi">{a.server_name || t("panel")}</span>
+          )}
+        </td>
+        <td className="pr-3">
+          {a.message}
+          {a.channel === "tg" && <span className="text-muted-foreground">{a.notified ? ` → ${t("sent")}` : ""}</span>}
+        </td>
+        <td className="pr-3 whitespace-nowrap text-muted-foreground">
+          {a.state === "acked" ? <span className="text-primary">✓ ack</span> : <span className={sevCls[a.severity]}>●</span>}
+        </td>
+        <td className="whitespace-nowrap text-right">
+          {a.state === "firing" && (
+            <Button size="sm" variant="outline" disabled={busy} onClick={() => act(() => api.ackAlert(a.id))}>
+              ack
+            </Button>
+          )}{" "}
+          {diagnosable(a) && (
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={busy || running}
+              title={t("the AI agent collects logs read-only and explains the likely cause")}
+              onClick={() => act(() => api.diagnoseAlert(a.id), t("could not start the diagnosis"))}
+            >
+              {t("diagnose")}
+            </Button>
+          )}{" "}
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={busy}
+            title={t("no notifications for this alert for an hour")}
+            onClick={() => act(() => api.silenceAlert(a.id, 60))}
+          >
+            {t("mute 1h")}
           </Button>
-        )}{" "}
-        <Button
-          size="sm"
-          variant="ghost"
-          disabled={busy}
-          title={t("no notifications for this alert for an hour")}
-          onClick={() => act(() => api.silenceAlert(a.id, 60))}
-        >
-          {t("mute 1h")}
-        </Button>
-      </td>
-    </tr>
+          {err && <div className="pt-1 text-xs text-crit">{err}</div>}
+        </td>
+      </tr>
+      {a.diagnosis && <DiagnosisRow a={a} d={a.diagnosis} cols={6} />}
+    </>
   );
 }
 
@@ -320,7 +440,7 @@ function RuleEditor({
             onChange={(e) => setR({ ...r, channel: e.target.value as Channel })}
             aria-label={t("channel")}
           >
-            <option value="tg">tg</option>
+            <option value="tg">notify</option>
             <option value="web">web</option>
           </select>
         </td>
@@ -411,7 +531,7 @@ function RulesPanel() {
                   </td>
                   <td className="pr-2 text-muted-foreground">{durLabel(r)}</td>
                   <td className={cn("pr-2", sevCls[r.severity])}>{r.severity}</td>
-                  <td className="pr-2 text-muted-foreground">{r.channel}</td>
+                  <td className="pr-2 text-muted-foreground">{r.channel === "tg" ? "notify" : r.channel}</td>
                   <td className="whitespace-nowrap text-right">
                     <Button size="sm" variant="ghost" onClick={() => setEditing(r.id)}>
                       {t("edit")}
@@ -441,7 +561,7 @@ function RulesPanel() {
         <QuietHours />
       </div>
       <p className="mt-2 text-xs text-muted-foreground">
-        {t("tg: notify in Telegram and in the panel, web: only in the panel. Containers stopped with exit code 0 do not count as alerts.")}
+        {t("notify: in the panel, in Telegram and in the notification channels; web: only in the panel. Containers stopped with exit code 0 do not count as alerts.")}
       </p>
     </Panel>
   );
@@ -717,13 +837,10 @@ function HeartbeatPanel() {
             onChange={(e) => setUrl(e.target.value)}
           />
         </div>
-        <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" checked={fail} onChange={(e) => setFail(e.target.checked)} />
-          <span>
-            {t("report problems to")} <span className="text-hi">URL/fail</span>{" "}
-            <span className="text-muted-foreground">{t("(healthchecks.io; off: skip the ping instead)")}</span>
-          </span>
-        </label>
+        <Check className="text-sm" checked={fail} onChange={setFail}>
+          {t("report problems to")} <span className="text-hi">URL/fail</span>{" "}
+          <span className="text-muted-foreground">{t("(healthchecks.io; off: skip the ping instead)")}</span>
+        </Check>
         <div className="text-sm">
           <span className="text-muted-foreground">{t("status")}</span> {status}
           {hb.last_ping && <span className="text-muted-foreground"> · {t("last ping")} {when(hb.last_ping)}</span>}
@@ -767,6 +884,212 @@ function HeartbeatPanel() {
           </ol>
         )}
       </div>
+    </Panel>
+  );
+}
+
+// --- Shoutrrr channels ---
+
+// URL patterns shown as hints; the full list is in the Shoutrrr docs.
+const URL_EXAMPLES: [string, string][] = [
+  ["email", "smtp://user:password@smtp.example.com:587/?from=srvmon@example.com&to=me@example.com"],
+  ["ntfy", "ntfy://ntfy.sh/my-secret-topic"],
+  ["Discord", "discord://token@webhook-id"],
+  ["Gotify", "gotify://gotify.example.com/app-token"],
+  ["Slack", "slack://hook:T00000000-B00000000-XXXXXXXXXXXXXXXXXXXXXXXX@webhook"],
+  ["Matrix", "matrix://user:password@matrix.example.com/?rooms=!room:example.com"],
+  ["webhook", "generic+https://hooks.example.com/srvmon"],
+];
+
+const SEVERITIES: Severity[] = ["crit", "warn", "info"];
+
+function ChannelRow({ c, busy, run }: { c: NotifyChannel; busy: boolean; run: (f: () => Promise<unknown>, ok: string) => void }) {
+  const input = { name: c.name, min_severity: c.min_severity, enabled: c.enabled };
+  return (
+    <tr className="border-t border-border/60 align-top">
+      <td className="py-1 pr-3">
+<button
+          type="button"
+          className={cn("whitespace-pre", c.enabled ? "text-primary" : "text-muted-foreground")}
+          title={c.enabled ? t("turn off") : t("turn on")}
+          disabled={busy}
+          onClick={() => run(() => api.updateChannel(c.id, { ...input, enabled: !c.enabled }), c.enabled ? t("channel off") : t("channel on"))}
+        >
+          {c.enabled ? "[x]" : "[ ]"}
+        </button>{" "}
+        <span className={c.enabled ? "text-hi" : "text-muted-foreground"}>{c.name}</span>
+      </td>
+      <td className="pr-3 whitespace-nowrap text-muted-foreground">
+        {c.service}
+        {c.target && ` · ${c.target}`}
+      </td>
+      <td className="pr-3">
+        <select
+          className={cellField}
+          value={c.min_severity}
+          disabled={busy}
+          aria-label={t("minimum severity")}
+          onChange={(e) => run(() => api.updateChannel(c.id, { ...input, min_severity: e.target.value as Severity }), t("saved"))}
+        >
+          {SEVERITIES.map((s) => (
+            <option key={s} value={s}>
+              {s === "info" ? s : `${s}+`}
+            </option>
+          ))}
+        </select>
+      </td>
+      <td className="pr-3 text-sm">
+        {c.last_error ? (
+          <span className="text-crit">✕ {c.last_error}</span>
+        ) : c.last_sent ? (
+          <span className="text-primary">✓ {when(c.last_sent)}</span>
+        ) : (
+          <span className="text-muted-foreground">—</span>
+        )}
+      </td>
+      <td className="whitespace-nowrap text-right">
+        <Button size="sm" variant="outline" disabled={busy} onClick={() => run(() => api.testChannel(c.id), t("test sent"))}>
+          {t("test")}
+        </Button>{" "}
+        <Button
+          size="sm"
+          variant="ghost"
+          className="hover:text-crit"
+          disabled={busy}
+          onClick={() => confirm(t("Delete the channel “{name}”?", { name: c.name })) && run(() => api.deleteChannel(c.id), t("channel deleted"))}
+        >
+          ✕
+        </Button>
+      </td>
+    </tr>
+  );
+}
+
+function ChannelsPanel() {
+  const [n, setN] = useState<NotifyView | null>(null);
+  const [name, setName] = useState("");
+  const [url, setURL] = useState("");
+  const [sev, setSev] = useState<Severity>("warn");
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [help, setHelp] = useState(false);
+
+  const load = useCallback(
+    () =>
+      api
+        .notify()
+        .then(setN)
+        .catch(() => undefined),
+    [],
+  );
+  useEffect(() => {
+    load();
+    const t = setInterval(load, 10000);
+    return () => clearInterval(t);
+  }, [load]);
+
+  const run = async (f: () => Promise<unknown>, ok: string) => {
+    setBusy(true);
+    setMsg(null);
+    try {
+      await f();
+      setMsg({ ok: true, text: ok });
+      await load();
+      return true;
+    } catch (e) {
+      setMsg({ ok: false, text: e instanceof ApiError && e.code === "no_master_key" ? t("no master key on the server") : errorMessage(e, t("error")) });
+      await load();
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const add = async () => {
+    if (await run(() => api.createChannel({ name: name.trim(), url: url.trim(), min_severity: sev, enabled: true }), t("channel added"))) {
+      setName("");
+      setURL("");
+    }
+  };
+
+  const channels = n?.channels ?? [];
+  return (
+    <Panel title={t("notification channels")} right={t("email, ntfy, Discord, Gotify, webhooks… via Shoutrrr")}>
+      {!n ? (
+        t("loading…")
+      ) : (
+        <div className="flex flex-col gap-3">
+          {channels.length > 0 && (
+            <ScrollArea className="w-full">
+              <table className="w-full min-w-[640px] border-collapse text-left">
+                <tbody>
+                  {channels.map((c) => (
+                    <ChannelRow key={c.id} c={c} busy={busy} run={run} />
+                  ))}
+                </tbody>
+              </table>
+            </ScrollArea>
+          )}
+          {!n.channels_ok ? (
+            <div className="text-sm text-crit">{t("no master key on the server")}</div>
+          ) : (
+            <div className="grid grid-cols-1 gap-2 md:grid-cols-[minmax(0,12rem)_minmax(0,1fr)_auto_auto]">
+              <input
+                className={fieldCls}
+                value={name}
+                placeholder={t("name, e.g. mail")}
+                aria-label={t("name")}
+                maxLength={60}
+                onChange={(e) => setName(e.target.value)}
+              />
+              <input
+                className={fieldCls}
+                value={url}
+                type="password"
+                autoComplete="off"
+                spellCheck={false}
+                placeholder="ntfy://ntfy.sh/my-topic"
+                aria-label="URL"
+                onChange={(e) => setURL(e.target.value)}
+              />
+              <select className={fieldCls} value={sev} aria-label={t("minimum severity")} onChange={(e) => setSev(e.target.value as Severity)}>
+                {SEVERITIES.map((s) => (
+                  <option key={s} value={s}>
+                    {s === "info" ? t("everything") : `${s}+`}
+                  </option>
+                ))}
+              </select>
+              <Button disabled={busy || !name.trim() || !url.trim()} onClick={add}>
+                + {t("channel")}
+              </Button>
+            </div>
+          )}
+          {msg && <div className={cn("text-sm", msg.ok ? "text-primary" : "text-crit")}>{msg.text}</div>}
+          <p className="text-xs text-muted-foreground">
+            {t("Every alert with the “notify” channel goes to Telegram and to each enabled channel whose minimum severity it reaches. The URL holds the credentials: it is stored encrypted and is not shown again.")}{" "}
+            <button type="button" className="text-hi underline-offset-2 hover:underline" onClick={() => setHelp(!help)}>
+              {help ? t("hide examples") : t("URL examples")}
+            </button>
+          </p>
+          {help && (
+            <div className="flex flex-col gap-1 text-xs">
+              {URL_EXAMPLES.map(([label, u]) => (
+                <div key={label} className="flex flex-wrap gap-x-2">
+                  <span className="w-16 shrink-0 text-muted-foreground">{label}</span>
+                  <code className="break-all text-hi">{u}</code>
+                </div>
+              ))}
+              <div className="mt-1 text-muted-foreground">
+                {t("All services and their parameters:")}{" "}
+                <a className="text-hi underline" href="https://shoutrrr.nickfedor.com/" target="_blank" rel="noreferrer noopener">
+                  shoutrrr.nickfedor.com
+                </a>{" "}
+                · {n.services.join(", ")}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </Panel>
   );
 }
@@ -840,6 +1163,8 @@ export function AlertsPage({ route, version, onLogout }: { route: Route; version
         </div>
       </div>
 
+      <ChannelsPanel />
+
       <Panel title={t("history")} right={t("events and alerts for 90 days")}>
         {history.length === 0 ? (
           <div className="py-2 text-muted-foreground">{t("empty so far")}</div>
@@ -848,16 +1173,19 @@ export function AlertsPage({ route, version, onLogout }: { route: Route; version
             <table className="w-full min-w-[720px] border-collapse text-left">
               <tbody>
                 {history.map((a) => (
-                  <tr key={a.id} className="border-t border-border/60 align-top">
-                    <td className="py-1 pr-3 whitespace-nowrap text-muted-foreground">{when(a.started_at)}</td>
-                    <td className={cn("pr-3 uppercase", sevCls[a.severity])}>{a.severity}</td>
-                    <td className="pr-3 whitespace-nowrap text-hi">{a.server_name || t("panel")}</td>
-                    <td className="pr-3">
-                      {a.message}
-                      {a.notified && <span className="text-muted-foreground"> → tg</span>}
-                    </td>
-                    <td className="whitespace-nowrap text-right text-sm">{stateText(a)}</td>
-                  </tr>
+                  <Fragment key={a.id}>
+                    <tr className="border-t border-border/60 align-top">
+                      <td className="py-1 pr-3 whitespace-nowrap text-muted-foreground">{when(a.started_at)}</td>
+                      <td className={cn("pr-3 uppercase", sevCls[a.severity])}>{a.severity}</td>
+                      <td className="pr-3 whitespace-nowrap text-hi">{a.server_name || t("panel")}</td>
+                      <td className="pr-3">
+                        {a.message}
+                        {a.notified && <span className="text-muted-foreground"> → {t("sent")}</span>}
+                      </td>
+                      <td className="whitespace-nowrap text-right text-sm">{stateText(a)}</td>
+                    </tr>
+                    {a.diagnosis && a.state === "resolved" && <DiagnosisRow a={a} d={a.diagnosis} cols={5} />}
+                  </Fragment>
                 ))}
               </tbody>
             </table>

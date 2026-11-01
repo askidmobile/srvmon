@@ -16,17 +16,22 @@ The interface is a dark TUI-style dashboard (btop-like) with a green accent. The
 ## Features
 
 - **Overview.** One table for all servers: CPU, RAM and disk bars, running/total containers (with a mark for failed ones), uptime, RAM size, the next hosting payment and its due date, plus the latest alerts. Filter by group, open a terminal in one click. Hotkeys: `1` overview, `3` terminal, `4` agent, `5` alerts, `6` settings.
-- **Metrics and containers.** A small Go agent (`srvmon-agent`) on each server reads CPU, RAM, swap, load, disks, network and uptime from `/proc`, containers through the docker socket (read-only), and pushes them to the panel. It buffers for an hour if the panel is unreachable. Metrics are stored in VictoriaMetrics.
-- **Server screen.** Per-core CPU, memory, disks, network, processes, containers with status/health/restarts, and syslog + docker logs, all live while the screen is open.
+- **Metrics and containers.** A small Go agent (`srvmon-agent`) on each server reads CPU, RAM, swap, load, disks, network and uptime from `/proc`, containers through `srvmon-dockerproxy` (a filtered read-only Docker API: no writes, no environment variables of containers), and pushes them to the panel. It buffers for an hour if the panel is unreachable. Metrics are stored in VictoriaMetrics.
+- **Server screen.** Per-core CPU, memory, disks, network, processes, containers with status/health/restarts, and syslog + docker logs, all live while the screen is open. Click a container for its CPU and memory history (1h to 7d; usage is read from the container's cgroup on every push, so the history is there even when nobody watches). Each disk shows a fill forecast ("full in ~13h") from a linear regression over the last 6 hours.
+- **Disk health (S.M.A.R.T.).** Optional, per server: PASSED/FAILED, temperature, power-on hours, reallocated/pending/uncorrectable sectors (SATA) or wear, spare and media errors (NVMe). The agent reads it itself every 30 minutes without waking sleeping disks; it needs raw read access to the disks, so it is off by default. Turn it on from the server screen (the panel recreates the agent over SSH with `CAP_SYS_RAWIO`, `CAP_SYS_ADMIN` and read-only access to SATA/NVMe block devices), with `SRVMON_SMART=1` for the monitoring host itself (GitHub variable or `.env`), or with the commented lines in `deploy/agent/docker-compose.yml`.
 - **Server passport and payments.** Each server keeps a passport: description, project, group, tags, provider, plan, cost with currency and the next payment date. Payments show up in the overview, in Telegram (`/bills`) and as an alert a few days before the due date.
 - **Site, port and certificate checks.** Add the server's URLs and ports on its screen; the panel checks them every minute from its own network (HTTP status, TCP connect, TLS handshake), alerts when one is down and when a TLS certificate or the domain registration is about to expire. Domain expiry dates (RDAP, WHOIS for zones without it) sit next to payments in the passport and in `/bills`.
 - **Onboarding wizard.** Add a server, verify its SSH host key, log in once with a password or your own key. srvmon creates a `srvmon` user with its own ed25519 key, installs the agent and can disable password auth. The one-time password or key is never stored.
-- **Web terminal.** xterm.js ↔ WebSocket ↔ SSH client inside `srvmon-server` ↔ sshd. Tabs, resize, `docker exec` into a container. The AI agent panel sits next to the terminal (`F9` shows or hides it) and works in the context of that server. Private keys never leave the monitoring server; they are encrypted at rest (XChaCha20-Poly1305).
+- **Web terminal.** xterm.js ↔ WebSocket ↔ SSH client inside `srvmon-server` ↔ sshd. Tabs, split panes (up to four sessions side by side or stacked), resize, `docker exec` into a container. The AI agent panel sits next to the terminal (`F9` shows or hides it) and works in the context of that server. Private keys never leave the monitoring server; they are encrypted at rest (XChaCha20-Poly1305).
+- **Files over SFTP.** A file panel next to the terminal (`F8`): browse, download, upload (drag and drop works too), create folders, rename and delete, with the rights of the `srvmon` user. Every change and download goes to the audit log.
+- **Session recording.** Every web terminal session is recorded in [asciinema](https://asciinema.org) format and can be replayed in the panel (pause, seek, 1–8× speed) or downloaded as a `.cast` file. Only output and window resizes are recorded, never keystrokes, so passwords typed at hidden prompts stay out. Output can still contain secrets, so recordings are encrypted with the master key and deleted after the retention period (30 days by default). Recording can be turned off, and the retention and per-session size limit changed, in `[6] settings`.
 - **AI agent.** Built on the [pi](https://pi.dev) SDK, any provider (DeepSeek, Anthropic, OpenAI, OpenRouter, Google, Ollama, any OpenAI- or Anthropic-compatible endpoint). Read-only commands run immediately; anything that changes a server waits for your explicit approval. The policy is enforced by `srvmon-server`, not by the model. Each server has its own chat context, chats keep their history, and the model can be picked per chat. Scheduled tasks (cron) report to Telegram, and you can ask the agent from Telegram with `/ask`.
 - **MCP server.** Claude Desktop, Cursor and Claude Code connect to `/mcp` with revocable tokens that carry scopes. They get the same tools and the same confirmation of changes in the panel or Telegram.
-- **Alerts and Telegram.** Agent offline, container down/unhealthy, restart loops, CPU, disk, sites and ports down, expiring certificates and domains, upcoming hosting payments, fail2ban bans, login attempts. Rules are editable (threshold, duration, level, channel: Telegram or panel only). Quiet hours in your time zone (critical alerts still go through), ack and mute, 90-day history. The bot answers `/status`, `/server`, `/alerts`, `/ack`, `/bills`, `/ask`.
+- **Alerts and Telegram.** Agent offline, container down/unhealthy, restart loops, CPU, disk, disk filling up soon, S.M.A.R.T. problems, sites and ports down, expiring certificates and domains, upcoming hosting payments, fail2ban bans, login attempts. Rules are editable (threshold, duration, level, channel: notify or panel only). Quiet hours in your time zone (critical alerts still go through), ack and mute, 90-day history, an AI diagnosis attached to critical alerts. The bot answers `/status`, `/server`, `/alerts`, `/ack`, `/bills`, `/ask`.
+- **More notification channels.** Besides Telegram, alerts can go to email, ntfy, Discord, Gotify, Slack, Matrix, Pushover, generic webhooks and other services supported by [Shoutrrr](https://shoutrrr.nickfedor.com/), each with its own minimum severity.
 - **Panel heartbeat (dead man's switch).** Once a minute the panel checks itself and pings an external URL such as [healthchecks.io](https://healthchecks.io). If the panel dies, the pings stop and that service alerts you by email or its own channels.
-- **Security.** Password (argon2id) + TOTP or backup code, no username. Rate limiting, an audit log and fail2ban jails for the panel and sshd.
+- **Backups and emergency access.** Scheduled encrypted backups of the panel database to any S3-compatible storage (AWS, Yandex Object Storage, R2, B2, MinIO) with retention and a Telegram alert on failure; the master key is exported separately behind a TOTP code. Your own SSH public keys are kept in `authorized_keys` on every server, so losing the panel never locks you out. See [docs/backup.md](docs/backup.md).
+- **Security.** Password (argon2id) + TOTP or backup code, no username. Rate limiting, an audit log and fail2ban jails for the panel and sshd. On servers, only the `srvmon-dockerproxy` container sees the docker socket, and the `srvmon` user gets limited sudo by default (see [Server access](#server-access)).
 
 ## Screenshots
 
@@ -82,14 +87,14 @@ Open `https://<your domain>`, enter the password, then the TOTP code. The monito
 
 If the host already runs nginx (or another proxy) on 80/443, set `SRVMON_PROXY=external` in `.env`: Caddy is not started, srvmon listens on `127.0.0.1:8088` (`SRVMON_HTTP_BIND`), and you include [deploy/nginx/srvmon.conf](deploy/nginx/srvmon.conf) in your nginx.
 
-Back up the `/data` volume together with `/data/master.key`: without the master key the stored SSH keys cannot be decrypted.
+Backups: set up S3-compatible storage in settings → backup, then export the master key there (or `docker compose exec server /srvmon-server master-key`) and keep it offline. Backups are encrypted with it and never contain it. Restore steps and emergency SSH keys: [docs/backup.md](docs/backup.md).
 
 ## Continuous deployment from your fork
 
 1. Prepare the host as above (`install-host.sh`) and point the domain at it.
 2. In GitHub: Settings → Environments → `production`:
    - secrets: `DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_SSH_KEY` (private deploy key), `DEPLOY_KNOWN_HOSTS` (output of `ssh-keyscan <host>`), optional `DEPLOY_PORT`, `GHCR_PULL_TOKEN`, `AI_API_KEY`;
-   - variables: `SRVMON_DOMAIN`, optional `SRVMON_PROXY`, `SRVMON_HTTP_BIND`, `DEPLOY_PATH` (default `/opt/srvmon`).
+   - variables: `SRVMON_DOMAIN`, optional `SRVMON_PROXY`, `SRVMON_HTTP_BIND`, `SRVMON_SMART` (`1`: S.M.A.R.T. for the monitoring host), `DEPLOY_PATH` (default `/opt/srvmon`).
    - Restrict the environment to the `main` branch (Deployment branches).
 3. Every push to `main`: CI → Release (images `ghcr.io/<owner>/srvmon-server|agent|ai`, tags `sha-xxxxxxx` and `latest`) → Deploy (`docker compose pull && up -d`, waits for the healthcheck, rolls back to the previous tag on failure). Deploy is skipped until `DEPLOY_HOST` is set. Manual deploy of a tag: Actions → Deploy → Run workflow.
 4. After the first deploy, once: `cd /opt/srvmon && docker compose exec -it server /srvmon-server init`.
@@ -105,7 +110,7 @@ The add wizard (`+ server`, `#/add`):
 1. Name, `host:port`, project, group, tags, description; optionally provider, plan, cost and next payment date.
 2. "Check host key": srvmon connects to sshd without logging in and shows the fingerprint. Compare it on the server (`ssh-keygen -lf /etc/ssh/ssh_host_ecdsa_key.pub`) and confirm; only this key is accepted afterwards.
 3. User (root or with sudo) and a one-time login method: **password**, **my key** (your private key, used once and not saved), or **panel key** (the panel shows its public key and a command to add it to `authorized_keys`).
-4. srvmon creates the `srvmon` user (docker group, optional passwordless sudo), installs its key, verifies key login, starts the `srvmon-agent` container with a token in `/etc/srvmon/agent.token` (0600) and optionally disables `PasswordAuthentication`.
+4. srvmon creates the `srvmon` user (docker group, sudo mode of your choice, see below), installs its key, verifies key login, starts the `srvmon-agent` container with a token in `/etc/srvmon/agent.token` (0600) and optionally disables `PasswordAuthentication`.
 
 Manually, without the wizard:
 
@@ -131,13 +136,21 @@ On the server screen the "checks" panel takes one target per line:
 - Domain expiry is looked up twice a day over RDAP (IANA bootstrap) and over WHOIS for zones without RDAP, such as `.ru` and `.рф`. The monitoring server needs outbound HTTPS and TCP port 43 for that.
 - Alert rules: "site / port down" for 2 min (crit), "certificate expires in ≤ 14 days" and "domain expires in ≤ 30 days" (warn). Thresholds are editable on the alerts screen.
 
+## Server access
+
+What the panel can do on a managed server, and what it cannot:
+
+- **Agent.** `srvmon-agent` never touches the docker socket. A separate `srvmon-dockerproxy` container (same image, no network, no capabilities, read-only root) holds the socket and serves the agent a unix socket with only `GET /_ping`, `/version`, `/containers/json`, `/containers/{id}/json` and `/containers/{id}/logs`; `Env` is removed from container inspect so secrets in environment variables stay on the server. The host's `/run` (docker and containerd sockets) is hidden from the agent's `/host` view. Panel updates move existing agents to this layout automatically.
+- **sudo of `srvmon`.** Three modes, chosen in the wizard and switchable in the server passport: **no sudo**; **limited** (default: `systemctl status/start/stop/restart/reload/…`, `journalctl`, `service`, `docker`; no `sudo -i`, no editing or enabling units); **full** (`NOPASSWD:ALL`, root in the terminal). The panel reads the current mode live with `sudo -n -l`; servers added before this change keep full sudo until you switch them.
+- **The honest part.** `srvmon` stays in the `docker` group, and docker access is root-equivalent. Limited sudo guards against mistakes (yours, or a command you approved for the AI agent), not against someone who already controls the panel. That is also how the panel can widen a narrowed sudo again: it writes `/etc/sudoers.d/srvmon` through a one-off container of the agent image, after `visudo -c` on the server.
+
 ## Alerts and Telegram
 
 The `[5] alerts` screen (`#/alerts`) shows active alerts with "ack" and "mute 1h", the rules, the Telegram bot, quiet hours and a 90-day history.
 
-- Default rules: agent silent for more than 2 min (crit), container down or unhealthy for 1 min (crit), more than 2 container restarts per hour, CPU > 90% for 5 min, memory > 95% for 5 min (off by default, panel only), disk > 85%, hosting payment due in 3 days or less, a site or port down for 2 min (crit), a TLS certificate expiring in 14 days or less, a domain expiring in 30 days or less, plus events: a fail2ban ban on the monitoring server, password guessing on the panel, a panel sign-in.
-- Every rule can be switched off, edited (threshold, duration, level crit/warn/info) or sent to a channel: `tg` (Telegram and panel) or `web` (panel only). `+ rule` adds a new one. Containers that stopped with exit code 0 do not count as alerts.
-- Quiet hours (for example 01:00–07:00 in `Europe/Moscow`) hold back Telegram notifications until they end; critical alerts are always sent.
+- Default rules: agent silent for more than 2 min (crit), container down or unhealthy for 1 min (crit), more than 2 container restarts per hour, CPU > 90% for 5 min, memory > 95% for 5 min (off by default, panel only), disk > 85%, disk full in less than 24 h at its current growth, a S.M.A.R.T. problem (failed self-assessment, pending or uncorrectable sectors, NVMe critical warning, spare or endurance used up; crit), hosting payment due in 3 days or less, a site or port down for 2 min (crit), a TLS certificate expiring in 14 days or less, a domain expiring in 30 days or less, plus events: a fail2ban ban on the monitoring server, password guessing on the panel, a panel sign-in.
+- Every rule can be switched off, edited (threshold, duration, level crit/warn/info) or sent to a channel: `notify` (panel, Telegram and the notification channels) or `web` (panel only). `+ rule` adds a new one. Containers that stopped with exit code 0 do not count as alerts.
+- Quiet hours (for example 01:00–07:00 in `Europe/Moscow`) hold back notifications until they end; critical alerts are always sent.
 
 Bot setup:
 
@@ -147,6 +160,22 @@ Bot setup:
 4. "Send test".
 
 If the monitoring server cannot reach `api.telegram.org` (Russian hosting, corporate networks), run a tiny Cloudflare Worker proxy and set `SRVMON_TELEGRAM_API`: see [docs/telegram-proxy.md](docs/telegram-proxy.md).
+
+### Notification channels (Shoutrrr)
+
+The "notification channels" panel on the same screen adds more places for alerts, using [Shoutrrr](https://shoutrrr.nickfedor.com/) URLs:
+
+| Service | URL |
+|---|---|
+| email | `smtp://user:password@smtp.example.com:587/?from=srvmon@example.com&to=me@example.com` |
+| ntfy | `ntfy://ntfy.sh/my-secret-topic` |
+| Discord | `discord://token@webhook-id` |
+| Gotify | `gotify://gotify.example.com/app-token` |
+| webhook | `generic+https://hooks.example.com/srvmon` |
+
+- Each channel has a minimum severity: `crit+` (only critical), `warn+` or everything. An alert with the `notify` channel goes to Telegram and to every enabled channel it qualifies for; quiet hours and mutes apply to all of them.
+- The URL holds credentials, so it is stored encrypted with the master key and the panel shows only the service and host. "test" sends a test message; the last send time or error is shown next to the channel, and the header shows `ch: N` with failing channels in red.
+- Failed sends are retried three times. Agent task alarms go to the channels as well.
 
 ### Panel heartbeat (dead man's switch)
 
@@ -167,6 +196,7 @@ The `srvmon-ai` container (pi SDK, `ai/`) has only srvmon tools: list servers an
 - **Command confirmation.** Read-only commands (`docker ps/logs/inspect`, `df`, `journalctl`, `systemctl status` …) run immediately. Anything that changes a server appears as a "⚠ confirm" card and runs only after you press "✓ run". The decision is made by `srvmon-server` (`internal/aiagent/policy.go`), not by the model. Every command and its result goes into the confirmation log.
 - **Tasks.** A request like "every 15 minutes check container restarts, if more than 2 per hour send to Telegram" becomes a task with cron `*/15 * * * *` (UTC). Tasks are listed in the "tasks" tab; a result with an alarm goes to Telegram.
 - **Telegram.** The bot sends the agent's commands for confirmation with approve and reject buttons, and `/ask <question>` asks the agent straight from Telegram.
+- **Alert diagnosis.** When a critical alert fires, the agent investigates it on its own with read-only commands (container logs, `inspect`, `df`, `journalctl` …) and sends the likely cause, the evidence and a suggested fix as a reply to the Telegram alert; the diagnosis is also shown under the alert in `[5] alerts`, where a "diagnose" button runs it by hand. `srvmon-server` refuses every changing command of a diagnosis without asking (no confirmations), caps it at 12 commands and 5 minutes, runs one at a time, diagnoses the same alert on the same server at most once in 6 hours and keeps hourly and daily limits (4 and 20 by default). Settings → AI diagnosis of alerts: on/off, warnings too, limits and a separate (cheaper) model.
 
 Enable it in the panel: settings → AI agent. Pick a provider (any from the pi catalog or a custom OpenAI/Anthropic-compatible URL), paste an API key (stored encrypted, never returned to the browser), load and select models, then "save and apply". Until something is saved in the panel, `srvmon-ai` uses `SRVMON_AI_PROVIDER`, `SRVMON_AI_MODEL` and `SRVMON_AI_API_KEY` from `.env`.
 

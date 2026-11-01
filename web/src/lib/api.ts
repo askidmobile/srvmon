@@ -141,6 +141,8 @@ export interface ServerView {
   agent_outdated?: boolean;
   agent_latest?: string;
   agent_update?: AgentUpdate;
+  // Hours until a growing filesystem is full, by mount point (≤ 30 days).
+  disk_full_hours?: Record<string, number>;
   // HTTP/TCP checks of the server, when it has any.
   checks?: { total: number; down: number };
 }
@@ -172,10 +174,20 @@ export const api = {
   containerAction: (id: number, name: string, action: "restart" | "stop" | "start") =>
     request<{ ok: boolean }>("POST", `/api/servers/${id}/containers/${encodeURIComponent(name)}/${action}`),
   updateAgent: (id: number) => request<{ started: boolean }>("POST", `/api/servers/${id}/agent/update`),
+  agentSmart: (id: number, enabled: boolean) =>
+    request<{ started: boolean }>("POST", `/api/servers/${id}/agent/smart`, { enabled }),
+  containerHistory: (id: number, name: string, range: HistoryRange) =>
+    request<ContainerHistory>(
+      "GET",
+      `/api/servers/${id}/containers/${encodeURIComponent(name)}/history?range=${encodeURIComponent(range)}`,
+    ),
   updateAgents: () => request<{ started: number }>("POST", "/api/servers/agents/update"),
+  sudo: (id: number) => request<SudoState>("GET", `/api/servers/${id}/sudo`),
+  setSudo: (id: number, mode: SudoMode) => request<SudoState>("PUT", `/api/servers/${id}/sudo`, { mode }),
   alerts: () => request<AlertsView>("GET", "/api/alerts"),
   alertSummary: () => request<AlertSummary>("GET", "/api/alerts/summary"),
   ackAlert: (id: number) => request<Alert>("POST", `/api/alerts/${id}/ack`),
+  diagnoseAlert: (id: number) => request<Diagnosis>("POST", `/api/alerts/${id}/diagnose`),
   silenceAlert: (id: number, minutes: number) =>
     request<{ alert: Alert; until: string }>("POST", `/api/alerts/${id}/silence`, { minutes }),
   rules: () => request<Rule[]>("GET", "/api/alert-rules"),
@@ -190,6 +202,10 @@ export const api = {
   saveHeartbeat: (fail_endpoint: boolean, url?: string) =>
     request<HeartbeatStatus>("PUT", "/api/notify/heartbeat", url === undefined ? { fail_endpoint } : { fail_endpoint, url }),
   testHeartbeat: () => request<HeartbeatStatus>("POST", "/api/notify/heartbeat/test"),
+  createChannel: (c: ChannelInput & { url: string }) => request<NotifyChannel>("POST", "/api/notify/channels", c),
+  updateChannel: (id: number, c: ChannelInput) => request<NotifyChannel>("PUT", `/api/notify/channels/${id}`, c),
+  deleteChannel: (id: number) => request<unknown>("DELETE", `/api/notify/channels/${id}`),
+  testChannel: (id: number) => request<unknown>("POST", `/api/notify/channels/${id}/test`),
   checks: (id: number) => request<ChecksView>("GET", `/api/servers/${id}/checks`).then(normalizeChecks),
   saveChecks: (id: number, targets: string[]) =>
     request<ChecksView>("PUT", `/api/servers/${id}/checks`, { targets }).then(normalizeChecks),
@@ -255,6 +271,18 @@ export interface Alert {
   acked_at?: string;
   resolved_at?: string;
   notified: boolean;
+  diagnosis?: Diagnosis;
+}
+
+// The AI agent's read-only investigation of an alert.
+export interface Diagnosis {
+  alert_id: number;
+  state: "queued" | "running" | "done" | "error" | "skipped";
+  trigger: "auto" | "manual";
+  text: string;
+  tools: number;
+  started_at: string;
+  finished_at?: string;
 }
 
 export interface AlertsView {
@@ -268,6 +296,8 @@ export interface AlertSummary {
   crit: number;
   last24h: number;
   telegram: "ok" | "off" | "error";
+  channels: number; // enabled Shoutrrr channels
+  channels_failing: number;
   latest: Alert[];
 }
 
@@ -309,10 +339,33 @@ export interface HeartbeatStatus {
   problems?: string[];
 }
 
+// A Shoutrrr notification channel; the URL (with its credentials) never
+// comes back from the server.
+export interface NotifyChannel {
+  id: number;
+  name: string;
+  service: string;
+  target: string;
+  min_severity: Severity;
+  enabled: boolean;
+  last_sent?: string;
+  last_error?: string;
+}
+
+export interface ChannelInput {
+  name: string;
+  url?: string; // absent on update: keep the stored one
+  min_severity: Severity;
+  enabled: boolean;
+}
+
 export interface NotifyView {
   telegram: TelegramStatus;
   quiet: Quiet;
   heartbeat?: HeartbeatStatus;
+  channels: NotifyChannel[];
+  services: string[];
+  channels_ok: boolean; // false: no master key to seal channel URLs
 }
 
 // --- server screen (stage 2) ---
@@ -354,6 +407,29 @@ export interface Inventory {
   cpu_model?: string;
   docker_version?: string;
   ips?: string[];
+  // The agent runs with S.M.A.R.T. reads on.
+  smart?: boolean;
+}
+
+// S.M.A.R.T. state of one disk; fields the disk does not report are absent.
+export interface DiskHealth {
+  device: string;
+  type?: "ata" | "nvme";
+  model?: string;
+  serial?: string;
+  passed?: boolean;
+  temp_c?: number;
+  power_on_hours?: number;
+  reallocated?: number;
+  pending?: number;
+  uncorrectable?: number;
+  percent_used?: number;
+  available_spare?: number;
+  spare_threshold?: number;
+  media_errors?: number;
+  critical_warning?: number;
+  // standby | unsupported | permission
+  error?: string;
 }
 
 export interface ServerDetailView extends ServerView {
@@ -364,6 +440,8 @@ export interface ServerDetailView extends ServerView {
   detail_at?: string;
   inventory?: Inventory;
   logs: LogLine[];
+  smart?: DiskHealth[];
+  smart_at?: string;
 }
 
 export type HistoryRange = "15m" | "1h" | "6h" | "24h" | "7d";
@@ -376,6 +454,15 @@ export interface History {
   cpu: (number | null)[];
   rx: (number | null)[];
   tx: (number | null)[];
+}
+
+export interface ContainerHistory {
+  range: HistoryRange;
+  container: string;
+  start: string;
+  step_sec: number;
+  cpu: (number | null)[];
+  mem: (number | null)[];
 }
 
 export interface ServerCard {
@@ -416,6 +503,13 @@ export interface SetupKey {
   command: string;
 }
 
+// Sudo of the panel's SSH user on a server ("custom": rules srvmon did not write).
+export type SudoMode = "none" | "limited" | "full";
+export interface SudoState {
+  mode: SudoMode | "custom";
+  user: string;
+}
+
 export interface OnboardRequest {
   server_id: number;
   card: NewServerCard;
@@ -426,7 +520,7 @@ export interface OnboardRequest {
   passphrase: string;
   setup_key: string;
   host_key: string;
-  sudo: boolean;
+  sudo_mode: SudoMode;
   disable_password: boolean;
   install_agent: boolean;
 }
@@ -452,3 +546,135 @@ export function terminalURL(serverId: number, cols: number, rows: number, contai
   if (container) q.set("container", container);
   return `${proto}//${location.host}/api/servers/${serverId}/terminal?${q}`;
 }
+
+// --- terminal recordings ---
+
+export interface Recording {
+  id: number;
+  server_id: number;
+  server_name: string;
+  target: string;
+  ip: string;
+  cols: number;
+  rows: number;
+  started_at: string;
+  ended_at?: string;
+  bytes: number;
+  truncated: boolean;
+}
+
+export interface RecSettings {
+  enabled: boolean;
+  retention_days: number;
+  max_mb: number;
+}
+
+export interface RecSettingsView extends RecSettings {
+  available: boolean;
+  count: number;
+  disk_bytes: number;
+}
+
+export const recApi = {
+  // A page of 100, newest first; before = the last id of the previous page.
+  list: (server?: number, before?: number) => {
+    const q = new URLSearchParams();
+    if (server) q.set("server", String(server));
+    if (before) q.set("before", String(before));
+    return request<Recording[] | null>("GET", `/api/recordings${q.size ? `?${q}` : ""}`).then((l) => l ?? []);
+  },
+  servers: () =>
+    request<{ id: number; name: string; count: number }[] | null>("GET", "/api/recordings/servers").then((l) => l ?? []),
+  get: (id: number) => request<Recording>("GET", `/api/recordings/${id}`),
+  remove: (id: number) => request<unknown>("DELETE", `/api/recordings/${id}`),
+  removeAll: () => request<{ deleted: number }>("DELETE", "/api/recordings"),
+  settings: () => request<RecSettingsView>("GET", "/api/recordings/settings"),
+  saveSettings: (s: RecSettings) => request<RecSettingsView>("PUT", "/api/recordings/settings", s),
+  castURL: (id: number, download = false) => `/api/recordings/${id}/cast${download ? "?download=1" : ""}`,
+  cast: async (id: number): Promise<string> => {
+    const res = await fetch(`/api/recordings/${id}/cast`, { credentials: "same-origin" });
+    if (!res.ok) {
+      const data = (await readBody(res)) as { error?: string };
+      throw new ApiError(res.status, data.error ?? "error");
+    }
+    return res.text();
+  },
+};
+
+// --- files over SFTP ---
+
+export interface FileEntry {
+  name: string;
+  size: number;
+  mode: string;
+  mtime: string;
+  dir: boolean;
+  link?: boolean;
+}
+
+export interface FileList {
+  path: string;
+  entries: FileEntry[] | null;
+  truncated?: boolean;
+}
+
+// Uploads go in chunks below the reverse proxy's body limit.
+const UPLOAD_CHUNK = 4 << 20;
+
+export const filesApi = {
+  list: (id: number, path?: string) =>
+    request<FileList>("GET", `/api/servers/${id}/files${path ? `?path=${encodeURIComponent(path)}` : ""}`).then(
+      (l) => ({ ...l, entries: l.entries ?? [] }),
+    ),
+  downloadURL: (id: number, path: string) => `/api/servers/${id}/files/download?path=${encodeURIComponent(path)}`,
+  mkdir: (id: number, path: string) => request<unknown>("POST", `/api/servers/${id}/files/mkdir`, { path }),
+  rename: (id: number, from: string, to: string) =>
+    request<unknown>("POST", `/api/servers/${id}/files/rename`, { from, to }),
+  remove: (id: number, path: string, recursive: boolean) =>
+    request<unknown>("POST", `/api/servers/${id}/files/delete`, { path, recursive }),
+  upload: async (
+    id: number,
+    path: string,
+    file: File,
+    overwrite: boolean,
+    onProgress: (sent: number) => void,
+    signal?: AbortSignal,
+  ) => {
+    // A fresh id per upload keeps two uploads of the same name apart.
+    const rnd = new Uint8Array(16);
+    crypto.getRandomValues(rnd);
+    const upload = Array.from(rnd, (b) => b.toString(16).padStart(2, "0")).join("");
+    let offset = 0;
+    try {
+      do {
+        const chunk = file.slice(offset, offset + UPLOAD_CHUNK);
+        const final = offset + chunk.size >= file.size;
+        const q = new URLSearchParams({ path, upload, offset: String(offset) });
+        if (final) q.set("final", "1");
+        if (overwrite) q.set("overwrite", "1");
+        const res = await fetch(`/api/servers/${id}/files/upload?${q}`, {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/octet-stream" },
+          body: chunk,
+          signal,
+        });
+        const data = (await readBody(res)) as { error?: string; message?: string };
+        if (!res.ok) {
+          const err = new ApiError(res.status, data.error ?? "error");
+          if (data.message) err.message = data.message;
+          throw err;
+        }
+        offset += chunk.size;
+        onProgress(offset);
+      } while (offset < file.size);
+    } catch (e) {
+      // Drop the half-written part file on the server (best effort).
+      const q = new URLSearchParams({ path, upload });
+      void fetch(`/api/servers/${id}/files/upload/abort?${q}`, { method: "POST", credentials: "same-origin" }).catch(
+        () => undefined,
+      );
+      throw e;
+    }
+  },
+};
