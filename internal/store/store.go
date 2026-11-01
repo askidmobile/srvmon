@@ -478,11 +478,17 @@ func (s *Store) ReissueAgentToken(ctx context.Context, serverID int64, tokenHash
 }
 
 // AgentServer resolves a live agent token to its server and bumps last_seen.
-// The first push of a reissued token revokes the server's other tokens.
+// The first push of a reissued token revokes the server's other tokens, in
+// the same transaction: the token is never activated without the revoke.
 func (s *Store) AgentServer(ctx context.Context, tokenHash string) (id int64, name string, err error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, "", err
+	}
+	defer tx.Rollback()
 	var seen sql.NullInt64
 	var supersede bool
-	err = s.db.QueryRowContext(ctx, `SELECT s.id, s.name, t.last_seen_at, t.supersede FROM agent_tokens t JOIN servers s ON s.id = t.server_id
+	err = tx.QueryRowContext(ctx, `SELECT s.id, s.name, t.last_seen_at, t.supersede FROM agent_tokens t JOIN servers s ON s.id = t.server_id
 		WHERE t.token_hash = ? AND t.revoked_at IS NULL`, tokenHash).Scan(&id, &name, &seen, &supersede)
 	if errors.Is(err, sql.ErrNoRows) {
 		return 0, "", ErrNotFound
@@ -490,11 +496,17 @@ func (s *Store) AgentServer(ctx context.Context, tokenHash string) (id int64, na
 	if err != nil {
 		return 0, "", err
 	}
-	_, err = s.db.ExecContext(ctx, `UPDATE agent_tokens SET last_seen_at = ?, supersede = 0 WHERE token_hash = ?`, time.Now().Unix(), tokenHash)
-	if err == nil && supersede && !seen.Valid {
-		err = s.RevokeOtherAgentTokens(ctx, id, tokenHash)
+	now := time.Now().Unix()
+	if _, err = tx.ExecContext(ctx, `UPDATE agent_tokens SET last_seen_at = ?, supersede = 0 WHERE token_hash = ?`, now, tokenHash); err != nil {
+		return 0, "", err
 	}
-	return id, name, err
+	if supersede && !seen.Valid {
+		if _, err = tx.ExecContext(ctx, `UPDATE agent_tokens SET revoked_at = ?
+			WHERE server_id = ? AND token_hash != ? AND revoked_at IS NULL`, now, id, tokenHash); err != nil {
+			return 0, "", err
+		}
+	}
+	return id, name, tx.Commit()
 }
 
 // ServerIDByName returns the id of the server with this name.
