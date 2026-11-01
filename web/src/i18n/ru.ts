@@ -500,7 +500,7 @@ export const ru: Dict = {
   "If the panel goes down, the pings stop and the external service alerts you by email or its own channels.": "Если панель упадёт, пинги прекратятся, и внешний сервис предупредит вас письмом или по своим каналам.",
   "ping URL": "URL пинга",
   "report problems to": "сообщать о проблемах на",
-  "(healthchecks.io; off: skip the ping instead)": "(healthchecks.io; выключено: просто пропустить пинг)",
+  "(healthchecks.io, Better Stack; off: skip the ping instead)": "(healthchecks.io, Better Stack; выключено: просто пропустить пинг)",
   "last ping": "последний пинг",
   "ping sent": "пинг отправлен",
   "ping now": "пинг сейчас",
