@@ -128,6 +128,9 @@ func stripInspectEnv(resp *http.Response) error {
 // ServeDockerProxy listens on the unix socket listen (root-only, 0600) and
 // forwards allowed requests to the docker socket upstream until ctx ends.
 func ServeDockerProxy(ctx context.Context, listen, upstream string, log *slog.Logger) error {
+	if err := setNonDumpable(); err != nil {
+		return fmt.Errorf("prctl PR_SET_DUMPABLE: %w", err)
+	}
 	if err := os.MkdirAll(filepath.Dir(listen), 0o755); err != nil {
 		return err
 	}

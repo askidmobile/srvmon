@@ -147,14 +147,17 @@ write_sudo() {
     sudo -n rm -f "/etc/sudoers.d/$U"
   fi
 }
-if docker info >/dev/null 2>&1; then
+D=""
+if docker info >/dev/null 2>&1; then D=docker
+elif sudo -n docker info >/dev/null 2>&1; then D="sudo -n docker"; fi
+if [ -n "$D" ]; then
   [ -d /etc/sudoers.d ] || exit 0
   # Refresh the image: a cached older tag may predate write-sudoers.
   REG=${IMG%%/*}
-  if [ -n "$RU" ]; then printf '%s' "$RT" | docker login "$REG" -u "$RU" --password-stdin >/dev/null 2>&1 || true; fi
-  docker pull -q "$IMG" >/dev/null 2>&1 || true
-  if [ -n "$RU" ]; then docker logout "$REG" >/dev/null 2>&1 || true; fi
-  if OUT=$(docker run --rm -i --pull never --network none --read-only --cap-drop ALL \
+  if [ -n "$RU" ]; then printf '%s' "$RT" | $D login "$REG" -u "$RU" --password-stdin >/dev/null 2>&1 || true; fi
+  $D pull -q "$IMG" >/dev/null 2>&1 || true
+  if [ -n "$RU" ]; then $D logout "$REG" >/dev/null 2>&1 || true; fi
+  if OUT=$($D run --rm -i --pull never --network none --read-only --cap-drop ALL \
     --security-opt no-new-privileges=true --user 0:0 \
     -v /etc/sudoers.d:/sudoers.d --entrypoint /srvmon-agent "$IMG" write-sudoers "$U" < "$T" 2>&1); then
     exit 0
