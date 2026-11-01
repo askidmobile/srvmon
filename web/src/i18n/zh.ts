@@ -721,5 +721,5 @@ export const zh: Dict = {
   "not written to the server: {error}": "未写入服务器：{error}",
   "systemd service, no docker": "systemd 服务，无 docker",
   "the agent runs as a systemd service without docker: containers are not collected": "代理以 systemd 服务运行，无 docker：不收集容器",
-  "The token is shown once. Without docker (Proxmox VE) run the first command as root; in the panel terminal (user srvmon) put sudo before SRVMON_TOKEN.": "令牌只显示一次。没有 docker（Proxmox VE）时请以 root 运行第一条命令；在面板终端（用户 srvmon）中请在 SRVMON_TOKEN 前加上 sudo。",
+  "The token is shown once. Without docker (Proxmox VE) run the first command as root; in the panel terminal (user srvmon) put sudo before SRVMON_TOKEN, which needs full sudo (the sudo row of the passport).": "令牌只显示一次。没有 docker（Proxmox VE）时请以 root 运行第一条命令；在面板终端（用户 srvmon）中请在 SRVMON_TOKEN 前加上 sudo，这需要完整 sudo（护照中的 sudo 行）。",
 };

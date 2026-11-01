@@ -721,5 +721,5 @@ export const ru: Dict = {
   "not written to the server: {error}": "не записан на сервер: {error}",
   "systemd service, no docker": "systemd-сервис, без docker",
   "the agent runs as a systemd service without docker: containers are not collected": "агент работает systemd-сервисом без docker: контейнеры не собираются",
-  "The token is shown once. Without docker (Proxmox VE) run the first command as root; in the panel terminal (user srvmon) put sudo before SRVMON_TOKEN.": "Токен показывается один раз. Без docker (Proxmox VE) выполните первую команду от root; в терминале панели (пользователь srvmon) допишите sudo перед SRVMON_TOKEN.",
+  "The token is shown once. Without docker (Proxmox VE) run the first command as root; in the panel terminal (user srvmon) put sudo before SRVMON_TOKEN, which needs full sudo (the sudo row of the passport).": "Токен показывается один раз. Без docker (Proxmox VE) выполните первую команду от root; в терминале панели (пользователь srvmon) допишите sudo перед SRVMON_TOKEN, для этого нужен полный sudo (строка sudo в паспорте).",
 };
