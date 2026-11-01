@@ -62,7 +62,7 @@ export function AgentToken({ s }: { s: ServerView }) {
     <div className="flex w-full flex-col gap-2 py-1">
       {tok.written && <span className="text-primary">{t("written to the server: the agent switches to it within a minute")}</span>}
       {tok.write_error && <span className="text-crit">{t("not written to the server: {error}", { error: tok.write_error })}</span>}
-      <span className="text-warn">{t("The token is shown once. Without docker (Proxmox VE) use the first command, as root.")}</span>
+      <span className="text-warn">{t("The token is shown once. Without docker (Proxmox VE) run the first command as root; in the panel terminal (user srvmon) put sudo before SRVMON_TOKEN, which needs full sudo (the sudo row of the passport).")}</span>
       {block("token", t("token"), tok.token)}
       {block("systemd", t("systemd service, no docker"), tok.systemd)}
       {block("docker", "docker", tok.docker)}

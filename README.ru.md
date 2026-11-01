@@ -129,6 +129,8 @@ SRVMON_URL=https://mon.example.com SRVMON_TOKEN=a_... docker compose up -d
 
 ### Хосты без docker (Proxmox VE)
 
+Подробная инструкция: [docs/agent.md](docs/agent.md).
+
 На гипервизоре docker нежелателен (переписывает iptables/nftables и живёт в cgroup рядом с KVM и ZFS), а агент в LXC-госте увидит гостя, а не ноду. Поэтому агент умеет работать обычным **systemd-сервисом**. Режим агента в мастере по умолчанию `auto`: docker, если он есть на сервере; systemd-сервис на ноде Proxmox VE без docker (docker не ставится); иначе docker, как раньше. `docker` и `systemd` задают режим явно.
 
 - В образе панели лежат статические бинари агента (`/agent/srvmon-agent-linux-amd64|arm64`, из того же коммита); панель копирует нужный по SSH в `/usr/local/lib/srvmon-agent/`. Серверу не нужен доступ к GitHub или реестру. К релизам `v*` бинари прикладываются вместе с `SHA256SUMS`.

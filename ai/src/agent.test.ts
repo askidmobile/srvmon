@@ -250,4 +250,9 @@ test("the system prompt asks for the panel language", () => {
   assert.match(systemPrompt("db-1", "diagnose", "Russian"), /READ-ONLY/);
   assert.match(systemPrompt("db-1", "diagnose", "Russian"), /Reply in Russian/);
   assert.doesNotMatch(systemPrompt("db-1", "diagnose"), /srvmon_task_create/);
+  // Both prompts know the systemd agent and never push docker onto it.
+  for (const p of [systemPrompt("pve"), systemPrompt("pve", "diagnose")]) {
+    assert.match(p, /journalctl -u srvmon-agent/);
+    assert.match(p, /never suggest installing docker/);
+  }
 });

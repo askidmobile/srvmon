@@ -39,6 +39,18 @@ export const DEFAULT_LANG = "English";
 /** What a session is for: a chat, a scheduled task or a read-only alert diagnosis. */
 export type Mode = "chat" | "task" | "diagnose";
 
+// How srvmon itself runs on the servers: the agent needs this to read the
+// state right and not suggest the wrong fix (docker on a hypervisor).
+const SRVMON_AGENT_FACTS = [
+  "How srvmon-agent runs (field \"agent\" of srvmon_servers / srvmon_server):",
+  "- docker: containers srvmon-agent and srvmon-dockerproxy; its log is `docker logs srvmon-agent`.",
+  "- systemd: a service without docker (hypervisors such as Proxmox VE): `systemctl status srvmon-agent`, `journalctl -u srvmon-agent`; binary /usr/local/lib/srvmon-agent/srvmon-agent, settings /etc/srvmon/agent.env. There are no containers on such a host, and that is expected: never suggest installing docker there. Its warnings come from journald.",
+  "- none: the server has no agent, the panel reaches it over SSH only (no metrics or alerts). waiting: a token was issued but no agent pushed yet. silent: the agent stopped pushing; check its service or container.",
+  "- The agent token is kept by the panel only as a hash and cannot be shown. A new one is issued in the server passport, row \"agent token\": \"reissue on the server\" or \"token for a manual install\". The manual install of the systemd agent is `curl -fsSL <panel>/agent/install.sh | sudo SRVMON_TOKEN=<token> sh` (as root without sudo; through srvmon_exec it needs full sudo for the srvmon user, the limited mode does not allow sh); give the owner this command, never invent a token.",
+  "- The panel updates agents of both kinds itself over SSH; do not replace the binary or the containers by hand.",
+  "- Lines in the agent's logs come from the host itself (e.g. sshd or pvedaemon authentication failures are someone guessing passwords on that host), not from srvmon.",
+];
+
 export function systemPrompt(server?: string, task: boolean | Mode = false, lang = DEFAULT_LANG): string {
   const mode: Mode = task === true ? "task" : task === false ? "chat" : task;
   if (mode === "diagnose") return diagnosePrompt(server, lang);
@@ -50,6 +62,8 @@ export function systemPrompt(server?: string, task: boolean | Mode = false, lang
     "- srvmon_servers / srvmon_server: state and containers from the srvmon agents (start with them, they are cheap);",
     "- srvmon_exec: a command on a server over SSH. Reads run at once. Anything that changes a server waits for the owner's confirmation in the panel; explain such commands in reason;",
     "- srvmon_tasks / srvmon_task_create / srvmon_task_delete: scheduled monitoring tasks (cron in UTC).",
+    "",
+    ...SRVMON_AGENT_FACTS,
     "",
     "Rules:",
     "- First find out (logs, inspect, docker events), then propose a change and ask for confirmation with one clear command.",
@@ -77,6 +91,8 @@ function diagnosePrompt(server: string | undefined, lang: string): string {
     `Reply in ${lang || DEFAULT_LANG}, like an experienced SRE: short plain text, commands and paths as \`code\`, no tables or headings.`,
     "",
     "Tools: srvmon_servers / srvmon_server (state from the srvmon agents, cheap: start with them) and srvmon_exec (a read-only command on a server over SSH).",
+    "",
+    ...SRVMON_AGENT_FACTS,
     "",
     "Rules:",
     "- You cannot change anything. srvmon refuses every command that is not read-only; nobody will confirm it. Do not try other forms of a changing command.",
