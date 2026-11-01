@@ -196,8 +196,18 @@ func TestNotifyFiltersBySeverity(t *testing.T) {
 	if got := fs.list(); len(got) != 3 || !strings.HasPrefix(got[1].title+got[2].title, "✅ RESOLVED · srvmon") {
 		t.Fatalf("resolved = %+v", got)
 	}
-	if v := h.List(); v[0].ID != crit.ID || v[0].LastSent == nil {
-		t.Fatalf("status not recorded: %+v", v[0])
+	// The fake signals inside Send; the hub records the status after Send
+	// returns, so it may land a moment later.
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		v := h.List()
+		if v[0].ID == crit.ID && v[0].LastSent != nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("status not recorded: %+v", v[0])
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 
