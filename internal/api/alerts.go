@@ -205,6 +205,11 @@ func validateRule(r *store.Rule) string {
 		if r.DurationSec < 60 {
 			return i18n.T("the restart counting window is at least 1 minute")
 		}
+	case store.KindDiskFill:
+		if r.Threshold < 1 || r.Threshold > 24*30 {
+			return i18n.T("threshold: from 1 hour to 30 days (720 hours)")
+		}
+		r.DurationSec = 0
 	case store.KindPaymentDue:
 		if r.Threshold < 0 || r.Threshold > 60 || r.Threshold != float64(int(r.Threshold)) {
 			return i18n.T("threshold: from 0 to 60 days")

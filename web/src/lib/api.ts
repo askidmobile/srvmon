@@ -141,6 +141,8 @@ export interface ServerView {
   agent_outdated?: boolean;
   agent_latest?: string;
   agent_update?: AgentUpdate;
+  // Hours until a growing filesystem is full, by mount point (≤ 30 days).
+  disk_full_hours?: Record<string, number>;
 }
 
 export interface AgentUpdate {
@@ -170,6 +172,13 @@ export const api = {
   containerAction: (id: number, name: string, action: "restart" | "stop" | "start") =>
     request<{ ok: boolean }>("POST", `/api/servers/${id}/containers/${encodeURIComponent(name)}/${action}`),
   updateAgent: (id: number) => request<{ started: boolean }>("POST", `/api/servers/${id}/agent/update`),
+  agentSmart: (id: number, enabled: boolean) =>
+    request<{ started: boolean }>("POST", `/api/servers/${id}/agent/smart`, { enabled }),
+  containerHistory: (id: number, name: string, range: HistoryRange) =>
+    request<ContainerHistory>(
+      "GET",
+      `/api/servers/${id}/containers/${encodeURIComponent(name)}/history?range=${encodeURIComponent(range)}`,
+    ),
   updateAgents: () => request<{ started: number }>("POST", "/api/servers/agents/update"),
   sudo: (id: number) => request<SudoState>("GET", `/api/servers/${id}/sudo`),
   setSudo: (id: number, mode: SudoMode) => request<SudoState>("PUT", `/api/servers/${id}/sudo`, { mode }),
@@ -353,6 +362,29 @@ export interface Inventory {
   cpu_model?: string;
   docker_version?: string;
   ips?: string[];
+  // The agent runs with S.M.A.R.T. reads on.
+  smart?: boolean;
+}
+
+// S.M.A.R.T. state of one disk; fields the disk does not report are absent.
+export interface DiskHealth {
+  device: string;
+  type?: "ata" | "nvme";
+  model?: string;
+  serial?: string;
+  passed?: boolean;
+  temp_c?: number;
+  power_on_hours?: number;
+  reallocated?: number;
+  pending?: number;
+  uncorrectable?: number;
+  percent_used?: number;
+  available_spare?: number;
+  spare_threshold?: number;
+  media_errors?: number;
+  critical_warning?: number;
+  // standby | unsupported | permission
+  error?: string;
 }
 
 export interface ServerDetailView extends ServerView {
@@ -363,6 +395,8 @@ export interface ServerDetailView extends ServerView {
   detail_at?: string;
   inventory?: Inventory;
   logs: LogLine[];
+  smart?: DiskHealth[];
+  smart_at?: string;
 }
 
 export type HistoryRange = "15m" | "1h" | "6h" | "24h" | "7d";
@@ -375,6 +409,15 @@ export interface History {
   cpu: (number | null)[];
   rx: (number | null)[];
   tx: (number | null)[];
+}
+
+export interface ContainerHistory {
+  range: HistoryRange;
+  container: string;
+  start: string;
+  step_sec: number;
+  cpu: (number | null)[];
+  mem: (number | null)[];
 }
 
 export interface ServerCard {

@@ -99,6 +99,8 @@ var migrations = []string{
 	migrationDiagnoses,
 	// Backups: alert rule for a failed scheduled backup.
 	migrationBackupRule,
+	// Disk fill forecast and S.M.A.R.T. alert rules.
+	migrationDiskRules,
 }
 
 func (s *Store) migrate(ctx context.Context) error {

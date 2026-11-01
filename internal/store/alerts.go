@@ -21,6 +21,12 @@ const (
 	KindBruteforce        = "bruteforce"
 	KindLogin             = "login"
 	KindBackup            = "backup" // a scheduled backup failed
+	// KindDiskFill: a filesystem will be full within Threshold hours at
+	// its 6-hour growth rate.
+	KindDiskFill = "disk_fill"
+	// KindSmart: a disk fails its S.M.A.R.T. self-assessment or reports
+	// reallocated/pending sectors, media errors or a critical warning.
+	KindSmart = "smart"
 )
 
 // EventKind reports whether a rule kind fires on events, not on state.
@@ -32,7 +38,7 @@ func EventKind(kind string) bool {
 func KnownKind(kind string) bool {
 	switch kind {
 	case KindAgentSilent, KindCPU, KindMem, KindDisk, KindContainerDown, KindContainerRestarts,
-		KindPaymentDue, KindFail2ban, KindBruteforce, KindLogin, KindBackup:
+		KindPaymentDue, KindFail2ban, KindBruteforce, KindLogin, KindBackup, KindDiskFill, KindSmart:
 		return true
 	}
 	return false
@@ -110,6 +116,11 @@ const migrationAlerts = `CREATE TABLE alert_rules (
 // migrationBackupRule: a failed scheduled backup alerts by default.
 const migrationBackupRule = `INSERT INTO alert_rules (kind, enabled, threshold, duration_sec, severity, channel)
 	VALUES ('backup', 1, 0, 0, 'crit', 'tg');`
+
+// migrationDiskRules adds the disk forecast and S.M.A.R.T. rules.
+const migrationDiskRules = `INSERT INTO alert_rules (kind, enabled, threshold, duration_sec, severity, channel) VALUES
+		('disk_fill', 1, 24, 0, 'warn', 'tg'),
+		('smart', 1, 0, 0, 'crit', 'tg');`
 
 // Rule is one alert rule. Threshold is percent for cpu/mem/disk, a restart
 // count for container_restarts and days for payment_due. Duration is how long

@@ -33,6 +33,28 @@ type AgentInstall struct {
 	// used for one pull and logged out right after.
 	RegistryUser  string
 	RegistryToken string
+	// Smart turns S.M.A.R.T. reads on or off. nil keeps what the running
+	// agent has (updates) or leaves it off (new installs).
+	Smart *bool
+}
+
+// smartArgs are the extra docker run arguments of an agent with
+// S.M.A.R.T.: raw read access to SATA (major 8) and NVMe (259) disks.
+const smartArgs = `-e SRVMON_SMART=1 --cap-add SYS_RAWIO --cap-add SYS_ADMIN --device-cgroup-rule 'b 8:* r' --device-cgroup-rule 'b 259:* r'`
+
+// smartScript sets the positional parameters to the docker run arguments
+// for S.M.A.R.T. ($SM is 1 or 0).
+const smartScript = `if [ "$SM" = 1 ]; then set -- ` + smartArgs + `; else set --; fi
+`
+
+func smartWanted(p *bool) string {
+	switch {
+	case p == nil:
+		return "keep"
+	case *p:
+		return "1"
+	}
+	return "0"
 }
 
 // OnboardParams are the inputs of Onboard.
@@ -365,8 +387,13 @@ if command -v usermod >/dev/null 2>&1; then usermod -aG docker "$U"; else addgro
 // container with the same mounts as deploy/agent/docker-compose.yml.
 func agentScript(a AgentInstall) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "set -e\nIMG=%s\nURL=%s\nTOKEN=%s\nRU=%s\nRT=%s\n",
-		shq(a.Image), shq(a.URL), shq(a.Token), shq(a.RegistryUser), shq(a.RegistryToken))
+	sm := "0"
+	if a.Smart != nil && *a.Smart {
+		sm = "1"
+	}
+	fmt.Fprintf(&b, "set -e\nIMG=%s\nURL=%s\nTOKEN=%s\nRU=%s\nRT=%s\nSM=%s\n",
+		shq(a.Image), shq(a.URL), shq(a.Token), shq(a.RegistryUser), shq(a.RegistryToken), sm)
+	b.WriteString(smartScript)
 	b.WriteString(`command -v docker >/dev/null 2>&1 || { echo no-docker >&2; exit 3; }
 mkdir -p /etc/srvmon
 chmod 700 /etc/srvmon
@@ -401,7 +428,7 @@ $D run -d --name srvmon-dockerproxy --restart unless-stopped \
 // agentRun starts srvmon-agent from $IMG with the mounts of
 // deploy/agent/docker-compose.yml. The docker socket comes from
 // srvmon-dockerproxy; the host's /run (docker and containerd sockets) is
-// hidden under an empty read-only tmpfs.
+// hidden under an empty read-only tmpfs. "$@" carries smartScript's flags.
 const agentRun = `$D run -d --name srvmon-agent --restart unless-stopped \
   --network host --pid host --read-only --security-opt no-new-privileges=true \
   -e SRVMON_URL="$URL" -e SRVMON_TOKEN_FILE=/etc/srvmon/agent.token \
@@ -409,7 +436,7 @@ const agentRun = `$D run -d --name srvmon-agent --restart unless-stopped \
   -v /etc/srvmon/agent.token:/etc/srvmon/agent.token:ro \
   -v /proc:/host/proc:ro -v /:/host:ro,rslave --tmpfs /host/run:ro,size=64k \
   -v srvmon-dockerproxy:/run/srvmon:ro \
-  "$IMG" >/dev/null`
+  "$@" "$IMG" >/dev/null`
 
 // disablePasswordScript turns off password logins. sshd takes the first
 // value it reads, and an Include may come before or after other settings,

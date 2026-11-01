@@ -12,6 +12,9 @@
 //	HOST_PROC        host procfs, default /proc (container: /host/proc)
 //	HOST_ROOT        host root fs, default / (container: /host)
 //	DOCKER_SOCK      docker socket, default /var/run/docker.sock; empty disables
+//	SRVMON_SMART     1 reads S.M.A.R.T. of the host's disks every 30 min; needs
+//	                 --cap-add SYS_RAWIO --cap-add SYS_ADMIN and read access to
+//	                 block devices (--device-cgroup-rule 'b 8:* r' 'b 259:* r')
 //
 // Subcommands (same image, other containers):
 //
@@ -81,6 +84,7 @@ func main() {
 		HostProc:   getenv("HOST_PROC", "/proc"),
 		HostRoot:   getenv("HOST_ROOT", "/"),
 		DockerSock: sock,
+		Smart:      os.Getenv("SRVMON_SMART") == "1" || os.Getenv("SRVMON_SMART") == "true",
 		Version:    version,
 	}
 	if err := agent.Run(ctx, cfg, log); err != nil {
