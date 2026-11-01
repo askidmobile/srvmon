@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"os/exec"
 	"strconv"
 	"time"
@@ -12,9 +13,12 @@ import (
 	"github.com/askidmobile/srvmon/internal/protocol"
 )
 
-// journalLines caps one journalctl read. Info entries are read too: a
+// journalLines caps one journalctl read. Info entries are read too, since a
 // service's stdout lands at PRIORITY=6 even when the line says [WARNING].
-const journalLines = 1000
+// The read goes forward from the cursor and stops after this many entries;
+// the next pass continues where it stopped, so a burst of info lines delays
+// a warning but cannot push it out of the window.
+const journalLines = 5000
 
 // journal returns warn-or-worse journald entries since the previous call;
 // the first call looks back one hour. The agent runs journalctl itself (a
@@ -28,38 +32,53 @@ func (t *LogTailer) journal(ctx context.Context) []protocol.LogLine {
 		t.noJournal = true
 		return nil
 	}
-	args := []string{"-q", "--no-pager", "-o", "json", "-p", "info", "-n", strconv.Itoa(journalLines)}
+	// No -n: with it journalctl shows the newest entries of the range,
+	// dropping the oldest. Without it the output runs forward from the
+	// cursor and the read below stops early.
+	args := []string{"-q", "--no-pager", "-o", "json", "-p", "info"}
 	if t.journalCursor != "" {
 		args = append(args, "--after-cursor="+t.journalCursor)
 	} else {
 		args = append(args, "--since=-1h")
 	}
-	out, err := exec.CommandContext(ctx, bin, args...).Output()
-	if err != nil && len(out) == 0 {
-		if ctx.Err() == nil {
-			t.noJournal = true
-		}
+	cctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	cmd := exec.CommandContext(cctx, bin, args...)
+	out, err := cmd.StdoutPipe()
+	if err != nil {
 		return nil
 	}
-	lines, cursor := parseJournal(out)
+	if err := cmd.Start(); err != nil {
+		t.noJournal = true
+		return nil
+	}
+	lines, cursor, n := parseJournal(out, journalLines)
+	cancel() // stops journalctl if the read ended early
+	werr := cmd.Wait()
+	if werr != nil && n == 0 && ctx.Err() == nil && cctx.Err() == nil {
+		t.noJournal = true
+	}
 	if cursor != "" {
 		t.journalCursor = cursor
 	}
 	return lines
 }
 
-// parseJournal reads journalctl -o json output: one object per line.
-// It returns the lines and the cursor of the last entry.
-func parseJournal(out []byte) ([]protocol.LogLine, string) {
+// parseJournal reads journalctl -o json output, one object per line, up to
+// max entries. It returns the warn-or-worse lines, the cursor of the last
+// entry read and how many entries were read.
+func parseJournal(r io.Reader, max int) ([]protocol.LogLine, string, int) {
 	var lines []protocol.LogLine
 	cursor := ""
-	sc := bufio.NewScanner(bytes.NewReader(out))
+	n := 0
+	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 64<<10), 4<<20)
-	for sc.Scan() {
+	for n < max && sc.Scan() {
 		var e map[string]json.RawMessage
 		if json.Unmarshal(sc.Bytes(), &e) != nil {
 			continue
 		}
+		n++
 		if c := jstr(e["__CURSOR"]); c != "" {
 			cursor = c
 		}
@@ -85,7 +104,7 @@ func parseJournal(out []byte) ([]protocol.LogLine, string) {
 		}
 		lines = append(lines, protocol.LogLine{Time: ts, Level: lvl, Source: src, Msg: clip(msg, maxLogMsg)})
 	}
-	return lines, cursor
+	return lines, cursor, n
 }
 
 // journalLevel picks the level of a journald entry. PRIORITY is what the
