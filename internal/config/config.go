@@ -44,6 +44,10 @@ type Config struct {
 	// SSH, agents that report another version than the panel's, once per
 	// panel version.
 	AgentAutoUpdate bool
+	// AgentBinDir (SRVMON_AGENT_BIN_DIR, default /agent in the image) holds
+	// srvmon-agent-linux-amd64 and -arm64: the agent the panel installs as
+	// a systemd service on hosts without docker (Proxmox VE).
+	AgentBinDir string
 
 	// AI agent (srvmon-ai container). Both empty disables the agent.
 	// SRVMON_AI_URL is the srvmon-ai base URL, SRVMON_AI_TOKEN the bearer
@@ -77,6 +81,7 @@ func FromEnv() (Config, error) {
 
 		AgentImage:         env("SRVMON_AGENT_IMAGE", "ghcr.io/askidmobile/srvmon-agent:latest"),
 		AgentRegistryUser:  env("SRVMON_AGENT_REGISTRY_USER", ""),
+		AgentBinDir:        env("SRVMON_AGENT_BIN_DIR", "/agent"),
 		AgentRegistryToken: env("SRVMON_AGENT_REGISTRY_TOKEN", ""),
 
 		AIURL:         env("SRVMON_AI_URL", ""),

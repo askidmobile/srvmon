@@ -287,6 +287,9 @@ type onboardReq struct {
 	SudoMode        string `json:"sudo_mode"`
 	DisablePassword bool   `json:"disable_password"`
 	InstallAgent    bool   `json:"install_agent"`
+	// AgentMode: "auto" (default), "docker" or "systemd" (no docker, e.g.
+	// a Proxmox VE node).
+	AgentMode string `json:"agent_mode"`
 }
 
 func (s *Server) handleOnboard(w http.ResponseWriter, r *http.Request) {
@@ -309,6 +312,13 @@ func (s *Server) handleOnboard(w http.ResponseWriter, r *http.Request) {
 	}
 	if !sshgw.ValidSudoMode(req.SudoMode) {
 		writeError(w, http.StatusBadRequest, "bad_sudo_mode")
+		return
+	}
+	if req.AgentMode == "" {
+		req.AgentMode = sshgw.ModeAuto
+	}
+	if !sshgw.ValidAgentMode(req.AgentMode) {
+		writeError(w, http.StatusBadRequest, "bad_agent_mode")
 		return
 	}
 	login, code := s.loginFor(&req)
@@ -479,6 +489,7 @@ func (s *Server) runOnboard(ctx context.Context, j *job, req onboardReq, login l
 		params.Agent = &sshgw.AgentInstall{
 			Image: s.cfg.AgentImage, URL: agentURL, Token: token,
 			RegistryUser: s.cfg.AgentRegistryUser, RegistryToken: s.cfg.AgentRegistryToken,
+			Mode: req.AgentMode, Binaries: s.agentBinaries,
 		}
 	}
 
@@ -517,7 +528,11 @@ func (s *Server) runOnboard(ctx context.Context, j *job, req onboardReq, login l
 			if s.waitHeartbeat(context.Background(), tokenHash) {
 				j.log(sshgw.StepOK, i18n.T("the agent is online"))
 			} else {
-				j.log(sshgw.StepWarn, i18n.T("the agent has not sent metrics yet: check `docker logs srvmon-agent` on the server"))
+				if res.AgentMode == sshgw.ModeSystemd {
+					j.log(sshgw.StepWarn, i18n.T("the agent has not sent metrics yet: check `journalctl -u srvmon-agent` on the server"))
+				} else {
+					j.log(sshgw.StepWarn, i18n.T("the agent has not sent metrics yet: check `docker logs srvmon-agent` on the server"))
+				}
 			}
 		}
 	}

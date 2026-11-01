@@ -99,6 +99,9 @@ func logLevel(msg string) string {
 type LogTailer struct {
 	HostRoot string
 	Docker   *Docker
+	// Journal falls back to journald (journalctl) when the host has no
+	// syslog file, as on Proxmox VE or Debian 12 without rsyslog.
+	Journal bool
 
 	syslogPath  string
 	syslogIno   uint64
@@ -108,6 +111,9 @@ type LogTailer struct {
 	// gelf, ...) cannot be read back: asking again every pass only makes
 	// dockerd log an error each time.
 	noLogs map[string]bool
+
+	journalCursor string
+	noJournal     bool // journalctl is missing or fails
 }
 
 // Collect returns lines that appeared since the previous call. The first
@@ -115,6 +121,9 @@ type LogTailer struct {
 func (t *LogTailer) Collect(ctx context.Context, containers []protocol.Container) []protocol.LogLine {
 	var out []protocol.LogLine
 	out = append(out, t.syslog()...)
+	if t.syslogPath == "" && t.Journal {
+		out = append(out, t.journal(ctx)...)
+	}
 	if t.Docker != nil {
 		out = append(out, t.docker(ctx, containers)...)
 	}

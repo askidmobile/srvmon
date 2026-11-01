@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 
-import { needsAgentUpdate, shortVersion } from "@/components/AgentVersion";
+import { AgentStatusLabel, agentStatus, needsAgentUpdate, shortVersion } from "@/components/AgentVersion";
 import { Hotkey, Shell } from "@/components/Shell";
 import { Button } from "@/components/ui/button";
 import { Panel } from "@/components/ui/panel";
@@ -51,7 +51,7 @@ function Row({ s, onDelete }: { s: ServerView; onDelete: (s: ServerView) => void
       }}
     >
       <td className="py-1.5 pr-4">
-        <span className={s.online ? "text-primary" : "text-crit"}>{s.online ? "●" : "○"}</span>{" "}
+        <AgentStatusLabel s={s} short />{" "}
         <a href={href.server(s.id)} className="text-hi hover:text-primary" onClick={(e) => e.stopPropagation()}>
           {s.name}
         </a>
@@ -97,7 +97,11 @@ function Row({ s, onDelete }: { s: ServerView; onDelete: (s: ServerView) => void
         )}
       </td>
       <td className="pr-4 whitespace-nowrap text-muted-foreground">
-        {r ? `${formatUptime(r.host.uptime_sec)} · ${formatBytes(r.host.mem_total)}` : t("no data")}
+        {r
+          ? `${formatUptime(r.host.uptime_sec)} · ${formatBytes(r.host.mem_total)}`
+          : agentStatus(s) === "ssh_only"
+            ? t("no agent")
+            : t("no data")}
       </td>
       <td className="whitespace-nowrap text-muted-foreground">
         {s.cost != null ? `${s.cost} ${s.currency}` : "—"}
@@ -209,6 +213,8 @@ export function Overview({ route, version, onLogout }: { route: Route; version: 
   const groups = useMemo(() => ["", ...new Set((servers ?? []).map((s) => s.group).filter(Boolean))], [servers]);
   const visible = (servers ?? []).filter((s) => !group || s.group === group);
   const online = (servers ?? []).filter((s) => s.online).length;
+  // SSH-only servers have no agent to be up: they do not count as down.
+  const monitored = (servers ?? []).filter((s) => agentStatus(s) !== "ssh_only").length;
   const outdated = (servers ?? []).filter(needsAgentUpdate).length;
   const updateAll = () => {
     api
@@ -226,8 +232,7 @@ export function Overview({ route, version, onLogout }: { route: Route; version: 
         <>
           {error && <span className="text-crit">{error}</span>}
           <span>
-            <span className={online === (servers?.length ?? 0) ? "text-primary" : "text-warn"}>●</span> {online}/
-            {servers?.length ?? 0} up
+            <span className={online === monitored ? "text-primary" : "text-warn"}>●</span> {online}/{monitored} up
           </span>
           {outdated > 0 && (
             <Button size="sm" variant="outline" onClick={updateAll} title={t("replace outdated agents over ssh")}>

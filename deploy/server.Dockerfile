@@ -21,9 +21,16 @@ COPY --from=web /src/web/dist ./web/dist
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
     go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o /out/srvmon-server ./cmd/server \
  && mkdir -p /out/data /out/log
+# The agent for hosts without docker (systemd mode, e.g. Proxmox VE): the
+# panel copies it to the server over SSH, so it always matches the panel.
+RUN for arch in amd64 arm64; do \
+      CGO_ENABLED=0 GOOS=linux GOARCH=$arch \
+      go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o /out/agent/srvmon-agent-linux-$arch ./cmd/agent || exit 1; \
+    done
 
 FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=build /out/srvmon-server /srvmon-server
+COPY --from=build /out/agent /agent
 COPY --from=build --chown=65532:65532 /out/data /data
 COPY --from=build --chown=65532:65532 /out/log /var/log/srvmon
 ENV SRVMON_LISTEN=:8080 \

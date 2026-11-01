@@ -5,6 +5,7 @@ import (
 	"compress/gzip"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -33,7 +34,20 @@ type Config struct {
 	// then needs CAP_SYS_RAWIO, CAP_SYS_ADMIN and read access to the block
 	// devices (see deploy/agent/docker-compose.yml).
 	Smart bool
+	// Mode is reported to the panel as Report.AgentMode.
+	Mode string
+	// WatchFiles makes Run return ErrRestart once one of these files is
+	// replaced or changed (systemd mode: the panel swaps the binary or the
+	// environment file and the service manager starts the new one).
+	WatchFiles []string
+	// Journal reads warn-or-worse lines from journald (journalctl) when the
+	// host has no syslog file. Only for an agent running on the host itself.
+	Journal bool
 }
+
+// ErrRestart: a watched file changed, the agent should exit and be started
+// again by its service manager.
+var ErrRestart = errors.New("agent files changed, restart")
 
 // Run collects and pushes until ctx is done.
 func Run(ctx context.Context, cfg Config, log *slog.Logger) error {
@@ -70,11 +84,12 @@ func Run(ctx context.Context, cfg Config, log *slog.Logger) error {
 	endpoint := strings.TrimRight(cfg.URL, "/") + "/api/ingest"
 
 	det := &DetailCollector{HostProc: cfg.HostProc, HostRoot: cfg.HostRoot}
-	logs := &LogTailer{HostRoot: cfg.HostRoot, Docker: dock}
+	logs := &LogTailer{HostRoot: cfg.HostRoot, Docker: dock, Journal: cfg.Journal}
+	watch := newFileWatch(cfg.WatchFiles)
 	cg := &CgroupUsage{HostRoot: cfg.HostRoot}
 	smart := newSmartLoop(cfg.Smart, cfg.HostRoot, log)
 	restarts := map[string]int{}
-	var restartsAt, logsAt, invAt time.Time
+	var restartsAt, logsAt, invAt, tokenAt time.Time
 	var detailUntil time.Time
 
 	// Prime CPU counters so the first report has a real percentage.
@@ -82,14 +97,27 @@ func Run(ctx context.Context, cfg Config, log *slog.Logger) error {
 	var buf []protocol.Report
 	timer := time.NewTimer(cfg.Interval)
 	defer timer.Stop()
-	log.Info("srvmon-agent started", "url", cfg.URL, "interval", cfg.Interval, "docker", dock != nil, "version", cfg.Version)
+	log.Info("srvmon-agent started", "url", cfg.URL, "interval", cfg.Interval, "docker", dock != nil, "version", cfg.Version, "mode", cfg.Mode)
 	for {
 		select {
 		case <-ctx.Done():
 			return nil
 		case <-timer.C:
 		}
+		if f := watch.changed(); f != "" {
+			log.Info("file changed, restarting", "file", f)
+			return ErrRestart
+		}
 		now := time.Now()
+		// A token the panel rewrites in the file (reissue) is picked up
+		// within a minute even while the old one still works.
+		if now.Sub(tokenAt) >= time.Minute {
+			if tok, changed := reloadToken(cfg.TokenFile, cfg.Token); changed {
+				cfg.Token = tok
+				log.Info("agent token reloaded", "file", cfg.TokenFile)
+			}
+			tokenAt = now
+		}
 		detail := now.Before(detailUntil)
 		if detail {
 			timer.Reset(cfg.DetailInterval)
@@ -103,7 +131,7 @@ func Run(ctx context.Context, cfg Config, log *slog.Logger) error {
 				log.Info("docker socket available", "sock", cfg.DockerSock)
 			}
 		}
-		rep := protocol.Report{Hostname: hostname, AgentVersion: cfg.Version, Timestamp: now.UTC()}
+		rep := protocol.Report{Hostname: hostname, AgentVersion: cfg.Version, AgentMode: cfg.Mode, Timestamp: now.UTC()}
 		h, err := col.Collect()
 		if err != nil {
 			log.Warn("collect", "err", err)

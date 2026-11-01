@@ -36,6 +36,11 @@ type AgentInstall struct {
 	// Smart turns S.M.A.R.T. reads on or off. nil keeps what the running
 	// agent has (updates) or leaves it off (new installs).
 	Smart *bool
+	// Mode is ModeAuto, ModeDocker (also when empty) or ModeSystemd. An
+	// update keeps the mode the server has.
+	Mode string
+	// Binaries provide the agent executable for ModeSystemd.
+	Binaries AgentBinaries
 }
 
 // smartArgs are the extra docker run arguments of an agent with
@@ -92,6 +97,7 @@ const AfterCommitTimeout = 10 * time.Minute
 // Result reports what Onboard achieved besides the mandatory key setup.
 type Result struct {
 	AgentInstalled   bool
+	AgentMode        string // ModeDocker or ModeSystemd once installed
 	PasswordDisabled bool
 }
 
@@ -234,7 +240,19 @@ func Onboard(ctx context.Context, p OnboardParams, log Logger) (Result, error) {
 		}
 	}
 
-	if a := p.Agent; a != nil {
+	if a := p.Agent; a != nil && a.Mode == ModeAuto {
+		if detectMode(ctx, c) == ModeSystemd {
+			log(StepInfo, i18n.T("Proxmox VE without docker: the agent runs as a systemd service, docker is not installed"))
+			a.Mode = ModeSystemd
+		} else {
+			a.Mode = ModeDocker
+		}
+	}
+	if a := p.Agent; a != nil && a.Mode == ModeSystemd {
+		if installNative(ctx, c, pr, p.SSHUser, *a, log) {
+			res.AgentInstalled, res.AgentMode = true, ModeSystemd
+		}
+	} else if a != nil {
 		dockerOK := true
 		if _, _, err := Run(ctx, c, "command -v docker", nil); err != nil {
 			log(StepRun, i18n.T("docker not found: installing it (get.docker.com, 1–3 min)"))
@@ -250,7 +268,7 @@ func Onboard(ctx context.Context, p OnboardParams, log Logger) (Result, error) {
 			_, errOut, err := pr.run(ctx, agentScript(*a))
 			switch {
 			case err == nil:
-				res.AgentInstalled = true
+				res.AgentInstalled, res.AgentMode = true, ModeDocker
 				log(StepOK, i18n.T("srvmon-agent started"))
 			case strings.Contains(errOut, "no-docker"):
 				log(StepWarn, i18n.T("docker is not installed: the agent is not started, install docker and reinstall the agent"))
@@ -405,7 +423,8 @@ pulled=0
 docker pull -q "$IMG" >/dev/null 2>&1 && pulled=1
 if [ -n "$RU" ]; then docker logout "$REG" >/dev/null 2>&1 || true; fi
 [ "$pulled" = 1 ] || { rm -f /etc/srvmon/agent.token.new; echo "docker pull $IMG failed (a private image? registry access is needed)" >&2; exit 4; }
-docker rm -f srvmon-agent >/dev/null 2>&1 || true
+# A systemd agent the panel installed before is replaced, not doubled.
+` + nativeRemoveScript + `docker rm -f srvmon-agent >/dev/null 2>&1 || true
 mv -f /etc/srvmon/agent.token.new /etc/srvmon/agent.token
 D=docker
 ` + dockerProxyRun + `

@@ -236,6 +236,9 @@ func (b *Bot) statusText(ctx context.Context) string {
 		snap, ok := b.latest.Get(s.ID)
 		if !ok || now.Sub(snap.Received) >= offlineAfter {
 			since := i18n.T("no data")
+			if s.LastSeen == nil && !s.HasAgent {
+				since = i18n.T("no agent, SSH only")
+			}
 			if s.LastSeen != nil {
 				since = i18n.T("silent for %s", alerts.FormatDuration(now.Sub(*s.LastSeen)))
 			}

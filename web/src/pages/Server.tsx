@@ -1,7 +1,8 @@
 import * as React from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { AgentVersion } from "@/components/AgentVersion";
+import { AgentToken } from "@/components/AgentToken";
+import { AgentStatusLabel, AgentVersion, agentStatus } from "@/components/AgentVersion";
 import { ChecksPanel, DomainLine } from "@/components/ChecksPanel";
 import { SudoMode } from "@/components/SudoMode";
 import { Hotkey, Shell } from "@/components/Shell";
@@ -509,7 +510,11 @@ function DockerPanel({ data, onLogs }: { data: ServerDetailView; onLogs: (name: 
   if (!r?.docker_ok) {
     return (
       <Panel title="docker">
-        <Empty>{t("docker is not available to the agent (no /var/run/docker.sock) or not installed")}</Empty>
+        <Empty>
+          {r?.agent_mode === "systemd"
+            ? t("the agent runs as a systemd service without docker: containers are not collected")
+            : t("docker is not available to the agent (no /var/run/docker.sock) or not installed")}
+        </Empty>
       </Panel>
     );
   }
@@ -1020,6 +1025,7 @@ function Passport({
         {r && <span className="text-muted-foreground"> · push {ago(data.snapshot?.received)}</span>}
       </span>,
     ],
+    [t("agent token"), <AgentToken key="token" s={data} />],
   ];
   return (
     <Panel
@@ -1210,11 +1216,7 @@ export function ServerScreen({
   }, [id, range, editing, setRange]);
 
   const r = data?.snapshot?.report;
-  const status = data && (
-    <span className={data.online ? "text-primary" : "text-crit"}>
-      {data.online ? "● online" : "○ offline"}
-    </span>
-  );
+  const status = data && <AgentStatusLabel s={data} />;
 
   let body: React.ReactNode;
   if (missing) {
@@ -1250,8 +1252,10 @@ export function ServerScreen({
           <h1 className="text-lg font-bold text-hi">{data.name}</h1>
           {data.online ? (
             <span className="text-primary">● online {r ? formatUptime(r.host.uptime_sec) : ""}</span>
-          ) : (
+          ) : agentStatus(data) === "offline" ? (
             <span className="text-crit">○ offline · {t("last push")} {ago(data.snapshot?.received ?? data.last_seen)}</span>
+          ) : (
+            <AgentStatusLabel s={data} />
           )}
           {facts.length > 0 && <span className="text-muted-foreground">{facts.join(" · ")}</span>}
           {data.tags.length > 0 && (

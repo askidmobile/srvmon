@@ -12,6 +12,13 @@
 //	HOST_PROC        host procfs, default /proc (container: /host/proc)
 //	HOST_ROOT        host root fs, default / (container: /host)
 //	DOCKER_SOCK      docker socket, default /var/run/docker.sock; empty disables
+//	SRVMON_AGENT_MODE  how the agent runs, reported to the panel: docker
+//	                 (default inside a container), systemd (the service the
+//	                 panel installs on hosts without docker), native otherwise.
+//	                 In systemd mode the agent exits when its binary or
+//	                 SRVMON_ENV_FILE changes, so systemd starts the new one,
+//	                 and reads journald when the host has no syslog file.
+//	SRVMON_ENV_FILE  the systemd unit's EnvironmentFile, watched for changes
 //	SRVMON_SMART     1 reads S.M.A.R.T. of the host's disks every 30 min; needs
 //	                 --cap-add SYS_RAWIO --cap-add SYS_ADMIN and read access to
 //	                 block devices (--device-cgroup-rule 'b 8:* r' 'b 259:* r')
@@ -22,6 +29,9 @@
 //	                 filtered read-only Docker API on DOCKERPROXY_LISTEN
 //	                 (default /run/srvmon/docker.sock) from DOCKERPROXY_UPSTREAM
 //	                 (default /var/run/docker.sock)
+//	write-token F    a one-off container of the panel: replaces the agent
+//	                 token in file F (in place, the agent container has it
+//	                 bind-mounted) with the token read from stdin
 //	write-sudoers U  a one-off container of the panel: writes stdin as the
 //	                 sudoers file of user U into SUDOERS_DIR (the host's
 //	                 /etc/sudoers.d), or removes it when stdin is empty
@@ -52,6 +62,8 @@ func main() {
 			return
 		case "dockerproxy":
 			os.Exit(runDockerProxy(log))
+		case "write-token":
+			os.Exit(runWriteToken(os.Args[2:], os.Stdin))
 		case "write-sudoers":
 			os.Exit(runWriteSudoers(os.Args[2:], os.Stdin, getenv("SUDOERS_DIR", "/sudoers.d")))
 		}
@@ -76,6 +88,20 @@ func main() {
 			os.Exit(1)
 		}
 	}
+	mode := os.Getenv("SRVMON_AGENT_MODE")
+	if mode == "" {
+		mode = "native"
+		if _, err := os.Stat("/.dockerenv"); err == nil {
+			mode = "docker"
+		}
+	}
+	var watch []string
+	if mode == "systemd" {
+		if exe, err := os.Executable(); err == nil {
+			watch = append(watch, exe)
+		}
+		watch = append(watch, os.Getenv("SRVMON_ENV_FILE"))
+	}
 	cfg := agent.Config{
 		URL:        os.Getenv("SRVMON_URL"),
 		Token:      token,
@@ -86,8 +112,16 @@ func main() {
 		DockerSock: sock,
 		Smart:      os.Getenv("SRVMON_SMART") == "1" || os.Getenv("SRVMON_SMART") == "true",
 		Version:    version,
+		Mode:       mode,
+		WatchFiles: watch,
+		Journal:    mode != "docker" && getenv("HOST_ROOT", "/") == "/",
 	}
-	if err := agent.Run(ctx, cfg, log); err != nil {
+	err = agent.Run(ctx, cfg, log)
+	if errors.Is(err, agent.ErrRestart) {
+		// systemd (Restart=always) starts the new binary.
+		os.Exit(0)
+	}
+	if err != nil {
 		fmt.Fprintln(os.Stderr, "srvmon-agent:", err)
 		os.Exit(1)
 	}

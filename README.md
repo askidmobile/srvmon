@@ -120,6 +120,23 @@ docker compose exec server /srvmon-server add-server -name shop-db -group prod -
 SRVMON_URL=https://mon.example.com SRVMON_TOKEN=a_... docker compose up -d
 ```
 
+### Hosts without docker (Proxmox VE)
+
+On a hypervisor docker is unwelcome (it rewrites iptables/nftables and sits in cgroups next to KVM and ZFS), and an agent in an LXC guest would see the guest, not the node. So the agent also runs as a plain **systemd service**. The wizard's agent mode is `auto` by default: docker when the server has it, a systemd service on a Proxmox VE node without docker (docker is not installed), otherwise docker as before; `docker` and `systemd` force a mode.
+
+- The panel image carries static agent binaries (`/agent/srvmon-agent-linux-amd64|arm64`, built from the same commit) and copies the right one over SSH to `/usr/local/lib/srvmon-agent/`. The server needs no access to GitHub or a registry. `v*` releases also attach the binaries with `SHA256SUMS`.
+- The unit runs as root with a read-only view of the host: `ProtectSystem=strict`, `ProtectHome=read-only`, `NoNewPrivileges`, only `CAP_DAC_READ_SEARCH`, `CAP_SYS_PTRACE` and (for S.M.A.R.T.) `CAP_SYS_RAWIO`/`CAP_SYS_ADMIN` with read access to SATA/NVMe block devices, no docker socket. Without docker the containers section stays empty without warnings; logs come from journald when there is no `/var/log/syslog` (Proxmox VE 8).
+- Updates work as with containers: the panel uploads the new binary as the `srvmon` user (it owns the binary, which is as powerful as the docker group a container agent needs), the agent notices the swap and exits, systemd starts the new one; if it does not report the panel's version in 90 s, the previous binary is put back. No sudo is needed, which Proxmox VE does not ship.
+- Re-running the wizard with another mode replaces the agent: the systemd service removes the panel's agent containers and vice versa.
+
+The **agent token** row of the server passport issues a new token (the panel keeps only a hash, so an existing token cannot be shown). "Reissue on the server" writes it there over SSH; otherwise the panel shows the token once with ready commands, e.g. for the systemd agent, as root:
+
+```bash
+curl -fsSL https://mon.example.com/agent/install.sh | SRVMON_TOKEN=a_... sh
+```
+
+The old token keeps working until an agent first pushes with the new one, then it is revoked. A server without any agent token is marked **ssh only** instead of offline and does not count in the "up" total.
+
 ## Site and port checks
 
 On the server screen the "checks" panel takes one target per line:

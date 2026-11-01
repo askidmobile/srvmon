@@ -105,6 +105,9 @@ var migrations = []string{
 	migrationRecordings,
 	// HTTP/TCP/TLS checks from the panel (checks.go).
 	migrationChecks,
+	// A reissued agent token revokes the server's other tokens on its
+	// first push.
+	`ALTER TABLE agent_tokens ADD COLUMN supersede INTEGER NOT NULL DEFAULT 0;`,
 }
 
 func (s *Store) migrate(ctx context.Context) error {
@@ -280,25 +283,29 @@ func (s *Store) Audit(ctx context.Context, ip, event, detail string) error {
 
 // Server is a monitored server card.
 type Server struct {
-	ID          int64      `json:"id"`
-	Name        string     `json:"name"`
-	Description string     `json:"description"`
-	Project     string     `json:"project"`
-	Group       string     `json:"group"`
-	Tags        []string   `json:"tags"`
-	Host        string     `json:"host"`
-	Port        int        `json:"port"`
-	Provider    string     `json:"provider"`
-	Plan        string     `json:"plan"`
-	Cost        *float64   `json:"cost,omitempty"`
-	Currency    string     `json:"currency"`
-	NextPayment string     `json:"next_payment"` // YYYY-MM-DD
-	Period      string     `json:"period"`       // month | year | hour
-	PanelURL    string     `json:"panel_url"`
-	SSHUser     string     `json:"ssh_user"`
-	HasSSH      bool       `json:"has_ssh"` // a private key is stored for the terminal
-	CreatedAt   time.Time  `json:"created_at"`
-	LastSeen    *time.Time `json:"last_seen,omitempty"`
+	ID          int64    `json:"id"`
+	Name        string   `json:"name"`
+	Description string   `json:"description"`
+	Project     string   `json:"project"`
+	Group       string   `json:"group"`
+	Tags        []string `json:"tags"`
+	Host        string   `json:"host"`
+	Port        int      `json:"port"`
+	Provider    string   `json:"provider"`
+	Plan        string   `json:"plan"`
+	Cost        *float64 `json:"cost,omitempty"`
+	Currency    string   `json:"currency"`
+	NextPayment string   `json:"next_payment"` // YYYY-MM-DD
+	Period      string   `json:"period"`       // month | year | hour
+	PanelURL    string   `json:"panel_url"`
+	SSHUser     string   `json:"ssh_user"`
+	HasSSH      bool     `json:"has_ssh"` // a private key is stored for the terminal
+	// HasAgent: the server has a live agent token. With LastSeen nil it
+	// was issued but no agent has pushed with it yet; without it the server
+	// is reached over SSH only.
+	HasAgent  bool       `json:"has_agent"`
+	CreatedAt time.Time  `json:"created_at"`
+	LastSeen  *time.Time `json:"last_seen,omitempty"`
 }
 
 // CreateServer inserts a server and returns its id.
@@ -359,7 +366,8 @@ func (s *Store) TokenLastSeen(ctx context.Context, tokenHash string) (time.Time,
 const serverCols = `s.id, s.name, s.description, s.project, s.grp, s.tags, s.host, s.port,
 	s.provider, s.plan, s.cost, s.currency, s.next_payment, s.period, s.panel_url, s.ssh_user,
 	s.ssh_key_enc IS NOT NULL, s.created_at,
-	(SELECT MAX(last_seen_at) FROM agent_tokens t WHERE t.server_id = s.id)`
+	(SELECT MAX(last_seen_at) FROM agent_tokens t WHERE t.server_id = s.id),
+	EXISTS (SELECT 1 FROM agent_tokens t WHERE t.server_id = s.id AND t.revoked_at IS NULL)`
 
 type scanner interface{ Scan(dest ...any) error }
 
@@ -371,7 +379,7 @@ func scanServer(row scanner) (Server, error) {
 	var cost sql.NullFloat64
 	if err := row.Scan(&srv.ID, &srv.Name, &srv.Description, &srv.Project, &srv.Group, &tags, &srv.Host, &srv.Port,
 		&srv.Provider, &srv.Plan, &cost, &srv.Currency, &srv.NextPayment, &srv.Period, &srv.PanelURL, &srv.SSHUser,
-		&srv.HasSSH, &created, &lastSeen); err != nil {
+		&srv.HasSSH, &created, &lastSeen, &srv.HasAgent); err != nil {
 		return srv, err
 	}
 	_ = json.Unmarshal([]byte(tags), &srv.Tags)
@@ -460,17 +468,32 @@ func (s *Store) AddAgentToken(ctx context.Context, serverID int64, tokenHash str
 	return err
 }
 
+// ReissueAgentToken stores the hash of a new token that, once an agent
+// first pushes with it, revokes the server's other tokens. Until then the
+// old agent keeps working.
+func (s *Store) ReissueAgentToken(ctx context.Context, serverID int64, tokenHash string) error {
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO agent_tokens (server_id, token_hash, created_at, supersede) VALUES (?, ?, ?, 1)`, serverID, tokenHash, time.Now().Unix())
+	return err
+}
+
 // AgentServer resolves a live agent token to its server and bumps last_seen.
+// The first push of a reissued token revokes the server's other tokens.
 func (s *Store) AgentServer(ctx context.Context, tokenHash string) (id int64, name string, err error) {
-	err = s.db.QueryRowContext(ctx, `SELECT s.id, s.name FROM agent_tokens t JOIN servers s ON s.id = t.server_id
-		WHERE t.token_hash = ? AND t.revoked_at IS NULL`, tokenHash).Scan(&id, &name)
+	var seen sql.NullInt64
+	var supersede bool
+	err = s.db.QueryRowContext(ctx, `SELECT s.id, s.name, t.last_seen_at, t.supersede FROM agent_tokens t JOIN servers s ON s.id = t.server_id
+		WHERE t.token_hash = ? AND t.revoked_at IS NULL`, tokenHash).Scan(&id, &name, &seen, &supersede)
 	if errors.Is(err, sql.ErrNoRows) {
 		return 0, "", ErrNotFound
 	}
 	if err != nil {
 		return 0, "", err
 	}
-	_, err = s.db.ExecContext(ctx, `UPDATE agent_tokens SET last_seen_at = ? WHERE token_hash = ?`, time.Now().Unix(), tokenHash)
+	_, err = s.db.ExecContext(ctx, `UPDATE agent_tokens SET last_seen_at = ?, supersede = 0 WHERE token_hash = ?`, time.Now().Unix(), tokenHash)
+	if err == nil && supersede && !seen.Valid {
+		err = s.RevokeOtherAgentTokens(ctx, id, tokenHash)
+	}
 	return id, name, err
 }
 
