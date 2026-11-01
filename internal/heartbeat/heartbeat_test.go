@@ -85,6 +85,17 @@ func TestValidateURL(t *testing.T) {
 	}
 }
 
+func TestFailURL(t *testing.T) {
+	for in, want := range map[string]string{
+		"https://hc-ping.com/abc":            "https://hc-ping.com/abc/fail",
+		"https://r.example/ping?token=s&x=1": "https://r.example/ping/fail?token=s&x=1",
+	} {
+		if got := failURL(in); got != want {
+			t.Errorf("%q: %q", in, got)
+		}
+	}
+}
+
 func TestMask(t *testing.T) {
 	if got := mask("https://hc-ping.com/1f3a9c2e-aaaa-bbbb"); got != "https://hc-ping.com/…bbbb" {
 		t.Errorf("mask: %q", got)

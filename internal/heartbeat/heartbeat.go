@@ -175,6 +175,17 @@ func ValidateURL(raw string) (string, error) {
 	return strings.TrimRight(u.String(), "/"), nil
 }
 
+// failURL appends /fail to the path of target, keeping its query.
+func failURL(target string) string {
+	u, err := url.Parse(target)
+	if err != nil {
+		return target + "/fail"
+	}
+	u.Path = strings.TrimRight(u.Path, "/") + "/fail"
+	u.RawPath = ""
+	return u.String()
+}
+
 // mask hides the secret part of a ping URL: the path and query usually are
 // the token (hc-ping.com/<uuid>, /api/push/<token>).
 func mask(raw string) string {
@@ -328,7 +339,7 @@ func (m *Monitor) beat(ctx context.Context) error {
 	case useFail:
 		result = "fail"
 		body := i18n.T("srvmon %s: problems:", m.version) + "\n" + strings.Join(problems, "\n")
-		err = m.ping(ctx, http.MethodPost, target+"/fail", body)
+		err = m.ping(ctx, http.MethodPost, failURL(target), body)
 	default:
 		result = "skipped"
 	}
