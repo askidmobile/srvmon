@@ -180,16 +180,26 @@ func TestNativeUpdateSwap(t *testing.T) {
 	if run("srvmon-agent") != "v1" {
 		t.Fatal("rollback did not restore v1")
 	}
+	if e, _ := os.ReadFile(env); string(e) != "SRVMON_URL=https://m\nSRVMON_SMART=0\n" {
+		t.Fatalf("rollback kept the new env %q", e)
+	}
+	if _, err := os.Stat(filepath.Join(lib, "agent.env.old")); !os.IsNotExist(err) {
+		t.Fatal("rollback left the env backup")
+	}
 	if out, err := runLocal(t, localize(nativeRollback, dir)); err == nil || !strings.Contains(out, "srvmon:no-old") {
 		t.Fatalf("second rollback: %v %s", err, out)
 	}
 	// Commit removes the kept binary.
 	write("srvmon-agent.old", "v0")
+	write("agent.env.old", "x")
 	if out, err := runLocal(t, localize(nativeCommit, dir)); err != nil {
 		t.Fatalf("commit: %v %s", err, out)
 	}
 	if _, err := os.Stat(filepath.Join(lib, "srvmon-agent.old")); !os.IsNotExist(err) {
 		t.Fatal("commit kept the old binary")
+	}
+	if _, err := os.Stat(filepath.Join(lib, "agent.env.old")); !os.IsNotExist(err) {
+		t.Fatal("commit kept the env backup")
 	}
 }
 

@@ -301,8 +301,11 @@ if [ -n "$WANT" ] && [ "$V" != "$WANT" ]; then bad "version $V"; fi
 E=` + NativeEnv + `
 if [ "$SM" != keep ] && [ ! -w "$E" ]; then rm -f "$N"; echo srvmon:no-write >&2; exit 4; fi
 cp -p "$DIR/srvmon-agent" "$DIR/srvmon-agent.old"
+rm -f "$DIR/agent.env.old"
 mv -f "$N" "$DIR/srvmon-agent"
 if [ "$SM" != keep ]; then
+  # /etc/srvmon belongs to root: the backup goes next to the binary.
+  cp "$E" "$DIR/agent.env.old"
   C=$(grep -v '^SRVMON_SMART=' "$E" || true)
   printf '%s\nSRVMON_SMART=%s\n' "$C" "$SM" > "$E"
 fi
@@ -320,10 +323,14 @@ func nativeBranch(native string) string {
 	return "if [ -f " + NativeUnit + " ]; then\n" + native + "exit 0\nfi\n"
 }
 
-const nativeCommit = `rm -f ` + NativeDir + `/srvmon-agent.old
+const nativeCommit = `rm -f ` + NativeDir + `/srvmon-agent.old ` + NativeDir + `/agent.env.old
 `
 
 const nativeRollback = `[ -f ` + NativeDir + `/srvmon-agent.old ] || { echo srvmon:no-old >&2; exit 6; }
+if [ -f ` + NativeDir + `/agent.env.old ]; then
+  cat ` + NativeDir + `/agent.env.old > ` + NativeEnv + `
+  rm -f ` + NativeDir + `/agent.env.old
+fi
 mv -f ` + NativeDir + `/srvmon-agent.old ` + NativeBin + `
 `
 
@@ -382,6 +389,8 @@ $D inspect -f '{{range .Config.Env}}{{println .}}{{end}}' srvmon-agent | grep -q
   echo srvmon:not-panel >&2; exit 3; }
 $D run --rm -i --pull missing --network none --cap-drop ALL --security-opt no-new-privileges=true \
   -v /etc/srvmon:/etc/srvmon --entrypoint /srvmon-agent "$IMG" write-token /etc/srvmon/agent.token >/dev/null
+# Agents older than the periodic token reload read the file only at start.
+$D restart srvmon-agent >/dev/null
 `
 	// The script goes in the command line, the token on stdin: neither
 	// lands in a file or the process list.
