@@ -80,6 +80,19 @@ export function BackupPanel() {
   useEffect(() => {
     backupApi.get().then(fill, (e) => setLoadErr(errText(e, t("could not load"))));
   }, [fill]);
+  // A scheduled backup (or one from another tab) may be running: follow
+  // its status only, so unsaved edits in the form stay.
+  const bgRunning = v?.status.running ?? false;
+  useEffect(() => {
+    if (!bgRunning) return;
+    const id = setInterval(() => {
+      backupApi.get().then(
+        (x) => setV((cur) => (cur ? { ...cur, status: x.status, key_exported_at: x.key_exported_at } : x)),
+        () => {},
+      );
+    }, 3000);
+    return () => clearInterval(id);
+  }, [bgRunning]);
 
   const set3 = (k: keyof BackupConfig["s3"], val: string | boolean) => setC((x) => ({ ...x, s3: { ...x.s3, [k]: val } }));
 
