@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/askidmobile/srvmon/internal/store"
 )
@@ -180,5 +181,32 @@ func TestSeededSecretsDoNotReachTheModel(t *testing.T) {
 	}
 	if acts, _ := a.st.ListAgentActions(context.Background(), store.ActionPending, 10); len(acts) != 0 {
 		t.Fatalf("%+v", acts)
+	}
+}
+
+// A setup cut short by the caller (cancelled request) is not cached as a
+// failure: the next read sets the reader up again.
+func TestReaderSetupCancelledIsNotCached(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	a := newAgentEnvWith(t, "http://127.0.0.1:1", func(user, cmd, stdin string) (string, string, uint32) {
+		if cmd == "sh -s" && strings.Contains(stdin, "host-sh") {
+			cancel()
+			time.Sleep(50 * time.Millisecond)
+			return "", "", 1
+		}
+		return "out of " + cmd + "\n", "", 0
+	})
+	a.sshd.mu.Lock()
+	a.sshd.deny = func(u string) bool { return u == "srvmon-ro" }
+	a.sshd.mu.Unlock()
+	acc, err := a.st.ServerSSH(context.Background(), a.srvID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := a.srv.readerClient(ctx, acc); err == nil {
+		t.Fatal("setup succeeded after cancel")
+	}
+	if st := a.srv.readerStateOf(a.srvID); st.failed != nil || st.self {
+		t.Fatalf("cached %+v", st)
 	}
 }

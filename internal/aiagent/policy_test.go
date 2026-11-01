@@ -287,3 +287,19 @@ func TestPathWordsAttachedShortValues(t *testing.T) {
 		t.Fatalf("%q", w)
 	}
 }
+
+// A newline inside quotes is one operand to the shell but two lines to the
+// server-side symlink check: such commands are not read-only.
+func TestQuotedControlCharacters(t *testing.T) {
+	for _, cmd := range []string{"cat '/tmp/a\n/srv/.env'", "cat \"/tmp/a\r\"", "grep 'x\x00' /tmp/a"} {
+		if ro, _ := Classify(cmd); ro {
+			t.Fatalf("%q classified read-only", cmd)
+		}
+		if w := PathWords(cmd); len(w) != 0 {
+			t.Fatalf("%q: %q", cmd, w)
+		}
+	}
+	if ro, why := Classify("cut -d'\t' -f1 /tmp/a"); !ro {
+		t.Fatalf("tab inside quotes: %s", why)
+	}
+}

@@ -97,6 +97,11 @@ func (s *Server) readerClient(ctx context.Context, a store.SSHAccess) (c *ssh.Cl
 			err = i18n.Errorf("%s is set up but cannot sign in (sshd AllowUsers/AllowGroups?): %s", sshgw.ReaderUser, err.Error())
 		}
 	}
+	if err != nil && ctx.Err() != nil {
+		// The caller gave up (request cancelled, timeout): that says nothing
+		// about the server, so it is not cached as a setup failure.
+		return nil, false, err
+	}
 	if err != nil {
 		err = i18n.Errorf("the read-only account is not available, read-only commands do not run: %s", err.Error())
 		s.setReaderState(a.ServerID, readerState{failed: err, until: time.Now().Add(readerFailedTTL)})

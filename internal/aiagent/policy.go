@@ -78,6 +78,9 @@ func splitPipeline(cmd string) ([][]string, error) {
 			if j < 0 {
 				return nil, errors.New(i18n.T("unclosed quote"))
 			}
+			if hasControl(cmd[i+1 : i+1+j]) {
+				return nil, errors.New(i18n.T("control character"))
+			}
 			cur.WriteString(cmd[i+1 : i+1+j])
 			inWord = true
 			i += j + 1
@@ -89,6 +92,9 @@ func splitPipeline(cmd string) ([][]string, error) {
 			body := cmd[i+1 : i+1+j]
 			if strings.ContainsAny(body, "$`\\") {
 				return nil, errors.New(i18n.T("substitution inside quotes"))
+			}
+			if hasControl(body) {
+				return nil, errors.New(i18n.T("control character"))
 			}
 			cur.WriteString(body)
 			inWord = true
@@ -118,6 +124,18 @@ func splitPipeline(cmd string) ([][]string, error) {
 	flush()
 	segs = append(segs, words)
 	return segs, nil
+}
+
+// hasControl reports a control character other than tab. A newline inside
+// quotes is one operand to the shell but several lines to everything that
+// checks it afterwards (the symlink check resolves operands line by line).
+func hasControl(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if (s[i] < 0x20 && s[i] != '\t') || s[i] == 0x7f {
+			return true
+		}
+	}
+	return false
 }
 
 // anyArgs: programs that only read whatever their arguments are.
@@ -685,7 +703,7 @@ func PathWords(cmd string) []string {
 			continue
 		}
 		add := func(w string) {
-			if w == "" || strings.ContainsAny(w, "\n\r") || seen[w] {
+			if w == "" || seen[w] {
 				return
 			}
 			seen[w] = true
