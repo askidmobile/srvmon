@@ -24,6 +24,7 @@ var zh = map[string]string{
 	"<b>srvmon</b>: %d/%d online · alerts %d":                               "<b>srvmon</b>：%d/%d 在线 · 告警 %d",
 	"<b>srvmon</b>: a test message. Notifications will arrive here.":        "<b>srvmon</b>：测试消息。通知将发送到这里。",
 	"<b>task #%d %s</b>\n%s":                                                "<b>任务 #%d %s</b>\n%s",
+	"<b>MCP client %s asks to run</b> #%d on <b>%s</b>:\n<code>%s</code>":   "<b>MCP 客户端 %s 请求执行</b> #%d，服务器 <b>%s</b>：\n<code>%s</code>",
 	"<b>the agent asks to run</b> #%d on <b>%s</b>:\n<code>%s</code>":       "<b>智能体请求执行</b> #%d，服务器 <b>%s</b>：\n<code>%s</code>",
 	"@every: at most once every %s":                                         "@every：最频繁每 %s 一次",
 	"Acknowledge: /ack &lt;id&gt;":                                          "确认：/ack &lt;id&gt;",
