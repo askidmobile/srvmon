@@ -10,6 +10,40 @@ export function shortVersion(v: string | undefined) {
   return /^[0-9a-f]{40}$/.test(v) ? v.slice(0, 7) : v;
 }
 
+// agentStatus tells an agent that went silent from a server that never had
+// one: an SSH-only server is not "offline".
+export type AgentStatus = "online" | "offline" | "waiting" | "ssh_only";
+
+export function agentStatus(s: ServerView): AgentStatus {
+  if (s.online) return "online";
+  if (s.snapshot || s.last_seen) return "offline";
+  return s.has_agent ? "waiting" : "ssh_only";
+}
+
+// AgentStatusLabel is the colored status of a server for lists and headers.
+export function AgentStatusLabel({ s, short }: { s: ServerView; short?: boolean }) {
+  switch (agentStatus(s)) {
+    case "online":
+      return <span className="text-primary">{short ? "●" : "● online"}</span>;
+    case "offline":
+      return <span className="text-crit">{short ? "○" : "○ offline"}</span>;
+    case "waiting":
+      return (
+        <span className="text-warn" title={t("the agent token is issued, no agent has pushed with it yet")}>
+          {short ? "◌" : `◌ ${t("waiting for the agent")}`}
+        </span>
+      );
+    default:
+      return (
+        <span className="text-muted-foreground" title={t("no agent: the panel reaches this server over SSH only, without metrics and alerts")}>
+          {short ? "◇" : `◇ ${t("ssh only")}`}
+        </span>
+      );
+  }
+}
+
+const MODE_LABEL: Record<string, string> = { docker: "docker", systemd: "systemd", native: "native" };
+
 // needsAgentUpdate: the panel can replace this server's agent with its own.
 export function needsAgentUpdate(s: ServerView) {
   return !!s.agent_outdated && s.has_ssh && s.agent_update?.state !== "running";
@@ -30,7 +64,10 @@ export function AgentVersion({ s, onStarted }: { s: ServerView; onStarted?: () =
   };
   return (
     <span className="inline-flex flex-wrap items-center gap-x-2">
-      <span>{r ? shortVersion(r.agent_version) : t("not connected")}</span>
+      <span>
+        {r ? shortVersion(r.agent_version) : t("not connected")}
+        {r?.agent_mode && MODE_LABEL[r.agent_mode] && <span className="text-muted-foreground"> · {MODE_LABEL[r.agent_mode]}</span>}
+      </span>
       {s.agent_outdated && u?.state !== "running" && (
         <span className="text-warn" title={t("the panel runs {v}", { v: shortVersion(s.agent_latest) })}>
           {t("outdated")}

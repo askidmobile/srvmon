@@ -113,6 +113,16 @@ docker compose exec server /srvmon-server add-server -name shop-db -group prod -
 SRVMON_URL=https://mon.example.com SRVMON_TOKEN=a_... docker compose up -d
 ```
 
+### 没有 docker 的主机（Proxmox VE）
+
+在虚拟化主机上不宜安装 docker（它会改写 iptables/nftables，并与 KVM、ZFS 共用 cgroup），而 LXC 中的代理只能看到容器本身。因此代理也可以作为普通的 **systemd 服务**运行。向导中的代理模式默认为 `auto`：服务器有 docker 时用 docker；在没有 docker 的 Proxmox VE 节点上用 systemd 服务（不安装 docker）；否则照旧安装 docker。`docker` 和 `systemd` 可强制指定模式。面板镜像自带静态代理程序（`/agent/srvmon-agent-linux-amd64|arm64`），通过 SSH 复制到 `/usr/local/lib/srvmon-agent/`，更新和回滚与容器代理相同。服务器护照中的 **代理令牌** 可重新签发令牌，并给出手动安装命令：
+
+```bash
+curl -fsSL https://mon.example.com/agent/install.sh | SRVMON_TOKEN=a_... sh
+```
+
+没有任何代理令牌的服务器标记为 **仅 ssh**，而不是 offline。
+
 ## 网站与端口检查
 
 在服务器页面的“检查”面板中每行填写一个目标：

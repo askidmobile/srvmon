@@ -177,7 +177,7 @@ func (s *Server) updateAgent(id int64, ip string, auto bool, smart *bool) {
 	err = sshgw.AgentUpdate(ctx, client, sshgw.AgentInstall{
 		Image: image, URL: s.cfg.PublicOrigin,
 		RegistryUser: s.cfg.AgentRegistryUser, RegistryToken: s.cfg.AgentRegistryToken,
-		Smart: smart,
+		Smart: smart, Binaries: s.agentBinaries,
 	})
 	event := "agent_update"
 	switch {
@@ -206,7 +206,7 @@ func (s *Server) updateAgent(id int64, ip string, auto bool, smart *bool) {
 		if v, ok := s.waitAgentVersion(ctx, id, started); !ok {
 			var why error
 			if v == "" {
-				why = errors.New(i18n.T("the new agent has not reported yet: check docker logs srvmon-agent on the server"))
+				why = errors.New(i18n.T("the new agent has not reported yet: check docker logs srvmon-agent or journalctl -u srvmon-agent on the server"))
 			} else {
 				why = errors.New(i18n.T("the new agent reports version %s instead of %s", short(v), short(s.version)))
 			}

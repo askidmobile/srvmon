@@ -17,7 +17,17 @@ import (
 // On a failed start the previous container is put back. Otherwise the
 // previous container stays, stopped, as srvmon-agent-old until the caller
 // confirms the new agent with AgentCommit or reverts with AgentRollback.
+//
+// A systemd agent (ModeSystemd) gets its binary replaced instead; the
+// previous one stays as srvmon-agent.old in the same way.
 func AgentUpdate(ctx context.Context, c *ssh.Client, a AgentInstall) error {
+	mode, err := agentMode(ctx, c)
+	if err != nil {
+		return i18n.Errorf("agent update: %s", err.Error())
+	}
+	if mode == ModeSystemd {
+		return nativeUpdate(ctx, c, a)
+	}
 	_, errOut, err := Run(ctx, c, "sh -s", strings.NewReader(agentUpdateScript(a)))
 	if err == nil {
 		return nil
@@ -46,7 +56,7 @@ var ErrNoPreviousAgent = errors.New("no previous agent to restore")
 
 // AgentCommit removes the previous agent kept by AgentUpdate.
 func AgentCommit(ctx context.Context, c *ssh.Client) error {
-	_, errOut, err := Run(ctx, c, "sh -s", strings.NewReader(dockerAccess+"$D rm -f srvmon-agent-old srvmon-dockerproxy-old >/dev/null 2>&1 || true\n"))
+	_, errOut, err := Run(ctx, c, "sh -s", strings.NewReader(nativeBranch(nativeCommit)+dockerAccess+"$D rm -f srvmon-agent-old srvmon-dockerproxy-old >/dev/null 2>&1 || true\n"))
 	if err != nil {
 		return i18n.Errorf("agent update: %s", firstLine(errOut, err))
 	}
@@ -55,7 +65,7 @@ func AgentCommit(ctx context.Context, c *ssh.Client) error {
 
 // AgentRollback puts back the previous agent kept by AgentUpdate.
 func AgentRollback(ctx context.Context, c *ssh.Client) error {
-	_, errOut, err := Run(ctx, c, "sh -s", strings.NewReader(dockerAccess+agentRestoreScript))
+	_, errOut, err := Run(ctx, c, "sh -s", strings.NewReader(nativeBranch(nativeRollback)+dockerAccess+agentRestoreScript))
 	if strings.Contains(errOut, "srvmon:no-old") {
 		return ErrNoPreviousAgent
 	}

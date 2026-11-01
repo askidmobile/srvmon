@@ -98,7 +98,7 @@ func (ts *testServer) serve(c net.Conn, cfg *ssh.ServerConfig) {
 				ts.execs = append(ts.execs, sc.User()+": "+p.Cmd)
 				ts.mu.Unlock()
 				var stdin string
-				if strings.HasSuffix(p.Cmd, "sh -s") {
+				if strings.HasSuffix(p.Cmd, "sh -s") || strings.Contains(p.Cmd, "cat >") {
 					b, _ := io.ReadAll(ch)
 					stdin = string(b)
 				}

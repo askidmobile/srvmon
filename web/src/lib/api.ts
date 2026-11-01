@@ -94,6 +94,8 @@ export interface Container {
 export interface Report {
   hostname: string;
   agent_version: string;
+  // How the agent runs: "docker", "systemd" (service without docker) or "native".
+  agent_mode?: string;
   ts: string;
   docker_ok: boolean;
   containers?: Container[];
@@ -134,6 +136,9 @@ export interface ServerView {
   panel_url: string;
   ssh_user: string;
   has_ssh: boolean;
+  // A live agent token exists. Without it and without last_seen the server
+  // is reached over SSH only.
+  has_agent: boolean;
   last_seen?: string;
   online: boolean;
   snapshot?: { received: string; report: Report };
@@ -181,6 +186,7 @@ export const api = {
       "GET",
       `/api/servers/${id}/containers/${encodeURIComponent(name)}/history?range=${encodeURIComponent(range)}`,
     ),
+  agentToken: (id: number, write: boolean) => request<AgentToken>("POST", `/api/servers/${id}/agent/token`, { write }),
   updateAgents: () => request<{ started: number }>("POST", "/api/servers/agents/update"),
   sudo: (id: number) => request<SudoState>("GET", `/api/servers/${id}/sudo`),
   setSudo: (id: number, mode: SudoMode) => request<SudoState>("PUT", `/api/servers/${id}/sudo`, { mode }),
@@ -523,6 +529,20 @@ export interface OnboardRequest {
   sudo_mode: SudoMode;
   disable_password: boolean;
   install_agent: boolean;
+  agent_mode: AgentMode;
+}
+
+// How the wizard installs the agent: auto = docker, or a systemd service
+// on a Proxmox VE node without docker.
+export type AgentMode = "auto" | "docker" | "systemd";
+
+// A reissued agent token, shown once.
+export interface AgentToken {
+  token: string;
+  systemd: string; // install command for the systemd agent
+  docker: string; // commands for the container agent
+  written: boolean; // the panel put it on the server over SSH
+  write_error?: string;
 }
 
 export interface OnboardLine {

@@ -5,10 +5,13 @@ import "time"
 
 // Report is one push from srvmon-agent to POST /api/ingest.
 type Report struct {
-	Hostname     string      `json:"hostname"`
-	AgentVersion string      `json:"agent_version"`
-	Timestamp    time.Time   `json:"ts"`
-	Host         HostMetrics `json:"host"`
+	Hostname     string `json:"hostname"`
+	AgentVersion string `json:"agent_version"`
+	// AgentMode is how the agent runs: "docker" (container), "systemd"
+	// (native service installed by the panel) or "native" (other).
+	AgentMode string      `json:"agent_mode,omitempty"`
+	Timestamp time.Time   `json:"ts"`
+	Host      HostMetrics `json:"host"`
 	// Containers is nil when the docker socket is not available.
 	Containers []Container `json:"containers,omitempty"`
 	DockerOK   bool        `json:"docker_ok"`

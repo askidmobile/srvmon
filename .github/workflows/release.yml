@@ -56,3 +56,27 @@ jobs:
           build-args: VERSION=${{ github.ref_type == 'tag' && github.ref_name || github.sha }}
           cache-from: type=gha,scope=${{ matrix.image }}
           cache-to: type=gha,mode=max,scope=${{ matrix.image }}
+
+  # Static agent binaries for hosts without docker (systemd mode), attached
+  # to v* releases for manual installs. The panel image carries the same
+  # binaries and installs them itself.
+  agent-bins:
+    needs: ci
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - run: make agent-bins VERSION=${{ github.ref_name }}
+      - run: (cd bin/agent && sha256sum srvmon-agent-linux-* > SHA256SUMS)
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --title "$TAG" --generate-notes
+          gh release upload "$TAG" bin/agent/* --clobber

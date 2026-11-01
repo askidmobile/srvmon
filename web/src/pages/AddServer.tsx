@@ -15,10 +15,26 @@ import {
   type SudoMode as SudoModeT,
   type NewServerCard,
   type ServerView,
+  type AgentMode,
 } from "@/lib/api";
 import { t } from "@/lib/i18n";
 import { href, navigate, type Route } from "@/lib/router";
 import { cn } from "@/lib/utils";
+
+// How the agent runs on the server. The hints are i18n keys.
+const AGENT_MODES: { v: AgentMode; l: string; hint: string }[] = [
+  {
+    v: "auto",
+    l: "auto",
+    hint: "docker when the server has it; on Proxmox VE without docker a systemd service; otherwise docker is installed",
+  },
+  { v: "docker", l: "docker", hint: "two containers: the agent and a read-only docker API proxy; docker is installed if missing" },
+  {
+    v: "systemd",
+    l: "systemd",
+    hint: "a service without docker (hypervisors, Proxmox VE): host metrics, disks and journald logs, no containers",
+  },
+];
 
 const fieldCls =
   "h-9 w-full min-w-0 border border-input bg-field px-2.5 text-hi placeholder:text-muted-foreground focus-visible:outline-1 focus-visible:outline-ring disabled:opacity-60";
@@ -194,6 +210,7 @@ export function AddServer({
   const [sudoMode, setSudoMode] = useState<SudoModeT>("limited");
   const [disablePassword, setDisablePassword] = useState(true);
   const [installAgent, setInstallAgent] = useState(true);
+  const [agentMode, setAgentMode] = useState<AgentMode>("auto");
   const [probe, setProbe] = useState<ProbeResult | null>(null);
   const [probing, setProbing] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
@@ -307,6 +324,7 @@ export function AddServer({
         sudo_mode: sudoMode,
         disable_password: disablePassword,
         install_agent: installAgent,
+        agent_mode: agentMode,
       });
       setJob(r.job);
       setServerId(r.server_id);
@@ -761,6 +779,27 @@ export function AddServer({
                 <Check checked={installAgent} onChange={setInstallAgent} disabled={locked}>
                   {t("install srvmon-agent")}
                 </Check>
+                {installAgent && (
+                  <div className="flex flex-col gap-1 pl-5">
+                    <div className="flex flex-wrap gap-1" role="radiogroup" aria-label={t("how to run the agent")}>
+                      {AGENT_MODES.map((m) => (
+                        <Button
+                          key={m.v}
+                          type="button"
+                          size="sm"
+                          role="radio"
+                          aria-checked={agentMode === m.v}
+                          variant={agentMode === m.v ? "default" : "outline"}
+                          disabled={locked}
+                          onClick={() => setAgentMode(m.v)}
+                        >
+                          {m.l}
+                        </Button>
+                      ))}
+                    </div>
+                    <span className="text-xs text-muted-foreground">{t(AGENT_MODES.find((m) => m.v === agentMode)?.hint ?? "")}</span>
+                  </div>
+                )}
                 <div className="flex flex-col gap-1">
                   <span className="text-muted-foreground">{t("sudo for srvmon")}</span>
                   <SudoPicker value={sudoMode} onChange={setSudoMode} disabled={locked} />
