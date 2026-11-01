@@ -159,7 +159,7 @@ func TestSeededSecretsDoNotReachTheModel(t *testing.T) {
 	}
 
 	// The .env itself and a symlink to it wait for the owner and do not run.
-	for _, cmd := range []string{"cat /srv/app/.env", "cat /srv/app/settings.conf"} {
+	for _, cmd := range []string{"cat /srv/app/.env", "cat /srv/app/settings.conf", "date -f/srv/app/settings.conf"} {
 		done := make(chan execResult, 1)
 		go func() { done <- exec(cmd) }()
 		act := a.waitPending(t)
@@ -174,7 +174,7 @@ func TestSeededSecretsDoNotReachTheModel(t *testing.T) {
 		}
 	}
 	for _, c := range a.sshd.commands() {
-		if strings.Contains(c, "cat ") {
+		if strings.Contains(c, "cat ") || strings.Contains(c, "date -f") {
 			t.Fatalf("a secret file was read without confirmation: %q", c)
 		}
 	}

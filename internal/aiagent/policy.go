@@ -669,7 +669,8 @@ func checkGetent(words []string) string {
 func SecretPath(p string) bool { return secretPath(p) }
 
 // PathWords returns all operand words of a command that Classify accepts
-// (the value of --opt=VALUE included) for resolving on the server: any of
+// (the value of --opt=VALUE and every possible attached value of a short
+// option included) for resolving on the server: any of
 // them may be a file or a symlink. There is no cap: a word left unchecked
 // would run unchecked.
 func PathWords(cmd string) []string {
@@ -683,19 +684,29 @@ func PathWords(cmd string) []string {
 		if len(words) == 0 {
 			continue
 		}
-		for _, w := range words[1:] {
-			if strings.HasPrefix(w, "-") {
-				i := strings.IndexByte(w, '=')
-				if i < 0 {
-					continue
-				}
-				w = w[i+1:]
-			}
+		add := func(w string) {
 			if w == "" || strings.ContainsAny(w, "\n\r") || seen[w] {
-				continue
+				return
 			}
 			seen[w] = true
 			out = append(out, w)
+		}
+		for _, w := range words[1:] {
+			switch {
+			case strings.HasPrefix(w, "--"):
+				if i := strings.IndexByte(w, '='); i >= 0 {
+					add(w[i+1:])
+				}
+			case strings.HasPrefix(w, "-"):
+				// A short option may carry its value attached (-f/tmp/x,
+				// -nf/tmp/x), and which letters take one depends on the
+				// program: resolve every tail after a letter.
+				for j := 2; j < len(w); j++ {
+					add(w[j:])
+				}
+			default:
+				add(w)
+			}
 		}
 	}
 	return out

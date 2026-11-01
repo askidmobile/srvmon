@@ -271,3 +271,19 @@ func TestPathWordsHasNoCap(t *testing.T) {
 		t.Fatalf("%d %q", len(w), w)
 	}
 }
+
+func TestPathWordsAttachedShortValues(t *testing.T) {
+	w := PathWords("date -f/tmp/settings.conf")
+	found := false
+	for _, x := range w {
+		if x == "/tmp/settings.conf" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("%q", w)
+	}
+	if w := PathWords("ls -la"); len(w) != 1 || w[0] != "a" {
+		t.Fatalf("%q", w)
+	}
+}
