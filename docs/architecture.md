@@ -54,7 +54,7 @@ flowchart LR
 
 Агент ничего не выполняет по команде извне: все действия идут через SSH с сервера мониторинга. Украденный токен агента даёт только право слать метрики.
 
-Docker-сокет хоста монтируется только в контейнер `srvmon-dockerproxy` (режим `srvmon-agent dockerproxy` того же образа: без сети, `cap_drop: ALL`, read-only). Он пропускает к Docker API лишь GET-запросы агента и вырезает `Env` из inspect; агент видит его unix-сокет через volume `srvmon-dockerproxy`, а `/run` хоста в его `/host` закрыт tmpfs. Пользователь `srvmon` получает sudo в одном из режимов: нет, ограниченный (службы, journalctl, docker) или полный; режим меняется из паспорта сервера (`internal/sshgw/sudo.go`).
+Docker-сокет хоста монтируется только в контейнер `srvmon-dockerproxy` (режим `srvmon-agent dockerproxy` того же образа: без сети, `cap_drop: ALL`, read-only). Он пропускает к Docker API лишь GET-запросы агента и вырезает `Env` из inspect; агент видит его unix-сокет через volume `srvmon-dockerproxy`, а `/run` хоста в его `/host` закрыт tmpfs. Пользователь `srvmon` получает sudo в одном из режимов: нет, ограниченный (службы, journalctl, docker) или полный; режим меняется из паспорта сервера (`internal/sshgw/sudo.go`). Команды AI-агента и MCP, которые классификатор признал только для чтения, выполняются от отдельного пользователя `srvmon-ro` (без групп и sudo, ключ панели без pty; `internal/sshgw/reader.go`, `internal/api/reader.go`). Docker он видит только через фильтр панели: личный unix-сокет сессии (streamlocal forward sshd), только GET, без `Env`, без export/archive/attach/exec (`internal/sshgw/dockerbridge.go`). Подтверждённые команды выполняются от `srvmon`.
 
 ## Центральный сервер
 

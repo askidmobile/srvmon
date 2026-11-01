@@ -194,13 +194,17 @@ func testOnboard(t *testing.T, hasDocker bool) {
 	if strings.Contains(all, "S3cr3t") {
 		t.Fatal("password leaked into log")
 	}
-	want := 4
+	want := 5
 	if !hasDocker {
-		want = 5
+		want = 6
 	}
 	if len(scripts) != want {
-		t.Fatalf("want %d scripts (user, [docker,] agent, sshd, sudo), got %d", want, len(scripts))
+		t.Fatalf("want %d scripts (user, reader, [docker,] agent, sshd, sudo), got %d", want, len(scripts))
 	}
+	if !strings.Contains(scripts[1], "R='srvmon-ro'") || !strings.Contains(scripts[1], "no-pty") {
+		t.Fatalf("the reader account must follow the user:\n%s", scripts[1])
+	}
+	scripts = append(scripts[:1], scripts[2:]...)
 	// sudo goes last: a narrower mode must not cut the login's own sudo
 	// before the agent install and the sshd change.
 	if last := scripts[len(scripts)-1]; !strings.Contains(last, "NOPASSWD:ALL") || strings.Contains(scripts[0], "sudoers") {

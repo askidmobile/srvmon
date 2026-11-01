@@ -661,3 +661,44 @@ func checkGetent(words []string) string {
 	}
 	return ""
 }
+
+// SecretPath reports whether p names a file that usually holds secrets
+// (the same check Classify applies to the words of a command). The panel
+// runs it on paths resolved on the server, so a symlink to a secret file
+// needs confirmation too.
+func SecretPath(p string) bool { return secretPath(p) }
+
+// PathWords returns the operand words of a command that Classify accepts
+// (the value of --opt=VALUE included), at most 32, for resolving on the
+// server: any of them may be a file or a symlink.
+func PathWords(cmd string) []string {
+	segs, err := splitPipeline(cmd)
+	if err != nil {
+		return nil
+	}
+	seen := map[string]bool{}
+	var out []string
+	for _, words := range segs {
+		if len(words) == 0 {
+			continue
+		}
+		for _, w := range words[1:] {
+			if strings.HasPrefix(w, "-") {
+				i := strings.IndexByte(w, '=')
+				if i < 0 {
+					continue
+				}
+				w = w[i+1:]
+			}
+			if w == "" || strings.ContainsAny(w, "\n\r") || seen[w] {
+				continue
+			}
+			seen[w] = true
+			out = append(out, w)
+			if len(out) == 32 {
+				return out
+			}
+		}
+	}
+	return out
+}
