@@ -97,7 +97,9 @@ func TestDiskForecastAndContainerSeries(t *testing.T) {
 			io.WriteString(w, `{"data":{"result":[
 				{"metric":{"server":"a","mount":"/"},"value":[1,"36000"]},
 				{"metric":{"server":"a","mount":"/slow"},"value":[1,"1e9"]},
-				{"metric":{"server":"b","mount":"/data"},"value":[1,"NaN"]}]}}`)
+				{"metric":{"server":"b","mount":"/data"},"value":[1,"NaN"]},
+				{"metric":{"server":"c","mount":"/full"},"value":[1,"0"]},
+				{"metric":{"server":"c","mount":"/neg"},"value":[1,"-5"]}]}}`)
 		case "/api/v1/query_range":
 			io.WriteString(w, `{"data":{"result":[{"values":[[1700000900,"5"]]}]}}`)
 		}
@@ -108,8 +110,12 @@ func TestDiskForecastAndContainerSeries(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 1 || got["a"]["/"] != 10 || len(got["a"]) != 1 {
+	if len(got) != 2 || got["a"]["/"] != 10 || len(got["a"]) != 1 || len(got["c"]) != 1 {
 		t.Fatalf("forecast = %v", got)
+	}
+	// A full disk keeps its zero-hour forecast.
+	if h, ok := got["c"]["/full"]; !ok || h != 0 {
+		t.Fatalf("full disk forecast = %v %v", h, ok)
 	}
 	end := time.Unix(1700000900, 0)
 	h, err := r.ContainerSeries(context.Background(), "a", `we"b`, "15m", end)

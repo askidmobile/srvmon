@@ -107,7 +107,7 @@ func (r *Reader) DiskForecast(ctx context.Context) (map[string]map[string]float6
 	out := map[string]map[string]float64{}
 	for _, s := range res {
 		srv, mount := s.Metric["server"], s.Metric["mount"]
-		if srv == "" || mount == "" || !(s.Value > 0) || math.IsInf(s.Value, 0) {
+		if srv == "" || mount == "" || !(s.Value >= 0) || math.IsInf(s.Value, 0) {
 			continue
 		}
 		h := s.Value / 3600
