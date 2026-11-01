@@ -114,7 +114,9 @@ func TestTerminalIsRecorded(t *testing.T) {
 
 	var sawRec bool
 	var out strings.Builder
-	for !strings.Contains(out.String(), "$ ") {
+	// The rec control frame and the shell prompt race: the SSH output pump
+	// may start before the handler announces the recording.
+	for !sawRec || !strings.Contains(out.String(), "$ ") {
 		typ, data, err := conn.Read(rctx)
 		if err != nil {
 			t.Fatalf("read: %v (got %q)", err, out.String())
