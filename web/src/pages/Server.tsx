@@ -2,6 +2,7 @@ import * as React from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { AgentVersion } from "@/components/AgentVersion";
+import { SudoMode } from "@/components/SudoMode";
 import { Hotkey, Shell } from "@/components/Shell";
 import { Button } from "@/components/ui/button";
 import { Panel } from "@/components/ui/panel";
@@ -739,6 +740,7 @@ function Passport({
       ),
     ],
     ["ssh", data.host ? `${data.host}:${data.port}` : t("not set up")],
+    ...(data.has_ssh ? ([["sudo", <SudoMode key="sudo" id={data.id} />]] as [string, React.ReactNode][]) : []),
     [t("os"), inv?.os || "—"],
     [t("kernel"), inv?.kernel || "—"],
     ["docker", inv?.docker_version || (r?.docker_ok ? t("yes") : "—")],
