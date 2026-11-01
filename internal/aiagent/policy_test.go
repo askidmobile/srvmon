@@ -267,7 +267,7 @@ func TestPathWordsHasNoCap(t *testing.T) {
 	}
 	b.WriteString(" /srv/app/settings.conf --file=/x/y -n")
 	w := PathWords(b.String())
-	if len(w) != 42 || w[40] != "/srv/app/settings.conf" || w[41] != "/x/y" {
+	if len(w) != 44 || w[40] != "/srv/app/settings.conf" || w[42] != "/x/y" {
 		t.Fatalf("%d %q", len(w), w)
 	}
 }
@@ -283,7 +283,7 @@ func TestPathWordsAttachedShortValues(t *testing.T) {
 	if !found {
 		t.Fatalf("%q", w)
 	}
-	if w := PathWords("ls -la"); len(w) != 1 || w[0] != "a" {
+	if w := PathWords("ls -la"); len(w) != 2 || w[0] != "-la" || w[1] != "a" {
 		t.Fatalf("%q", w)
 	}
 }
@@ -301,5 +301,20 @@ func TestQuotedControlCharacters(t *testing.T) {
 	}
 	if ro, why := Classify("cut -d'\t' -f1 /tmp/a"); !ro {
 		t.Fatalf("tab inside quotes: %s", why)
+	}
+}
+
+// After "--" a dash-prefixed word is a file name: every option word is also
+// resolved whole.
+func TestPathWordsAfterTerminator(t *testing.T) {
+	w := PathWords("cat -- --settings.conf")
+	found := false
+	for _, x := range w {
+		if x == "--settings.conf" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("%q", w)
 	}
 }

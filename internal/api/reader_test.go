@@ -113,17 +113,19 @@ func TestSeededSecretsDoNotReachTheModel(t *testing.T) {
 	const tok = "FAKE-ghp_0123456789abcdefghijklmnopqrstuvwxyz"
 	a := newAgentEnvWith(t, "http://127.0.0.1:1", func(user, cmd, stdin string) (string, string, uint32) {
 		switch {
-		case strings.HasPrefix(stdin, "readlink -f"):
-			var out strings.Builder
+		case isResolve(stdin):
+			var paths []string
 			for _, l := range strings.Split(strings.TrimSpace(stdin), "\n") {
 				switch {
 				case strings.Contains(l, "'/srv/app/settings.conf'"):
-					out.WriteString("/srv/app/.env\n") // a symlink to the .env
+					paths = append(paths, "/srv/app/.env") // a symlink to the .env
+				case strings.Contains(l, "'/srv/app/odd.conf'"):
+					paths = append(paths, "/srv/app/odd\n/.env") // a symlink into a directory named "odd\n"
 				default:
-					out.WriteString("/home/srvmon-ro/x\n")
+					paths = append(paths, "/home/srvmon-ro/x")
 				}
 			}
-			return out.String(), "", 0
+			return resolved(paths...), "", 0
 		case strings.Contains(cmd, "docker inspect app"):
 			return `[{"Name":"/app","Config":{"Env":["API_TOKEN=` + tok + `","DB_PASSWORD=hunter2 with spaces"]}}]` + "\n", "", 0
 		case strings.Contains(cmd, "journalctl"):
@@ -160,7 +162,8 @@ func TestSeededSecretsDoNotReachTheModel(t *testing.T) {
 	}
 
 	// The .env itself and a symlink to it wait for the owner and do not run.
-	for _, cmd := range []string{"cat /srv/app/.env", "cat /srv/app/settings.conf", "date -f/srv/app/settings.conf"} {
+	for _, cmd := range []string{"cat /srv/app/.env", "cat /srv/app/settings.conf", "date -f/srv/app/settings.conf",
+		"cat -- /srv/app/odd.conf", "cat /srv/app/odd.conf"} {
 		done := make(chan execResult, 1)
 		go func() { done <- exec(cmd) }()
 		act := a.waitPending(t)
@@ -208,5 +211,53 @@ func TestReaderSetupCancelledIsNotCached(t *testing.T) {
 	}
 	if st := a.srv.readerStateOf(a.srvID); st.failed != nil || st.self {
 		t.Fatalf("cached %+v", st)
+	}
+}
+
+// Concurrent first reads set the reader up once: the others wait and then
+// sign in as the account the first one created.
+func TestReaderSetupIsSerialized(t *testing.T) {
+	var setups atomic.Int32
+	var a *agentEnv
+	a = newAgentEnvWith(t, "http://127.0.0.1:1", func(user, cmd, stdin string) (string, string, uint32) {
+		if cmd == "sh -s" && strings.Contains(stdin, "host-sh") {
+			if setups.Add(1) > 1 {
+				return "", "useradd: user 'srvmon-ro' already exists\n", 9
+			}
+			time.Sleep(200 * time.Millisecond)
+			a.sshd.mu.Lock()
+			a.sshd.deny = nil
+			a.sshd.mu.Unlock()
+			return "reader-ok\n", "", 0
+		}
+		return "out of " + cmd + "\n", "", 0
+	})
+	a.sshd.mu.Lock()
+	a.sshd.deny = func(u string) bool { return u == "srvmon-ro" }
+	a.sshd.mu.Unlock()
+	acc, err := a.st.ServerSSH(context.Background(), a.srvID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 4)
+	for range 4 {
+		go func() {
+			c, asReader, err := a.srv.readerClient(context.Background(), acc)
+			if err == nil {
+				c.Close()
+				if !asReader {
+					err = fmt.Errorf("not as reader")
+				}
+			}
+			errs <- err
+		}()
+	}
+	for range 4 {
+		if err := <-errs; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n := setups.Load(); n != 1 {
+		t.Fatalf("set up %d times", n)
 	}
 }

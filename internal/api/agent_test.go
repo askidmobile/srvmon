@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -116,6 +117,20 @@ func newFakeSSHDFull(t *testing.T, clientKey ssh.PublicKey, handler func(user, c
 	return f
 }
 
+// isResolve reports the panel's symlink resolution script (secretTarget).
+func isResolve(stdin string) bool { return strings.HasPrefix(stdin, "p=$(readlink -f") }
+
+// resolved is a fake answer to the resolution script: one path per line,
+// hex-encoded as od prints it.
+func resolved(paths ...string) string {
+	var b strings.Builder
+	b.WriteString("#resolved\n")
+	for _, p := range paths {
+		b.WriteString(hex.EncodeToString([]byte(p)) + "\n")
+	}
+	return b.String()
+}
+
 // commands are the commands that ran, without the panel's symlink
 // resolution before a read-only one.
 func (f *fakeSSHD) commands() []string {
@@ -123,7 +138,7 @@ func (f *fakeSSHD) commands() []string {
 	defer f.mu.Unlock()
 	var out []string
 	for _, e := range f.execs {
-		if !strings.HasPrefix(e.stdin, "readlink -f") {
+		if !isResolve(e.stdin) {
 			out = append(out, e.cmd)
 		}
 	}
@@ -136,7 +151,7 @@ func (f *fakeSSHD) users() []string {
 	defer f.mu.Unlock()
 	var out []string
 	for _, e := range f.execs {
-		if !strings.HasPrefix(e.stdin, "readlink -f") {
+		if !isResolve(e.stdin) {
 			out = append(out, e.user)
 		}
 	}
@@ -174,7 +189,14 @@ func newAgentEnvWith(t *testing.T, aiURL string, handler func(user, cmd, stdin s
 		t.Fatal(err)
 	}
 	signer, _ := ssh.ParsePrivateKey(kp.Private)
-	sshd := newFakeSSHDFull(t, signer.PublicKey(), handler)
+	sshd := newFakeSSHDFull(t, signer.PublicKey(), func(user, cmd, stdin string) (string, string, uint32) {
+		out, errOut, code := handler(user, cmd, stdin)
+		if isResolve(stdin) && !strings.HasPrefix(out, "#resolved\n") {
+			// The handler does not model symlinks: nothing resolves.
+			return strings.Repeat("\n", strings.Count(stdin, "\n")), "", 0
+		}
+		return strings.TrimPrefix(out, "#resolved\n"), errOut, code
+	})
 	ctx := context.Background()
 	id, err := e.st.CreateServer(ctx, store.Server{Name: "prod-api-01"})
 	if err != nil {

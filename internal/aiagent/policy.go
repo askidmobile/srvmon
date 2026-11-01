@@ -710,6 +710,9 @@ func PathWords(cmd string) []string {
 			out = append(out, w)
 		}
 		for _, w := range words[1:] {
+			// The word itself may be a file too: after "--" (cat -- --x),
+			// or for programs that take no options.
+			add(w)
 			switch {
 			case strings.HasPrefix(w, "--"):
 				if i := strings.IndexByte(w, '='); i >= 0 {
@@ -722,8 +725,6 @@ func PathWords(cmd string) []string {
 				for j := 2; j < len(w); j++ {
 					add(w[j:])
 				}
-			default:
-				add(w)
 			}
 		}
 	}

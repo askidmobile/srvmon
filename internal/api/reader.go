@@ -74,6 +74,21 @@ func (s *Server) readerClient(ctx context.Context, a store.SSHAccess) (c *ssh.Cl
 	if err == nil || !isAuthError(err) {
 		return c, err == nil, err
 	}
+	// Concurrent first reads (several chats, MCP) set the account up one at
+	// a time: the setup script is not atomic, and the one that waited finds
+	// the account ready or the outcome cached.
+	mu := s.readerSetupLock(a.ServerID)
+	mu.Lock()
+	defer mu.Unlock()
+	if st := s.readerStateOf(a.ServerID); st.failed != nil {
+		return nil, false, st.failed
+	} else if st.self {
+		c, err := s.dialServer(ctx, a)
+		return c, false, err
+	}
+	if c, err = s.dialServer(ctx, ra); err == nil || !isAuthError(err) {
+		return c, err == nil, err
+	}
 	pc, err := s.dialServer(ctx, a)
 	if err != nil {
 		return nil, false, err
@@ -108,8 +123,20 @@ func (s *Server) readerClient(ctx context.Context, a store.SSHAccess) (c *ssh.Cl
 		s.log.Warn("reader account", "server", a.Name, "err", err)
 		return nil, false, err
 	}
+	s.setReaderState(a.ServerID, readerState{})
 	_ = s.store.Audit(context.Background(), "agent", "reader_setup", a.Name+": "+sshgw.ReaderUser)
 	return c, true, nil
+}
+
+func (s *Server) readerSetupLock(id int64) *sync.Mutex {
+	s.agent.mu.Lock()
+	defer s.agent.mu.Unlock()
+	mu := s.agent.setup[id]
+	if mu == nil {
+		mu = &sync.Mutex{}
+		s.agent.setup[id] = mu
+	}
+	return mu
 }
 
 // serverPublicKey is the authorized_keys line of the panel's key for a.
@@ -138,9 +165,12 @@ func secretTarget(ctx context.Context, c *ssh.Client, cmd string) string {
 	if len(words) == 0 {
 		return ""
 	}
+	// Each resolved path comes back hex-encoded on its own line: a path may
+	// contain newlines (a symlink into a directory named "a\n"), and a
+	// path that does is not judged by a fragment of it.
 	var b strings.Builder
 	for _, w := range words {
-		fmt.Fprintf(&b, "readlink -f -- %s 2>/dev/null || echo\n", sshgw.Quote(w))
+		fmt.Fprintf(&b, "p=$(readlink -f -- %s 2>/dev/null); printf %%s \"$p\" | od -An -v -tx1 | tr -d ' \\n'; echo\n", sshgw.Quote(w))
 	}
 	out, _, err := sshgw.Run(ctx, c, "sh -s", strings.NewReader(b.String()))
 	if err != nil && out == "" {
@@ -148,8 +178,16 @@ func secretTarget(ctx context.Context, c *ssh.Client, cmd string) string {
 	}
 	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
 	for i, w := range words {
-		if i < len(lines) && lines[i] != "" && aiagent.SecretPath(lines[i]) {
-			return i18n.T("%s points to %s, which may hold secrets", w, lines[i])
+		if i >= len(lines) || lines[i] == "" {
+			continue
+		}
+		raw, err := hex.DecodeString(strings.TrimSpace(lines[i]))
+		if err != nil {
+			return i18n.T("%s points to %s, which may hold secrets", w, "?")
+		}
+		p := string(raw)
+		if aiagent.SecretPath(p) || strings.ContainsAny(p, "\n\r") {
+			return i18n.T("%s points to %s, which may hold secrets", w, strings.ReplaceAll(strings.ReplaceAll(p, "\n", `\n`), "\r", `\r`))
 		}
 	}
 	return ""
