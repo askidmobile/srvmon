@@ -223,4 +223,10 @@ var ru = map[string]string{
 	"the new agent reports version %s instead of %s":                                   "новый агент сообщает версию %s вместо %s",
 	"%s; restoring the previous agent failed: %s":                                      "%s; вернуть прежний агент не удалось: %s",
 	"%s; the previous agent is restored":                                               "%s; прежний агент восстановлен",
+	// Panel heartbeat (dead man's switch).
+	"no connection: %s":          "нет связи: %s",
+	"rules not evaluated for %s": "правила не проверялись %s",
+	"srvmon %s: problems:":       "srvmon %s: проблемы:",
+	"the ping URL starts with http:// or https:// and has no spaces": "URL пинга начинается с http:// или https:// и без пробелов",
+	"set the ping URL first": "сначала укажите URL пинга",
 }
