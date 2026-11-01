@@ -131,3 +131,33 @@ func TestRuleIDsAreNotReused(t *testing.T) {
 		t.Fatalf("rule id %d reused", id2)
 	}
 }
+
+func TestServerChecks(t *testing.T) {
+	st, err := Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	ctx := context.Background()
+	id, _ := st.CreateServer(ctx, Server{Name: "a"})
+	if err := st.SetServerChecks(ctx, id, []string{"https://x.org/", "x.org:22"}); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := st.ServerChecks(ctx, id)
+	if err := st.SetServerChecks(ctx, id, []string{"x.org:22", "tls://x.org:993"}); err != nil {
+		t.Fatal(err)
+	}
+	after, _ := st.ServerChecks(ctx, id)
+	if len(after) != 2 || after[0].ID != before[1].ID || after[1].Target != "tls://x.org:993" {
+		t.Fatalf("before %+v after %+v", before, after)
+	}
+	if err := st.SetServerChecks(ctx, 999, nil); err != ErrNotFound {
+		t.Fatalf("unknown server: %v", err)
+	}
+	if err := st.DeleteServer(ctx, id); err != nil {
+		t.Fatal(err)
+	}
+	if all, _ := st.ListChecks(ctx); len(all) != 0 {
+		t.Fatalf("checks outlive their server: %+v", all)
+	}
+}

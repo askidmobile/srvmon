@@ -19,10 +19,11 @@ The interface is a dark TUI-style dashboard (btop-like) with a green accent. The
 - **Metrics and containers.** A small Go agent (`srvmon-agent`) on each server reads CPU, RAM, swap, load, disks, network and uptime from `/proc`, containers through the docker socket (read-only), and pushes them to the panel. It buffers for an hour if the panel is unreachable. Metrics are stored in VictoriaMetrics.
 - **Server screen.** Per-core CPU, memory, disks, network, processes, containers with status/health/restarts, and syslog + docker logs, all live while the screen is open.
 - **Server passport and payments.** Each server keeps a passport: description, project, group, tags, provider, plan, cost with currency and the next payment date. Payments show up in the overview, in Telegram (`/bills`) and as an alert a few days before the due date.
+- **Site, port and certificate checks.** Add the server's URLs and ports on its screen; the panel checks them every minute from its own network (HTTP status, TCP connect, TLS handshake), alerts when one is down and when a TLS certificate or the domain registration is about to expire. Domain expiry dates (RDAP, WHOIS for zones without it) sit next to payments in the passport and in `/bills`.
 - **Onboarding wizard.** Add a server, verify its SSH host key, log in once with a password or your own key. srvmon creates a `srvmon` user with its own ed25519 key, installs the agent and can disable password auth. The one-time password or key is never stored.
 - **Web terminal.** xterm.js ↔ WebSocket ↔ SSH client inside `srvmon-server` ↔ sshd. Tabs, resize, `docker exec` into a container. The AI agent panel sits next to the terminal (`F9` shows or hides it) and works in the context of that server. Private keys never leave the monitoring server; they are encrypted at rest (XChaCha20-Poly1305).
 - **AI agent.** Built on the [pi](https://pi.dev) SDK, any provider (DeepSeek, Anthropic, OpenAI, OpenRouter, Google, Ollama, any OpenAI- or Anthropic-compatible endpoint). Read-only commands run immediately; anything that changes a server waits for your explicit approval. The policy is enforced by `srvmon-server`, not by the model. Each server has its own chat context, chats keep their history, and the model can be picked per chat. Scheduled tasks (cron) report to Telegram, and you can ask the agent from Telegram with `/ask`.
-- **Alerts and Telegram.** Agent offline, container down/unhealthy, restart loops, CPU, disk, upcoming hosting payments, fail2ban bans, login attempts. Rules are editable (threshold, duration, level, channel: Telegram or panel only). Quiet hours in your time zone (critical alerts still go through), ack and mute, 90-day history. The bot answers `/status`, `/server`, `/alerts`, `/ack`, `/bills`, `/ask`.
+- **Alerts and Telegram.** Agent offline, container down/unhealthy, restart loops, CPU, disk, sites and ports down, expiring certificates and domains, upcoming hosting payments, fail2ban bans, login attempts. Rules are editable (threshold, duration, level, channel: Telegram or panel only). Quiet hours in your time zone (critical alerts still go through), ack and mute, 90-day history. The bot answers `/status`, `/server`, `/alerts`, `/ack`, `/bills`, `/ask`.
 - **Security.** Password (argon2id) + TOTP or backup code, no username. Rate limiting, an audit log and fail2ban jails for the panel and sshd.
 
 ## Screenshots
@@ -112,11 +113,27 @@ docker compose exec server /srvmon-server add-server -name shop-db -group prod -
 SRVMON_URL=https://mon.example.com SRVMON_TOKEN=a_... docker compose up -d
 ```
 
+## Site and port checks
+
+On the server screen the "checks" panel takes one target per line:
+
+| Target | What is checked |
+|---|---|
+| `https://example.com/health` | HTTP GET, up when the status is below 400 (up to 5 redirects), plus the TLS certificate |
+| `http://10.0.0.5:8080/` | HTTP GET |
+| `tls://mail.example.com:993` | TCP connect and TLS handshake, plus the certificate |
+| `db.example.com:5432` | TCP connect (`tcp://` is optional) |
+
+- Every target is checked once a minute from the monitoring server; a failed check is repeated once after 3 s before it counts as down. Up to 20 targets per server.
+- The panel shows status, latency, certificate expiry and the domain registration expiry. History goes to VictoriaMetrics as `srvmon_check_up`, `srvmon_check_latency_ms` and `srvmon_check_cert_days`.
+- Domain expiry is looked up twice a day over RDAP (IANA bootstrap) and over WHOIS for zones without RDAP, such as `.ru` and `.рф`. The monitoring server needs outbound HTTPS and TCP port 43 for that.
+- Alert rules: "site / port down" for 2 min (crit), "certificate expires in ≤ 14 days" and "domain expires in ≤ 30 days" (warn). Thresholds are editable on the alerts screen.
+
 ## Alerts and Telegram
 
 The `[5] alerts` screen (`#/alerts`) shows active alerts with "ack" and "mute 1h", the rules, the Telegram bot, quiet hours and a 90-day history.
 
-- Default rules: agent silent for more than 2 min (crit), container down or unhealthy for 1 min (crit), more than 2 container restarts per hour, CPU > 90% for 5 min, memory > 95% for 5 min (off by default, panel only), disk > 85%, hosting payment due in 3 days or less, plus events: a fail2ban ban on the monitoring server, password guessing on the panel, a panel sign-in.
+- Default rules: agent silent for more than 2 min (crit), container down or unhealthy for 1 min (crit), more than 2 container restarts per hour, CPU > 90% for 5 min, memory > 95% for 5 min (off by default, panel only), disk > 85%, hosting payment due in 3 days or less, a site or port down for 2 min (crit), a TLS certificate expiring in 14 days or less, a domain expiring in 30 days or less, plus events: a fail2ban ban on the monitoring server, password guessing on the panel, a panel sign-in.
 - Every rule can be switched off, edited (threshold, duration, level crit/warn/info) or sent to a channel: `tg` (Telegram and panel) or `web` (panel only). `+ rule` adds a new one. Containers that stopped with exit code 0 do not count as alerts.
 - Quiet hours (for example 01:00–07:00 in `Europe/Moscow`) hold back Telegram notifications until they end; critical alerts are always sent.
 

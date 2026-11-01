@@ -93,6 +93,8 @@ var migrations = []string{
 	agentSchema,
 	// AI settings in the panel: a chat may pick its own model.
 	migrationAgentModel,
+	// HTTP/TCP/TLS checks from the panel (checks.go).
+	migrationChecks,
 }
 
 func (s *Store) migrate(ctx context.Context) error {

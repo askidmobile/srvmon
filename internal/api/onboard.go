@@ -594,6 +594,9 @@ func (s *Server) handleDeleteServer(w http.ResponseWriter, r *http.Request) {
 	}
 	s.latest.Forget(id)
 	s.alerts.Forget(id)
+	if _, err := s.checks.Reload(context.WithoutCancel(r.Context())); err != nil {
+		s.log.Error("checks: reload", "err", err)
+	}
 	_ = s.store.Audit(r.Context(), s.clientIP(r), "server_delete", strconv.FormatInt(id, 10))
 	writeJSON(w, http.StatusOK, map[string]bool{"deleted": true})
 }

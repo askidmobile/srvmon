@@ -6,6 +6,7 @@
 // values, list it in LANGS and dicts below and in internal/i18n on the server.
 import { useSyncExternalStore } from "react";
 
+import { checksRu, checksZh } from "@/i18n/checks";
 import { ru } from "@/i18n/ru";
 import { zh } from "@/i18n/zh";
 
@@ -18,7 +19,7 @@ export const LANGS: { code: Lang; name: string }[] = [
 ];
 
 export type Dict = Record<string, string>;
-const dicts: Record<Lang, Dict> = { en: {}, ru, zh };
+const dicts: Record<Lang, Dict> = { en: {}, ru: { ...ru, ...checksRu }, zh: { ...zh, ...checksZh } };
 
 const STORAGE = "srvmon.lang";
 

@@ -36,7 +36,7 @@ func TestAlertRulesAPI(t *testing.T) {
 	r := e.get(t, "/api/alert-rules")
 	_ = json.NewDecoder(r.Body).Decode(&rules)
 	r.Body.Close()
-	if len(rules) != 10 {
+	if len(rules) != 13 {
 		t.Fatalf("default rules = %d", len(rules))
 	}
 	cpu := rules[1]

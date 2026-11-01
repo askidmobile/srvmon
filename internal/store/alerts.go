@@ -31,7 +31,8 @@ func EventKind(kind string) bool {
 func KnownKind(kind string) bool {
 	switch kind {
 	case KindAgentSilent, KindCPU, KindMem, KindDisk, KindContainerDown, KindContainerRestarts,
-		KindPaymentDue, KindFail2ban, KindBruteforce, KindLogin:
+		KindPaymentDue, KindFail2ban, KindBruteforce, KindLogin,
+		KindCheckDown, KindCertExpiry, KindDomainExpiry:
 		return true
 	}
 	return false

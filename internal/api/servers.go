@@ -50,6 +50,7 @@ func (s *Server) handleServer(w http.ResponseWriter, r *http.Request) {
 		v.Online = s.now().Sub(snap.Received) < offlineAfter
 	}
 	s.decorateAgent(&v.serverView)
+	s.decorateChecks(&v.serverView)
 	writeJSON(w, http.StatusOK, v)
 }
 

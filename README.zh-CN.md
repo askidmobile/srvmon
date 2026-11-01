@@ -19,10 +19,11 @@
 - **指标与容器。** 每台服务器上运行一个小型 Go 代理（`srvmon-agent`），从 `/proc` 读取 CPU、内存、swap、负载、磁盘、网络和运行时间，通过 docker socket（只读）读取容器信息并推送到面板。面板不可达时最多缓存一小时。指标存储在 VictoriaMetrics 中。
 - **服务器详情页。** 按核心的 CPU、内存、磁盘、网络、进程、容器状态/健康检查/重启次数、syslog 与 docker 日志，页面打开期间实时刷新。
 - **服务器档案与续费。** 每台服务器有一份档案：描述、项目、分组、标签、提供商、套餐、费用（含币种）和下次付款日期。续费信息显示在总览中、Telegram（`/bills`）里，并会在到期前几天发出告警。
+- **网站、端口与证书检查。** 在服务器页面添加其 URL 和端口；面板每分钟从自身网络检查一次（HTTP 状态、TCP 连接、TLS 握手），在目标无法访问、TLS 证书或域名注册即将到期时发出告警。域名到期日期（RDAP，没有 RDAP 的后缀用 WHOIS）显示在档案中的续费信息旁和 `/bills` 中。
 - **添加向导。** 校验 SSH 主机密钥，用密码或你自己的私钥登录一次。srvmon 创建 `srvmon` 用户及其 ed25519 密钥，安装代理，并可关闭密码登录。一次性密码或密钥不会被保存。
 - **Web 终端。** xterm.js ↔ WebSocket ↔ `srvmon-server` 内的 SSH 客户端 ↔ sshd。支持多标签、窗口缩放、`docker exec` 进入容器。终端旁边是 AI 代理面板（`F9` 显示或隐藏），在该服务器的上下文中工作。私钥从不离开监控服务器，并以 XChaCha20-Poly1305 加密存储。
 - **AI 代理。** 基于 [pi](https://pi.dev) SDK，支持任意提供商（DeepSeek、Anthropic、OpenAI、OpenRouter、Google、Ollama，以及任何 OpenAI / Anthropic 兼容接口）。只读命令直接执行；任何会修改服务器的命令都必须经你明确批准，策略由 `srvmon-server` 而非模型执行。每台服务器有独立的对话上下文，对话保留历史，每个对话可单独选择模型。定时任务（cron）结果可发送到 Telegram，也可以在 Telegram 中用 `/ask` 向代理提问。
-- **告警与 Telegram。** 代理离线、容器停止或不健康、频繁重启、CPU、磁盘、主机续费提醒、fail2ban 封禁、登录尝试。规则可编辑（阈值、持续时间、级别、渠道：Telegram 或仅面板）。按你的时区设置静默时段（严重告警仍会发送），支持确认与临时静音，保留 90 天历史。机器人命令：`/status`、`/server`、`/alerts`、`/ack`、`/bills`、`/ask`。
+- **告警与 Telegram。** 代理离线、容器停止或不健康、频繁重启、CPU、磁盘、网站和端口无法访问、证书和域名即将到期、主机续费提醒、fail2ban 封禁、登录尝试。规则可编辑（阈值、持续时间、级别、渠道：Telegram 或仅面板）。按你的时区设置静默时段（严重告警仍会发送），支持确认与临时静音，保留 90 天历史。机器人命令：`/status`、`/server`、`/alerts`、`/ack`、`/bills`、`/ask`。
 - **安全。** 密码（argon2id）+ TOTP 或备用码，无需用户名。限流、审计日志，以及面板和 sshd 的 fail2ban 规则。
 
 ## 截图
@@ -105,11 +106,27 @@ docker compose exec server /srvmon-server add-server -name shop-db -group prod -
 SRVMON_URL=https://mon.example.com SRVMON_TOKEN=a_... docker compose up -d
 ```
 
+## 网站与端口检查
+
+在服务器页面的“检查”面板中每行填写一个目标：
+
+| 目标 | 检查内容 |
+|---|---|
+| `https://example.com/health` | HTTP GET，状态码低于 400 视为正常（最多 5 次重定向），并检查 TLS 证书 |
+| `http://10.0.0.5:8080/` | HTTP GET |
+| `tls://mail.example.com:993` | TCP 连接和 TLS 握手，并检查证书 |
+| `db.example.com:5432` | TCP 连接（`tcp://` 可省略） |
+
+- 监控服务器每分钟检查一次每个目标；检查失败会在 3 秒后重试一次，仍失败才视为无法访问。每台服务器最多 20 个目标。
+- 面板显示状态、延迟、证书到期和域名注册到期时间。历史写入 VictoriaMetrics：`srvmon_check_up`、`srvmon_check_latency_ms`、`srvmon_check_cert_days`。
+- 域名到期时间每天通过 RDAP（IANA 引导文件）查询两次，没有 RDAP 的后缀（如 `.ru`、`.рф`）使用 WHOIS。监控服务器需要能访问外网 HTTPS 和 TCP 43 端口。
+- 告警规则：“网站 / 端口无法访问”持续 2 分钟（crit），“证书 ≤ 14 天内到期”和“域名 ≤ 30 天内到期”（warn）。阈值可在告警页面修改。
+
 ## 告警与 Telegram
 
 `[5] 告警` 页面（`#/alerts`）显示活动告警（可“确认”或“静音 1 小时”）、规则、Telegram 机器人、静默时段和 90 天历史。
 
-- 默认规则：代理静默超过 2 分钟（crit），容器停止或不健康 1 分钟（crit），每小时重启超过 2 次，CPU > 90% 持续 5 分钟，内存 > 95% 持续 5 分钟（默认关闭，仅面板），磁盘 > 85%，3 天内需续费；以及事件：监控服务器上的 fail2ban 封禁、面板密码爆破、面板登录。
+- 默认规则：代理静默超过 2 分钟（crit），容器停止或不健康 1 分钟（crit），每小时重启超过 2 次，CPU > 90% 持续 5 分钟，内存 > 95% 持续 5 分钟（默认关闭，仅面板），磁盘 > 85%，3 天内需续费，网站或端口无法访问 2 分钟（crit），TLS 证书 14 天内到期，域名 30 天内到期；以及事件：监控服务器上的 fail2ban 封禁、面板密码爆破、面板登录。
 - 每条规则都可以关闭、修改（阈值、持续时间、级别 crit/warn/info）或指定渠道：`tg`（Telegram 和面板）或 `web`（仅面板）。`+ 规则` 可添加新规则。以退出码 0 停止的容器不算告警。
 - 静默时段（例如 `Europe/Moscow` 时区 01:00–07:00）内 Telegram 通知会延后到时段结束；严重告警始终发送。
 

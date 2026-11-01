@@ -70,6 +70,7 @@ type serverView struct {
 	AgentOutdated bool             `json:"agent_outdated,omitempty"`
 	AgentLatest   string           `json:"agent_latest,omitempty"`
 	AgentUpdate   *agentUpdateView `json:"agent_update,omitempty"`
+	Checks        *checkSummary    `json:"checks,omitempty"`
 }
 
 func (s *Server) handleServers(w http.ResponseWriter, r *http.Request) {
@@ -88,6 +89,7 @@ func (s *Server) handleServers(w http.ResponseWriter, r *http.Request) {
 			v.Online = now.Sub(snap.Received) < offlineAfter
 		}
 		s.decorateAgent(&v)
+		s.decorateChecks(&v)
 		out = append(out, v)
 	}
 	writeJSON(w, http.StatusOK, out)
