@@ -21,8 +21,9 @@ import (
 const ReaderUser = "srvmon-ro"
 
 // ErrNoRootAccess: the panel's SSH user has neither root, nor the docker
-// group, nor passwordless sudo, so the reader account cannot be set up.
-// Such a user is itself unprivileged.
+// group or socket, nor any passwordless sudo rule, so the reader account
+// cannot be set up. Such a user is itself unprivileged. A user with some of
+// these that still cannot set it up (docker stopped, say) gets an error.
 var ErrNoRootAccess = errors.New("no root access")
 
 // readerRootScript creates ReaderUser (if missing), takes it out of every
@@ -73,7 +74,7 @@ func EnsureReader(ctx context.Context, c *ssh.Client, p ReaderParams) error {
 	case strings.Contains(errOut, "srvmon:no-access"):
 		return ErrNoRootAccess
 	case err != nil:
-		return i18n.Errorf("setting up %s: %s", ReaderUser, firstLine(errOut, err))
+		return i18n.Errorf("setting up %s: %s", ReaderUser, firstLine(strings.ReplaceAll(errOut, "srvmon:privileged ", ""), err))
 	case !strings.Contains(out, "reader-ok"):
 		return i18n.Errorf("setting up %s: %s", ReaderUser, firstLine(errOut+out, nil))
 	}
@@ -89,7 +90,19 @@ if sudo -n true 2>/dev/null; then printf '%s' "$RS" | sudo -n sh -s; exit; fi
 D=""
 if docker info >/dev/null 2>&1; then D=docker
 elif sudo -n docker info >/dev/null 2>&1; then D="sudo -n docker"; fi
-[ -n "$D" ] && [ -n "$IMG" ] || { echo srvmon:no-access >&2; exit 6; }
+if [ -z "$D" ] || [ -z "$IMG" ]; then
+  # no-access only when the user is verifiably unprivileged: a docker
+  # group with the daemon down, a usable socket or any NOPASSWD sudo rule
+  # is privilege the reader would not have, so that is a failure instead.
+  if id -Gn | tr ' ' '\n' | grep -qx docker; then echo "srvmon:privileged in the docker group, but docker does not answer" >&2; exit 7; fi
+  for s in /var/run/docker.sock /run/docker.sock; do
+    if [ -S "$s" ] && [ -w "$s" ]; then echo "srvmon:privileged $s is writable, but docker does not answer" >&2; exit 7; fi
+  done
+  if command -v sudo >/dev/null 2>&1 && LC_ALL=C sudo -n -l 2>/dev/null | grep -q NOPASSWD; then
+    echo "srvmon:privileged passwordless sudo rules, but none can set up the account" >&2; exit 7
+  fi
+  echo srvmon:no-access >&2; exit 6
+fi
 REG=${IMG%%/*}
 if [ -n "$RU" ]; then printf '%s' "$RT" | $D login "$REG" -u "$RU" --password-stdin >/dev/null 2>&1 || true; fi
 $D pull -q "$IMG" >/dev/null 2>&1 || true

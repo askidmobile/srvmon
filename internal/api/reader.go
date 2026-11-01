@@ -161,6 +161,9 @@ func (s *Server) runReadOnly(ctx context.Context, a store.SSHAccess, cmd string,
 		return -1, "", "", err
 	}
 	defer c.Close()
+	// Close the connection when ctx ends, also while no command runs on it:
+	// a forward request (ListenUnix) waits for sshd without a context.
+	defer context.AfterFunc(ctx, func() { c.Close() })()
 	if why := secretTarget(ctx, c, cmd); why != "" {
 		return -1, "", why, nil
 	}

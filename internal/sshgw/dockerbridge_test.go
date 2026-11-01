@@ -93,7 +93,7 @@ func TestReaderScripts(t *testing.T) {
 		}
 	}
 	e := ensureReaderScript(ReaderParams{PublicKey: "ssh-ed25519 AAAA", Image: "ghcr.io/x/agent:1"})
-	for _, want := range []string{"sudo -n sh -s", "host-sh", "-v /:/host", "--network none", "srvmon:no-access"} {
+	for _, want := range []string{"sudo -n sh -s", "host-sh", "-v /:/host", "--network none", "srvmon:no-access", "srvmon:privileged", "sudo -n -l"} {
 		if !strings.Contains(e, want) {
 			t.Errorf("ensure script lacks %q", want)
 		}
