@@ -229,4 +229,16 @@ var zh = map[string]string{
 	"srvmon %s: problems:":       "srvmon %s：问题：",
 	"the ping URL starts with http:// or https:// and has no spaces": "ping URL 须以 http:// 或 https:// 开头且不含空格",
 	"set the ping URL first": "请先设置 ping URL",
+	// AI diagnosis of alerts.
+	"AI diagnosis":                                                "AI 诊断",
+	"diagnoses per hour: 1–60":                                    "每小时诊断次数：1–60",
+	"diagnoses per day: 1–500":                                    "每天诊断次数：1–500",
+	"the hourly limit cannot exceed the daily one":                "每小时上限不能超过每天上限",
+	"model id is too long":                                        "模型 id 过长",
+	"skipped: the limit of %d diagnoses per hour is reached":      "已跳过：已达到每小时 %d 次诊断的上限",
+	"skipped: the limit of %d diagnoses per day is reached":       "已跳过：已达到每天 %d 次诊断的上限",
+	"skipped: too many diagnoses at once":                         "已跳过：同时进行的诊断过多",
+	"the agent gave no answer":                                    "代理没有给出回答",
+	"pick a model from the list in the AI settings":               "请从 AI 设置的列表中选择模型",
+	"this alert is not about a server state: nothing to diagnose": "此告警与服务器状态无关：无需诊断",
 }

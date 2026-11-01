@@ -16,7 +16,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 
 import type { Setup } from "./setup.js";
-import { srvmonTools, toolNames } from "./tools.js";
+import { diagnoseToolNames, srvmonTools, toolNames } from "./tools.js";
 
 export type Event =
   | { t: "text"; d: string }
@@ -36,7 +36,12 @@ export interface AgentConfig {
 /** The reply language, as an English name ("Russian"). */
 export const DEFAULT_LANG = "English";
 
-export function systemPrompt(server?: string, task = false, lang = DEFAULT_LANG): string {
+/** What a session is for: a chat, a scheduled task or a read-only alert diagnosis. */
+export type Mode = "chat" | "task" | "diagnose";
+
+export function systemPrompt(server?: string, task: boolean | Mode = false, lang = DEFAULT_LANG): string {
+  const mode: Mode = task === true ? "task" : task === false ? "chat" : task;
+  if (mode === "diagnose") return diagnosePrompt(server, lang);
   const lines = [
     "You are the AI agent of the srvmon monitoring panel. Through it the owner watches their servers: metrics, docker containers, logs.",
     `Reply in ${lang || DEFAULT_LANG}, briefly and to the point, like an experienced SRE. Write commands and paths as \`code\`.`,
@@ -53,7 +58,7 @@ export function systemPrompt(server?: string, task = false, lang = DEFAULT_LANG)
     "- Do not repeat secrets (tokens, passwords, keys) from output in full.",
     "- When asked to \"watch\", \"check every N minutes\" or \"send to Telegram\", create a task with srvmon_task_create; in its prompt describe what to check and when to answer with a line starting with ALERT. Write the task prompt in the language of the conversation.",
   ];
-  if (task) {
+  if (mode === "task") {
     lines.push(
       "",
       "This is a scheduled task run, the owner is not in the chat. Changing commands still wait for their confirmation; do not wait for them without need.",
@@ -63,6 +68,24 @@ export function systemPrompt(server?: string, task = false, lang = DEFAULT_LANG)
   if (server) {
     lines.push("", `Chat context: server "${server}". If a question does not name a server, it is about this one.`);
   }
+  return lines.join("\n");
+}
+
+function diagnosePrompt(server: string | undefined, lang: string): string {
+  const lines = [
+    "You are the AI agent of the srvmon monitoring panel. An alert fired and you investigate it before the owner looks: this is a READ-ONLY diagnosis.",
+    `Reply in ${lang || DEFAULT_LANG}, like an experienced SRE: short plain text, commands and paths as \`code\`, no tables or headings.`,
+    "",
+    "Tools: srvmon_servers / srvmon_server (state from the srvmon agents, cheap: start with them) and srvmon_exec (a read-only command on a server over SSH).",
+    "",
+    "Rules:",
+    "- You cannot change anything. srvmon refuses every command that is not read-only; nobody will confirm it. Do not try other forms of a changing command.",
+    "- The number of commands is limited: pick targeted ones (tail logs, do not dump them).",
+    "- Do not make up output or state: if you did not check something, say so.",
+    "- Do not repeat secrets (tokens, passwords, keys) from output.",
+    "- Suggest the fix as a command the owner can run; you do not run it.",
+  ];
+  if (server) lines.push("", `The alert is about server "${server}".`);
   return lines.join("\n");
 }
 
@@ -102,7 +125,14 @@ export class Agents {
     return join(this.cfg.dataDir, "sessions", `chat-${id}`);
   }
 
-  private async create(sessionManager: SessionManager, prompt: string, modelId: string, chatId?: number, taskId?: number) {
+  private async create(
+    sessionManager: SessionManager,
+    prompt: string,
+    modelId: string,
+    chatId?: number,
+    taskId?: number,
+    diagnoseId?: number,
+  ) {
     const cwd = this.cfg.dataDir;
     const model = this.cfg.setup.resolve(modelId);
     if (!model) throw new Error("model not configured: open settings → AI");
@@ -113,8 +143,8 @@ export class Agents {
       thinkingLevel: model.reasoning ? this.cfg.setup.thinking : "off",
       modelRuntime: this.cfg.modelRuntime,
       resourceLoader: loader(prompt),
-      tools: toolNames,
-      customTools: srvmonTools({ toolsUrl: this.cfg.toolsUrl, token: this.cfg.token, chatId, taskId }),
+      tools: diagnoseId ? diagnoseToolNames : toolNames,
+      customTools: srvmonTools({ toolsUrl: this.cfg.toolsUrl, token: this.cfg.token, chatId, taskId, diagnoseId }),
       sessionManager,
       settingsManager: SettingsManager.inMemory({
         compaction: { enabled: true },
@@ -183,6 +213,31 @@ export class Agents {
   /** Runs a scheduled task in a throwaway session. */
   async runTask(taskId: number, text: string, emit: (e: Event) => void, signal: AbortSignal, lang = DEFAULT_LANG) {
     const session = await this.create(SessionManager.inMemory(this.cfg.dataDir), systemPrompt(undefined, true, lang), "", undefined, taskId);
+    try {
+      await drive(session, text, emit, signal);
+    } finally {
+      session.dispose();
+    }
+  }
+
+  /** Runs a read-only diagnosis of an alert in a throwaway session. */
+  async runDiagnosis(
+    alertId: number,
+    text: string,
+    server: string | undefined,
+    model: string,
+    emit: (e: Event) => void,
+    signal: AbortSignal,
+    lang = DEFAULT_LANG,
+  ) {
+    const session = await this.create(
+      SessionManager.inMemory(this.cfg.dataDir),
+      systemPrompt(server, "diagnose", lang),
+      model,
+      undefined,
+      undefined,
+      alertId,
+    );
     try {
       await drive(session, text, emit, signal);
     } finally {

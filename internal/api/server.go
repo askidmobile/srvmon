@@ -57,6 +57,7 @@ type Server struct {
 	ai              *aiagent.Client // nil: agent disabled
 	agent           *agentState
 	mcp             *mcpState
+	diag            *diagnoser
 	notify          func(ctx context.Context, text string) error
 	onActionPending func(store.AgentAction)
 
@@ -117,6 +118,7 @@ func New(o Options) *Server {
 		ai:              aiagent.NewClient(o.Config.AIURL, o.Config.AIToken),
 		agent:           newAgentState(),
 		mcp:             newMCPState(),
+		diag:            newDiagnoser(),
 		notify:          o.Notify,
 		onActionPending: o.OnActionPending,
 	}
@@ -126,6 +128,7 @@ func New(o Options) *Server {
 		i18n.Set(v)
 	}
 	srv.alerts = alerts.New(o.Store, srv.latest, o.Log)
+	srv.alerts.OnFire(srv.onAlertFired)
 	bot, err := telegram.New(context.Background(), telegram.Options{
 		Store: o.Store, Secrets: o.Secrets, Engine: srv.alerts, Latest: srv.latest, Log: o.Log, API: o.TelegramAPI,
 	})
@@ -226,6 +229,9 @@ func (s *Server) Handler() http.Handler {
 	agent("PATCH /api/agent/tasks/{id}", s.handleAgentUpdateTask)
 	agent("DELETE /api/agent/tasks/{id}", s.handleAgentDeleteTask)
 	agent("POST /api/agent/tasks/{id}/run", s.handleAgentRunTask)
+	agent("GET /api/agent/diagnose", s.handleDiagnoseSettings)
+	agent("PUT /api/agent/diagnose", s.handleDiagnoseSave)
+	agent("POST /api/alerts/{id}/diagnose", s.handleAlertDiagnose)
 
 	s.alertRoutes(mux)
 	s.mcpRoutes(mux)

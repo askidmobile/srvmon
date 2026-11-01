@@ -1,4 +1,4 @@
-import { type ReactNode, useCallback, useEffect, useState } from "react";
+import { Fragment, type ReactNode, useCallback, useEffect, useState } from "react";
 
 import { Hotkey, Shell } from "@/components/Shell";
 import { Button } from "@/components/ui/button";
@@ -17,7 +17,7 @@ import {
   type Rule,
   type Severity,
 } from "@/lib/api";
-import { t } from "@/lib/i18n";
+import { t, tn } from "@/lib/i18n";
 import { href, type Route } from "@/lib/router";
 import { cn } from "@/lib/utils";
 
@@ -130,51 +130,101 @@ function durLabel(r: Pick<Rule, "kind" | "duration_sec">): string {
 
 // --- active alerts and history ---
 
+// Alerts about a server state the AI agent can look at.
+function diagnosable(a: Alert): boolean {
+  return a.server_id > 0 && a.kind !== "payment_due";
+}
+
+const diagState: Record<string, string> = {
+  queued: "queued",
+  running: "the agent is looking…",
+  error: "failed",
+  skipped: "skipped",
+};
+
+function DiagnosisRow({ d, cols }: { d: NonNullable<Alert["diagnosis"]>; cols: number }) {
+  const status = d.state === "done" ? "" : t(diagState[d.state] ?? d.state);
+  return (
+    <tr className="align-top">
+      <td />
+      <td colSpan={cols - 1} className="pb-2 pr-3">
+        <div className="border-l-2 border-primary/60 pl-2.5 text-sm">
+          <div className="text-xs text-muted-foreground">
+            🩺 {t("AI diagnosis")}
+            {d.trigger === "manual" ? ` · ${t("manual")}` : ""}
+            {d.tools > 0 ? ` · ${tn(d.tools, "{n} command", "{n} commands")}` : ""}
+            {status && <span className={d.state === "error" ? "text-crit" : "text-warn"}> · {status}</span>}
+          </div>
+          {d.text && <div className="whitespace-pre-wrap break-words text-tx">{d.text}</div>}
+        </div>
+      </td>
+    </tr>
+  );
+}
+
 function AlertRow({ a, onChange }: { a: Alert; onChange: () => void }) {
   const [busy, setBusy] = useState(false);
-  const act = async (f: () => Promise<unknown>) => {
+  const [err, setErr] = useState("");
+  const act = async (f: () => Promise<unknown>, fallback = t("failed")) => {
     setBusy(true);
-    await f().catch(() => undefined);
+    setErr("");
+    await f().catch((e) => setErr(errorMessage(e, fallback)));
     setBusy(false);
     onChange();
   };
+  const running = a.diagnosis?.state === "queued" || a.diagnosis?.state === "running";
   return (
-    <tr className="border-t border-border/60 align-top">
-      <td className="py-1.5 pr-3 whitespace-nowrap text-muted-foreground">{when(a.started_at)}</td>
-      <td className={cn("pr-3 uppercase", sevCls[a.severity])}>{a.severity}</td>
-      <td className="pr-3 whitespace-nowrap">
-        {a.server_id ? (
-          <a className="text-hi hover:text-primary" href={href.server(a.server_id)}>
-            {a.server_name}
-          </a>
-        ) : (
-          <span className="text-hi">{a.server_name || t("panel")}</span>
-        )}
-      </td>
-      <td className="pr-3">
-        {a.message}
-        {a.channel === "tg" && <span className="text-muted-foreground">{a.notified ? " → tg" : ""}</span>}
-      </td>
-      <td className="pr-3 whitespace-nowrap text-muted-foreground">
-        {a.state === "acked" ? <span className="text-primary">✓ ack</span> : <span className={sevCls[a.severity]}>●</span>}
-      </td>
-      <td className="whitespace-nowrap text-right">
-        {a.state === "firing" && (
-          <Button size="sm" variant="outline" disabled={busy} onClick={() => act(() => api.ackAlert(a.id))}>
-            ack
+    <>
+      <tr className="border-t border-border/60 align-top">
+        <td className="py-1.5 pr-3 whitespace-nowrap text-muted-foreground">{when(a.started_at)}</td>
+        <td className={cn("pr-3 uppercase", sevCls[a.severity])}>{a.severity}</td>
+        <td className="pr-3 whitespace-nowrap">
+          {a.server_id ? (
+            <a className="text-hi hover:text-primary" href={href.server(a.server_id)}>
+              {a.server_name}
+            </a>
+          ) : (
+            <span className="text-hi">{a.server_name || t("panel")}</span>
+          )}
+        </td>
+        <td className="pr-3">
+          {a.message}
+          {a.channel === "tg" && <span className="text-muted-foreground">{a.notified ? " → tg" : ""}</span>}
+        </td>
+        <td className="pr-3 whitespace-nowrap text-muted-foreground">
+          {a.state === "acked" ? <span className="text-primary">✓ ack</span> : <span className={sevCls[a.severity]}>●</span>}
+        </td>
+        <td className="whitespace-nowrap text-right">
+          {a.state === "firing" && (
+            <Button size="sm" variant="outline" disabled={busy} onClick={() => act(() => api.ackAlert(a.id))}>
+              ack
+            </Button>
+          )}{" "}
+          {diagnosable(a) && (
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={busy || running}
+              title={t("the AI agent collects logs read-only and explains the likely cause")}
+              onClick={() => act(() => api.diagnoseAlert(a.id), t("could not start the diagnosis"))}
+            >
+              {t("diagnose")}
+            </Button>
+          )}{" "}
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={busy}
+            title={t("no notifications for this alert for an hour")}
+            onClick={() => act(() => api.silenceAlert(a.id, 60))}
+          >
+            {t("mute 1h")}
           </Button>
-        )}{" "}
-        <Button
-          size="sm"
-          variant="ghost"
-          disabled={busy}
-          title={t("no notifications for this alert for an hour")}
-          onClick={() => act(() => api.silenceAlert(a.id, 60))}
-        >
-          {t("mute 1h")}
-        </Button>
-      </td>
-    </tr>
+          {err && <div className="pt-1 text-xs text-crit">{err}</div>}
+        </td>
+      </tr>
+      {a.diagnosis && <DiagnosisRow d={a.diagnosis} cols={6} />}
+    </>
   );
 }
 
@@ -832,16 +882,19 @@ export function AlertsPage({ route, version, onLogout }: { route: Route; version
             <table className="w-full min-w-[720px] border-collapse text-left">
               <tbody>
                 {history.map((a) => (
-                  <tr key={a.id} className="border-t border-border/60 align-top">
-                    <td className="py-1 pr-3 whitespace-nowrap text-muted-foreground">{when(a.started_at)}</td>
-                    <td className={cn("pr-3 uppercase", sevCls[a.severity])}>{a.severity}</td>
-                    <td className="pr-3 whitespace-nowrap text-hi">{a.server_name || t("panel")}</td>
-                    <td className="pr-3">
-                      {a.message}
-                      {a.notified && <span className="text-muted-foreground"> → tg</span>}
-                    </td>
-                    <td className="whitespace-nowrap text-right text-sm">{stateText(a)}</td>
-                  </tr>
+                  <Fragment key={a.id}>
+                    <tr className="border-t border-border/60 align-top">
+                      <td className="py-1 pr-3 whitespace-nowrap text-muted-foreground">{when(a.started_at)}</td>
+                      <td className={cn("pr-3 uppercase", sevCls[a.severity])}>{a.severity}</td>
+                      <td className="pr-3 whitespace-nowrap text-hi">{a.server_name || t("panel")}</td>
+                      <td className="pr-3">
+                        {a.message}
+                        {a.notified && <span className="text-muted-foreground"> → tg</span>}
+                      </td>
+                      <td className="whitespace-nowrap text-right text-sm">{stateText(a)}</td>
+                    </tr>
+                    {a.diagnosis && a.state === "resolved" && <DiagnosisRow d={a.diagnosis} cols={5} />}
+                  </Fragment>
                 ))}
               </tbody>
             </table>

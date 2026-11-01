@@ -72,6 +72,37 @@ func (b *Bot) alertText(n alerts.Notification) (string, [][]button) {
 	return text, [][]button{{{Text: "✓ ack", Data: "ack:" + id}, {Text: "🔕 " + i18n.T("mute 1h"), Data: "sil:" + id}}}
 }
 
+// diagnosisText renders the AI diagnosis of an alert. The model writes plain
+// text with `code`; everything is escaped, backticks become <code>.
+func diagnosisText(a store.Alert, text string) string {
+	where := esc(a.ServerName)
+	if where == "" {
+		where = "srvmon"
+	}
+	return fmt.Sprintf("🩺 <b>%s</b> · %s <i>#%d</i>\n%s", i18n.T("AI diagnosis"), where, a.ID, codeSpans(esc(text)))
+}
+
+// codeSpans turns `x` into <code>x</code> in already escaped text; an
+// unpaired backtick stays as it is.
+func codeSpans(s string) string {
+	var out strings.Builder
+	for {
+		i := strings.IndexByte(s, '`')
+		if i < 0 {
+			break
+		}
+		j := strings.IndexByte(s[i+1:], '`')
+		if j < 0 {
+			break
+		}
+		out.WriteString(s[:i])
+		out.WriteString("<code>" + s[i+1:i+1+j] + "</code>")
+		s = s[i+2+j:]
+	}
+	out.WriteString(s)
+	return out.String()
+}
+
 func (b *Bot) callback(ctx context.Context, data string) string {
 	if rest, ok := strings.CutPrefix(data, "act:"); ok {
 		return b.agentAction(ctx, rest)

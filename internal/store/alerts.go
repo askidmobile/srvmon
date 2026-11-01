@@ -211,6 +211,8 @@ type Alert struct {
 	AckedAt    *time.Time `json:"acked_at,omitempty"`
 	ResolvedAt *time.Time `json:"resolved_at,omitempty"`
 	Notified   bool       `json:"notified"`
+	// Diagnosis is filled by AttachDiagnoses, not by the alert queries.
+	Diagnosis *Diagnosis `json:"diagnosis,omitempty"`
 }
 
 // Open reports whether the alert is firing or acknowledged.
@@ -368,6 +370,9 @@ func (s *Store) SetAlertMessage(ctx context.Context, id int64, msg string) error
 func (s *Store) PurgeAlerts(ctx context.Context, t time.Time) error {
 	if _, err := s.db.ExecContext(ctx, `DELETE FROM alerts WHERE state IN ('resolved', 'event') AND started_at < ?`,
 		t.Unix()); err != nil {
+		return err
+	}
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM diagnosis_runs WHERE started_at < ?`, t.Unix()); err != nil {
 		return err
 	}
 	_, err := s.db.ExecContext(ctx, `DELETE FROM alert_silences WHERE until < ?`, time.Now().Unix())

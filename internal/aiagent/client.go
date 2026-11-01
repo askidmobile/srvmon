@@ -51,6 +51,10 @@ type RunRequest struct {
 	// TaskID marks a scheduled run: srvmon-ai uses a throwaway session and
 	// passes the id back on tool calls so confirmations name the task.
 	TaskID int64 `json:"task_id,omitempty"`
+	// DiagnoseID marks a read-only diagnosis of this alert: srvmon-ai uses
+	// a throwaway session without the task tools and passes the id back on
+	// tool calls, and srvmon refuses every command that is not read-only.
+	DiagnoseID int64 `json:"diagnose_id,omitempty"`
 	// Model overrides the default model for this run (a model id of the
 	// configured provider).
 	Model string `json:"model,omitempty"`

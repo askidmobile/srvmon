@@ -183,6 +183,8 @@ func TestContainerDown(t *testing.T) {
 		{Name: "web", State: "running", Status: "Up 2 hours (unhealthy)", Health: "unhealthy"},
 		{Name: "db", State: "running", Status: "Up 2 hours (healthy)", Health: "healthy"},
 	}})
+	var fired []string
+	te.e.OnFire(func(a store.Alert) { fired = append(fired, a.Subject) })
 	te.eval(t)
 	subjects := map[string]bool{}
 	for _, a := range te.open(t) {
@@ -190,6 +192,11 @@ func TestContainerDown(t *testing.T) {
 	}
 	if len(subjects) != 2 || !subjects["mailer"] || !subjects["web"] {
 		t.Fatalf("subjects = %v", subjects)
+	}
+	// The hook sees each new alert once, not again while it keeps firing.
+	te.eval(t)
+	if len(fired) != 2 {
+		t.Fatalf("fired = %v", fired)
 	}
 }
 

@@ -65,6 +65,10 @@ func (s *Server) handleAlerts(w http.ResponseWriter, r *http.Request) {
 		s.internalError(w, "count alerts", err)
 		return
 	}
+	if err := s.store.AttachDiagnoses(r.Context(), open, recent); err != nil {
+		s.internalError(w, "alert diagnoses", err)
+		return
+	}
 	writeJSON(w, http.StatusOK, alertsView{Open: open, Recent: recent, Last24h: n})
 }
 

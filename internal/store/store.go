@@ -95,6 +95,8 @@ var migrations = []string{
 	migrationAgentModel,
 	// MCP access tokens and the source of agent actions (mcp.go).
 	migrationMCP,
+	// AI diagnoses of alerts (diagnose.go).
+	migrationDiagnoses,
 }
 
 func (s *Store) migrate(ctx context.Context) error {
