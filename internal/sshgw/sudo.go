@@ -130,7 +130,7 @@ func setSudoScript(p SudoParams) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "set -e\nU=%s\nMODE=%s\nIMG=%s\nRU=%s\nRT=%s\n",
 		shq(p.User), shq(p.Mode), shq(p.Image), shq(p.RegistryUser), shq(p.RegistryToken))
-	b.WriteString(`VS=$(command -v visudo || { for d in /usr/sbin /sbin /usr/bin /bin; do [ -x "$d/visudo" ] && { echo "$d/visudo"; break; }; done; })
+	b.WriteString(`VS=$(command -v visudo || { for d in /usr/sbin /sbin /usr/bin /bin; do [ -x "$d/visudo" ] && { echo "$d/visudo"; break; }; done; true; })
 if [ "$MODE" != none ]; then
   [ -n "$VS" ] && [ -d /etc/sudoers.d ] || { echo srvmon:no-sudo >&2; exit 3; }
 fi
@@ -139,26 +139,32 @@ trap 'rm -f "$T"' EXIT
 `)
 	b.WriteString(sudoersGen(p.Mode))
 	b.WriteString(`if [ -s "$T" ]; then "$VS" -cf "$T" >/dev/null 2>&1 || { echo srvmon:sudoers-invalid >&2; exit 4; }; fi
+# write_sudo installs $T with the user's own passwordless sudo.
+write_sudo() {
+  if [ -s "$T" ]; then
+    sudo -n sh -c 'umask 337; cat > "/etc/sudoers.d/.$1.srvmon-tmp" && mv -f "/etc/sudoers.d/.$1.srvmon-tmp" "/etc/sudoers.d/$1"' sh "$U" < "$T"
+  else
+    sudo -n rm -f "/etc/sudoers.d/$U"
+  fi
+}
 if docker info >/dev/null 2>&1; then
   [ -d /etc/sudoers.d ] || exit 0
+  # Refresh the image: a cached older tag may predate write-sudoers.
   REG=${IMG%%/*}
-  if ! docker image inspect "$IMG" >/dev/null 2>&1; then
-    if [ -n "$RU" ]; then printf '%s' "$RT" | docker login "$REG" -u "$RU" --password-stdin >/dev/null; fi
-    docker pull -q "$IMG" >/dev/null 2>&1 || true
-    if [ -n "$RU" ]; then docker logout "$REG" >/dev/null 2>&1 || true; fi
-  fi
-  if ! OUT=$(docker run --rm -i --pull never --network none --read-only --cap-drop ALL \
+  if [ -n "$RU" ]; then printf '%s' "$RT" | docker login "$REG" -u "$RU" --password-stdin >/dev/null 2>&1 || true; fi
+  docker pull -q "$IMG" >/dev/null 2>&1 || true
+  if [ -n "$RU" ]; then docker logout "$REG" >/dev/null 2>&1 || true; fi
+  if OUT=$(docker run --rm -i --pull never --network none --read-only --cap-drop ALL \
     --security-opt no-new-privileges=true --user 0:0 \
     -v /etc/sudoers.d:/sudoers.d --entrypoint /srvmon-agent "$IMG" write-sudoers "$U" < "$T" 2>&1); then
-    printf 'srvmon:write-failed %s\n' "$(printf '%s' "$OUT" | tail -n 1)" >&2; exit 5
+    exit 0
   fi
+  # An image without write-sudoers (or no image at all): the user's own
+  # sudo still works while it is full.
+  if sudo -n true 2>/dev/null && write_sudo; then exit 0; fi
+  printf 'srvmon:write-failed %s\n' "$(printf '%s' "$OUT" | tail -n 1)" >&2; exit 5
 elif sudo -n true 2>/dev/null; then
-  if [ -s "$T" ]; then
-    sudo -n sh -c 'umask 337; cat > "/etc/sudoers.d/.$1.srvmon-tmp" && mv -f "/etc/sudoers.d/.$1.srvmon-tmp" "/etc/sudoers.d/$1"' sh "$U" < "$T" ||
-      { echo srvmon:write-failed >&2; exit 5; }
-  else
-    sudo -n rm -f "/etc/sudoers.d/$U" || { echo srvmon:write-failed >&2; exit 5; }
-  fi
+  write_sudo || { echo srvmon:write-failed >&2; exit 5; }
 else
   echo srvmon:no-access >&2; exit 6
 fi

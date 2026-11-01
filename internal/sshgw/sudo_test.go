@@ -86,7 +86,7 @@ func TestSudoScriptsParse(t *testing.T) {
 	for _, mode := range []string{SudoNone, SudoLimited, SudoFull} {
 		scripts := map[string]string{
 			"set":  setSudoScript(SudoParams{User: "srvmon", Mode: mode, Image: "ghcr.io/x/a:1"}),
-			"user": userScript("srvmon", "ssh-ed25519 AAAA k", mode),
+			"root": "set -e\nU=srvmon\n" + sudoersRootScript(mode),
 		}
 		for name, s := range scripts {
 			if out, err := exec.Command("sh", "-n", "-c", s).CombinedOutput(); err != nil {
@@ -94,7 +94,7 @@ func TestSudoScriptsParse(t *testing.T) {
 			}
 		}
 	}
-	if s := userScript("srvmon", "ssh-ed25519 AAAA k", ""); strings.Contains(s, "sudoers") {
-		t.Error("an empty mode must leave sudo alone")
+	if s := userScript("srvmon", "ssh-ed25519 AAAA k"); strings.Contains(s, "sudoers") {
+		t.Error("the user script must not touch sudo: Onboard writes it last")
 	}
 }

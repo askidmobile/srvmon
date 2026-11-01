@@ -194,12 +194,17 @@ func testOnboard(t *testing.T, hasDocker bool) {
 	if strings.Contains(all, "S3cr3t") {
 		t.Fatal("password leaked into log")
 	}
-	want := 3
+	want := 4
 	if !hasDocker {
-		want = 4
+		want = 5
 	}
 	if len(scripts) != want {
-		t.Fatalf("want %d scripts (user, [docker,] agent, sshd), got %d", want, len(scripts))
+		t.Fatalf("want %d scripts (user, [docker,] agent, sshd, sudo), got %d", want, len(scripts))
+	}
+	// sudo goes last: a narrower mode must not cut the login's own sudo
+	// before the agent install and the sshd change.
+	if last := scripts[len(scripts)-1]; !strings.Contains(last, "NOPASSWD:ALL") || strings.Contains(scripts[0], "sudoers") {
+		t.Fatalf("sudo rules must be the last script:\n%s", last)
 	}
 	if !hasDocker {
 		if !strings.Contains(scripts[1], "get.docker.com") || !strings.Contains(scripts[1], "U='srvmon'") ||
@@ -328,7 +333,7 @@ func TestOnboardCancelBeforeCommit(t *testing.T) {
 // An existing account's password hash must survive onboarding: only an
 // account created by the script gets the "*" (key-only) password.
 func TestUserScriptKeepsExistingPassword(t *testing.T) {
-	s := userScript("srvmon", "ssh-ed25519 AAAA test", SudoNone)
+	s := userScript("srvmon", "ssh-ed25519 AAAA test")
 	create := strings.Index(s, `if ! id -u "$U"`)
 	end := strings.Index(s[create:], "\nfi\n") + create
 	for _, cmd := range []string{"usermod -p", "chpasswd"} {

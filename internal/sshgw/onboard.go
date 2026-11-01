@@ -171,7 +171,7 @@ func Onboard(ctx context.Context, p OnboardParams, log Logger) (Result, error) {
 		log(StepOK, i18n.T("root rights via sudo"))
 	}
 
-	out, errOut, err := pr.run(ctx, userScript(p.SSHUser, p.Key.Public, p.SudoMode))
+	out, errOut, err := pr.run(ctx, userScript(p.SSHUser, p.Key.Public))
 	if err != nil {
 		return res, i18n.Errorf("creating user %s: %s", p.SSHUser, firstLine(errOut, err))
 	}
@@ -180,17 +180,6 @@ func Onboard(ctx context.Context, p OnboardParams, log Logger) (Result, error) {
 		groups = i18n.T("docker group")
 	}
 	log(StepOK, i18n.T("user %s (%s), authorized_keys ← %s", p.SSHUser, groups, p.Key.Fingerprint))
-	switch {
-	case p.SudoMode == "":
-	case p.SudoMode == SudoNone:
-		log(StepOK, i18n.T("no sudo for %s", p.SSHUser))
-	case !strings.Contains(out, "sudo-ok"):
-		log(StepWarn, i18n.T("sudo not set up (no sudo/visudo on the server)"))
-	case p.SudoMode == SudoLimited:
-		log(StepOK, i18n.T("limited sudo for %s: services, journalctl, docker", p.SSHUser))
-	default:
-		log(StepOK, i18n.T("passwordless sudo for %s", p.SSHUser))
-	}
 
 	kc, err := DialKey(ctx, p.Addr, p.SSHUser, p.HostKey, p.Key.Private)
 	if err != nil {
@@ -258,6 +247,25 @@ func Onboard(ctx context.Context, p OnboardParams, log Logger) (Result, error) {
 			log(StepOK, "sshd: PasswordAuthentication no · reload")
 		}
 	}
+
+	// sudo rules go last: when the login user is SSHUser itself, its
+	// current sudo is what runs the steps above, and a narrower mode must
+	// not take it away before they are done.
+	if p.SudoMode != "" {
+		out, errOut, err := pr.run(ctx, "set -e\nU="+shq(p.SSHUser)+"\n"+sudoersRootScript(p.SudoMode))
+		switch {
+		case err != nil:
+			log(StepWarn, i18n.T("sudo not set up: %s", firstLine(errOut, err)))
+		case p.SudoMode == SudoNone:
+			log(StepOK, i18n.T("no sudo for %s", p.SSHUser))
+		case !strings.Contains(out, "sudo-ok"):
+			log(StepWarn, i18n.T("sudo not set up (no sudo/visudo on the server)"))
+		case p.SudoMode == SudoLimited:
+			log(StepOK, i18n.T("limited sudo for %s: services, journalctl, docker", p.SSHUser))
+		default:
+			log(StepOK, i18n.T("passwordless sudo for %s", p.SSHUser))
+		}
+	}
 	return res, nil
 }
 
@@ -294,9 +302,10 @@ rm -f "$T"
 `, shq(blob))
 }
 
-// userScript creates the account, adds it to docker, installs the public key
-// and writes its sudo rules (see sudoersGen). Prints markers for the log.
-func userScript(user, pubKey, sudoMode string) string {
+// userScript creates the account, adds it to docker and installs the public
+// key. Prints markers for the log. Sudo rules are written at the end of
+// Onboard (sudoersRootScript).
+func userScript(user, pubKey string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "set -e\nU=%s\nKEY=%s\n", shq(user), shq(pubKey))
 	b.WriteString(`if ! id -u "$U" >/dev/null 2>&1; then
@@ -321,9 +330,6 @@ grep -qxF "$KEY" "$H/.ssh/authorized_keys" || printf '%s\n' "$KEY" >> "$H/.ssh/a
 chown "$U:$G" "$H/.ssh/authorized_keys"
 chmod 600 "$H/.ssh/authorized_keys"
 `)
-	if sudoMode != "" {
-		b.WriteString(sudoersRootScript(sudoMode))
-	}
 	return b.String()
 }
 
