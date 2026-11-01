@@ -54,6 +54,7 @@ type Server struct {
 
 	ai              *aiagent.Client // nil: agent disabled
 	agent           *agentState
+	mcp             *mcpState
 	notify          func(ctx context.Context, text string) error
 	onActionPending func(store.AgentAction)
 
@@ -113,6 +114,7 @@ func New(o Options) *Server {
 
 		ai:              aiagent.NewClient(o.Config.AIURL, o.Config.AIToken),
 		agent:           newAgentState(),
+		mcp:             newMCPState(),
 		notify:          o.Notify,
 		onActionPending: o.OnActionPending,
 	}
@@ -213,6 +215,7 @@ func (s *Server) Handler() http.Handler {
 	agent("POST /api/agent/tasks/{id}/run", s.handleAgentRunTask)
 
 	s.alertRoutes(mux)
+	s.mcpRoutes(mux)
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "not_found")
 	})

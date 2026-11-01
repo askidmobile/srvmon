@@ -1,5 +1,6 @@
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { McpPanel } from "@/components/McpPanel";
 import { Hotkey, Shell } from "@/components/Shell";
 import { Button } from "@/components/ui/button";
 import { Panel } from "@/components/ui/panel";
@@ -542,6 +543,7 @@ export function SettingsPage({ route, version, onLogout }: { route: Route; versi
       <div className="flex max-w-5xl flex-col gap-5">
         <LanguagePanel />
         <AIPanel />
+        <McpPanel />
       </div>
     </Shell>
   );

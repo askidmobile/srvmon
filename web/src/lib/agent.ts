@@ -119,6 +119,7 @@ export interface AgentAction {
   decided_by?: string;
   exit_code?: number;
   output?: string;
+  source?: string; // "mcp:<token name>" for a command from an MCP client
 }
 
 export interface AgentTask {

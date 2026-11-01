@@ -22,6 +22,7 @@
 - **添加向导。** 校验 SSH 主机密钥，用密码或你自己的私钥登录一次。srvmon 创建 `srvmon` 用户及其 ed25519 密钥，安装代理，并可关闭密码登录。一次性密码或密钥不会被保存。
 - **Web 终端。** xterm.js ↔ WebSocket ↔ `srvmon-server` 内的 SSH 客户端 ↔ sshd。支持多标签、窗口缩放、`docker exec` 进入容器。终端旁边是 AI 代理面板（`F9` 显示或隐藏），在该服务器的上下文中工作。私钥从不离开监控服务器，并以 XChaCha20-Poly1305 加密存储。
 - **AI 代理。** 基于 [pi](https://pi.dev) SDK，支持任意提供商（DeepSeek、Anthropic、OpenAI、OpenRouter、Google、Ollama，以及任何 OpenAI / Anthropic 兼容接口）。只读命令直接执行；任何会修改服务器的命令都必须经你明确批准，策略由 `srvmon-server` 而非模型执行。每台服务器有独立的对话上下文，对话保留历史，每个对话可单独选择模型。定时任务（cron）结果可发送到 Telegram，也可以在 Telegram 中用 `/ask` 向代理提问。
+- **MCP 服务器。** Claude Desktop、Cursor 和 Claude Code 使用带权限、可撤销的令牌连接 `/mcp`，工具相同，变更同样需要在面板或 Telegram 中确认。
 - **告警与 Telegram。** 代理离线、容器停止或不健康、频繁重启、CPU、磁盘、主机续费提醒、fail2ban 封禁、登录尝试。规则可编辑（阈值、持续时间、级别、渠道：Telegram 或仅面板）。按你的时区设置静默时段（严重告警仍会发送），支持确认与临时静音，保留 90 天历史。机器人命令：`/status`、`/server`、`/alerts`、`/ack`、`/bills`、`/ask`。
 - **安全。** 密码（argon2id）+ TOTP 或备用码，无需用户名。限流、审计日志，以及面板和 sshd 的 fail2ban 规则。
 
@@ -133,6 +134,41 @@ SRVMON_URL=https://mon.example.com SRVMON_TOKEN=a_... docker compose up -d
 - **Telegram。** 机器人会把代理的命令连同批准/拒绝按钮发给你确认，`/ask <问题>` 可直接在 Telegram 中向代理提问。
 
 在面板设置中启用：选择提供商（pi 目录中的任意一个或自定义兼容地址），填入 API 密钥（加密存储，不会返回给浏览器），加载并勾选模型，然后保存并应用。在面板保存设置之前，`srvmon-ai` 使用 `.env` 中的 `SRVMON_AI_PROVIDER`、`SRVMON_AI_MODEL`、`SRVMON_AI_API_KEY`。
+
+## MCP：Claude Desktop、Cursor、Claude Code
+
+srvmon 同时也是一个 [MCP](https://modelcontextprotocol.io) 服务器，地址为 `https://<你的域名>/mcp`（Streamable HTTP）。MCP 客户端获得与内置代理相同的工具和相同的确认策略，并且不需要 `srvmon-ai` 容器。
+
+| 工具 | 权限 | 作用 |
+|---|---|---|
+| `list_servers`、`get_server` | `read` | 服务器、指标、容器、日志中的最新警告 |
+| `list_alerts`、`list_tasks` | `read` | 当前告警、代理的定时任务 |
+| `run_command` | `exec` | 通过 SSH 执行命令：只读命令立即执行，变更命令等待你确认 |
+| `action_status` | `exec` | 等待确认的命令的状态和输出 |
+| `create_task`、`delete_task` | `tasks` | 内置代理的定时任务 |
+
+1. 打开 `[6] 设置` →“MCP 访问”，为令牌命名（每个客户端一个），勾选权限和有效期，然后点击“创建令牌”。令牌（`smcp_…`）只显示一次，并附带现成的配置；数据库只保存其哈希。可在同一页面撤销。
+2. 连接客户端：
+
+```bash
+# Claude Code
+claude mcp add --transport http srvmon https://srvmon.example.com/mcp --header "Authorization: Bearer smcp_…"
+```
+
+```jsonc
+// Cursor：~/.cursor/mcp.json（或项目中的 .cursor/mcp.json）
+{ "mcpServers": { "srvmon": { "url": "https://srvmon.example.com/mcp",
+  "headers": { "Authorization": "Bearer smcp_…" } } } }
+```
+
+```jsonc
+// Claude Desktop：Settings → Developer → Edit config（claude_desktop_config.json）；需要 Node.js
+{ "mcpServers": { "srvmon": { "command": "npx",
+  "args": ["-y", "mcp-remote@latest", "https://srvmon.example.com/mcp", "--header", "Authorization:${SRVMON_MCP_AUTH}"],
+  "env": { "SRVMON_MCP_AUTH": "Bearer smcp_…" } } } }
+```
+
+会修改服务器的命令会以“⚠ 确认”卡片出现在代理面板和 Telegram 中，并标注“MCP <令牌名>”。MCP 客户端大约一分钟后会放弃工具调用，因此 `run_command` 等待 40 秒后返回 `pending` 和 `action_id`。命令本身会等待你的决定 15 分钟，客户端通过 `action_status` 获取结果。错误的令牌与登录共用同一个按 IP 的限流，并写入 fail2ban 日志。
 
 ## 本地开发
 

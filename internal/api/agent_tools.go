@@ -126,15 +126,23 @@ func (s *Server) toolView(srv store.Server) toolServerView {
 	return v
 }
 
-func (s *Server) toolServers(w http.ResponseWriter, r *http.Request) {
-	list, err := s.store.ListServers(r.Context())
+func (s *Server) toolServerList(ctx context.Context) ([]toolServerView, error) {
+	list, err := s.store.ListServers(ctx)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal")
-		return
+		return nil, err
 	}
 	out := make([]toolServerView, 0, len(list))
 	for _, srv := range list {
 		out = append(out, s.toolView(srv))
+	}
+	return out, nil
+}
+
+func (s *Server) toolServers(w http.ResponseWriter, r *http.Request) {
+	out, err := s.toolServerList(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal")
+		return
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -156,6 +164,11 @@ func (s *Server) toolServer(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal")
 		return
 	}
+	writeJSON(w, http.StatusOK, s.toolServerDetail(srv))
+}
+
+// toolServerDetail is what the agent and MCP clients see of one server.
+func (s *Server) toolServerDetail(srv store.Server) map[string]any {
 	out := map[string]any{"server": s.toolView(srv)}
 	if snap, ok := s.latest.Get(srv.ID); ok {
 		h := snap.Report.Host
@@ -174,7 +187,7 @@ func (s *Server) toolServer(w http.ResponseWriter, r *http.Request) {
 	if srv.Provider != "" {
 		out["provider"] = srv.Provider + " " + srv.Plan
 	}
-	writeJSON(w, http.StatusOK, out)
+	return out
 }
 
 type execRequest struct {
@@ -424,13 +437,7 @@ func (s *Server) toolNewTask(w http.ResponseWriter, r *http.Request) {
 	}
 	t, field, err := s.createTask(r.Context(), in, "agent")
 	if field != "" {
-		msg := map[string]string{
-			"name":     "name of 1–64 characters",
-			"prompt":   "a prompt is required, up to 4000 characters",
-			"schedule": "a 5-field cron (UTC, at most every 5 minutes) or @every 15m",
-			"notify":   "notify: empty or telegram",
-			"servers":  "an unknown server in the list",
-		}[field]
+		msg := taskHints[field]
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid", "field": field, "hint": msg})
 		return
 	}

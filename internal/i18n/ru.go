@@ -24,6 +24,7 @@ var ru = map[string]string{
 	"<b>srvmon</b>: %d/%d online · alerts %d":                               "<b>srvmon</b>: %d/%d онлайн · алертов %d",
 	"<b>srvmon</b>: a test message. Notifications will arrive here.":        "<b>srvmon</b>: тестовое сообщение. Уведомления будут приходить сюда.",
 	"<b>task #%d %s</b>\n%s":                                                "<b>задача #%d %s</b>\n%s",
+	"<b>MCP client %s asks to run</b> #%d on <b>%s</b>:\n<code>%s</code>":   "<b>MCP-клиент %s просит выполнить</b> #%d на <b>%s</b>:\n<code>%s</code>",
 	"<b>the agent asks to run</b> #%d on <b>%s</b>:\n<code>%s</code>":       "<b>агент просит выполнить</b> #%d на <b>%s</b>:\n<code>%s</code>",
 	"@every: at most once every %s":                                         "@every: не чаще раза в %s",
 	"Acknowledge: /ack &lt;id&gt;":                                          "Подтвердить: /ack &lt;id&gt;",
