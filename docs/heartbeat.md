@@ -9,12 +9,14 @@
 ## Вариант 1. Better Stack (вход через Google)
 
 1. Откройте [betterstack.com](https://betterstack.com) и войдите через Google.
-2. На вопросе «How would you like to use Better Stack?» выберите только **Uptime monitoring** и нажмите Continue.
-3. Мастер предложит добавить монитор сайта. Можно пропустить или сразу добавить `https://<ваш-домен>/healthz`: это вторая проверка снаружи, она заметит, если панель недоступна из интернета.
-4. В левом меню Uptime откройте **Heartbeats** → **Create heartbeat**. Имя, например, `srvmon panel`; **Expect a heartbeat every** 1 minute; **Grace period** 5 minutes.
-5. В настройках оповещений выберите, кому и как сообщать (почта по умолчанию).
-6. Скопируйте URL вида `https://uptime.betterstack.com/api/v1/heartbeat/<token>`.
-7. В панели: **алерты → пульс панели** → вставьте URL → **сохранить** → **пинг сейчас**. Статус должен стать «● ок», а в Better Stack heartbeat перейдёт в Up.
+2. На вопросе «How would you like to use Better Stack?» выберите **Uptime monitoring** и нажмите Continue.
+3. «What integrations do you want to use?» ни на что не влияет, но без выбора Continue не активна: отметьте любую, например Cloudflare.
+4. «Where can we call you?»: нажмите **Continue without a test call**. Если без URL не пускает, укажите `https://<ваш-домен>/healthz`: это вторая проверка снаружи, она заметит, если панель недоступна из интернета.
+5. Тариф: хватит **Free** (10 heartbeats, 10 мониторов, уведомления на почту и в Slack).
+6. В левом меню Uptime откройте **Heartbeats** → **Create heartbeat**. В поле **What service will this heartbeat track?** впишите `srvmon panel`. **Expect a heartbeat every**: `1` и единицу **minutes**, по умолчанию стоит **day**, обязательно смените. **with a grace period of**: 5 minutes.
+7. В блоке **How should we notify the primary responder?** оставьте **E-mail**. Звонки и SMS есть только на платном тарифе. Нажмите **Create heartbeat**.
+8. Скопируйте URL вида `https://uptime.betterstack.com/api/v1/heartbeat/<token>`.
+9. В панели: **алерты → пульс панели** → вставьте URL → **сохранить** → **пинг сейчас**. Статус должен стать «● ок», а в Better Stack heartbeat перейдёт в Up.
 
 Галку «сообщать о проблемах на URL/fail» оставьте включённой: Better Stack принимает `<url>/fail` и сразу отмечает heartbeat как упавший.
 
@@ -23,7 +25,7 @@
 1. Зарегистрируйтесь на [healthchecks.io](https://healthchecks.io). Вход здесь только по ссылке из письма. Если письмо не приходит (проверьте «Спам»; на корпоративном Google Workspace его может задержать администратор), используйте вариант 1.
 2. **Add Check** → **Schedule**: Period 1 minute, Grace 5 minutes.
 3. В **Integrations** выберите каналы: почта включена сразу, есть Telegram, ntfy и другие.
-4. Скопируйте Ping URL вида `https://hc-ping.com/<uuid>` и вставьте его в панели, как в шаге 7 выше.
+4. Скопируйте Ping URL вида `https://hc-ping.com/<uuid>` и вставьте его в панели, как в последнем шаге варианта 1.
 
 ## Другие приёмники
 
