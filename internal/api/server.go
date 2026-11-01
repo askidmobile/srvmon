@@ -22,6 +22,7 @@ import (
 	"github.com/askidmobile/srvmon/internal/auth"
 	"github.com/askidmobile/srvmon/internal/checks"
 	"github.com/askidmobile/srvmon/internal/config"
+	"github.com/askidmobile/srvmon/internal/heartbeat"
 	"github.com/askidmobile/srvmon/internal/i18n"
 	"github.com/askidmobile/srvmon/internal/metrics"
 	"github.com/askidmobile/srvmon/internal/secret"
@@ -52,10 +53,12 @@ type Server struct {
 	csp       string
 	alerts    *alerts.Engine
 	checks    *checks.Runner
-	bot       *telegram.Bot // nil when its settings cannot be loaded
+	bot       *telegram.Bot      // nil when its settings cannot be loaded
+	heartbeat *heartbeat.Monitor // nil when its settings cannot be loaded
 
 	ai              *aiagent.Client // nil: agent disabled
 	agent           *agentState
+	mcp             *mcpState
 	notify          func(ctx context.Context, text string) error
 	onActionPending func(store.AgentAction)
 
@@ -115,6 +118,7 @@ func New(o Options) *Server {
 
 		ai:              aiagent.NewClient(o.Config.AIURL, o.Config.AIToken),
 		agent:           newAgentState(),
+		mcp:             newMCPState(),
 		notify:          o.Notify,
 		onActionPending: o.OnActionPending,
 	}
@@ -137,6 +141,14 @@ func New(o Options) *Server {
 		srv.alerts.SetNotifier(bot)
 		srv.wireAgentTelegram(bot)
 	}
+	hb, err := heartbeat.New(context.Background(), heartbeat.Options{
+		Store: o.Store, Secrets: o.Secrets, Version: o.Version, Log: o.Log, Checks: srv.selfChecks(),
+	})
+	if err != nil {
+		o.Log.Error("heartbeat: load settings", "err", err)
+	} else {
+		srv.heartbeat = hb
+	}
 	// 'self' covers same-origin WebSocket in current browsers; older Safari
 	// needs the wss:// origin spelled out.
 	connect := "'self'"
@@ -152,11 +164,14 @@ func New(o Options) *Server {
 	return srv
 }
 
-// Start runs the background work: alert evaluation, the Telegram bot and,
+// Start runs the background work: alert evaluation, the heartbeat, the Telegram bot and,
 // when fail2banEvents is set, following fail2ban bans of the host.
 func (s *Server) Start(ctx context.Context, fail2banEvents, hostName string) {
 	go s.alerts.Run(ctx)
 	go s.checks.Run(ctx)
+	if s.heartbeat != nil {
+		go s.heartbeat.Run(ctx)
+	}
 	if s.bot != nil {
 		go s.bot.Run(ctx)
 	}
@@ -221,6 +236,7 @@ func (s *Server) Handler() http.Handler {
 	agent("POST /api/agent/tasks/{id}/run", s.handleAgentRunTask)
 
 	s.alertRoutes(mux)
+	s.mcpRoutes(mux)
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "not_found")
 	})

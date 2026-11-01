@@ -126,6 +126,7 @@ function ActionCard({ a, onDone }: { a: AgentAction; onDone: () => void }) {
       <div className="text-xs text-warn">
         ⚠ {t("confirm")} · {a.server}
         {a.task_id ? ` · ${t("task #{id}", { id: a.task_id })}` : ""}
+        {a.source?.startsWith("mcp:") ? ` · MCP ${a.source.slice(4)}` : ""}
       </div>
       <pre className="my-1 overflow-x-auto whitespace-pre-wrap break-all bg-field px-2 py-1 text-xs text-hi">
         {a.command}

@@ -187,6 +187,9 @@ export const api = {
     request<TelegramStatus>("PUT", "/api/notify/telegram", token === undefined ? { chat_id } : { chat_id, token }),
   testTelegram: () => request<unknown>("POST", "/api/notify/telegram/test"),
   saveQuiet: (q: Quiet) => request<Quiet>("PUT", "/api/notify/quiet", q),
+  saveHeartbeat: (fail_endpoint: boolean, url?: string) =>
+    request<HeartbeatStatus>("PUT", "/api/notify/heartbeat", url === undefined ? { fail_endpoint } : { fail_endpoint, url }),
+  testHeartbeat: () => request<HeartbeatStatus>("POST", "/api/notify/heartbeat/test"),
   checks: (id: number) => request<ChecksView>("GET", `/api/servers/${id}/checks`).then(normalizeChecks),
   saveChecks: (id: number, targets: string[]) =>
     request<ChecksView>("PUT", `/api/servers/${id}/checks`, { targets }).then(normalizeChecks),
@@ -295,9 +298,21 @@ export interface Quiet {
   tz: string;
 }
 
+// Dead man's switch: the panel pings an external URL once a minute.
+export interface HeartbeatStatus {
+  configured: boolean;
+  target?: string; // URL with its secret part hidden
+  fail_endpoint: boolean;
+  last_ping?: string;
+  last_result?: "ok" | "fail" | "skipped" | "error";
+  last_error?: string;
+  problems?: string[];
+}
+
 export interface NotifyView {
   telegram: TelegramStatus;
   quiet: Quiet;
+  heartbeat?: HeartbeatStatus;
 }
 
 // --- server screen (stage 2) ---

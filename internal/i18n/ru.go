@@ -24,6 +24,7 @@ var ru = map[string]string{
 	"<b>srvmon</b>: %d/%d online · alerts %d":                               "<b>srvmon</b>: %d/%d онлайн · алертов %d",
 	"<b>srvmon</b>: a test message. Notifications will arrive here.":        "<b>srvmon</b>: тестовое сообщение. Уведомления будут приходить сюда.",
 	"<b>task #%d %s</b>\n%s":                                                "<b>задача #%d %s</b>\n%s",
+	"<b>MCP client %s asks to run</b> #%d on <b>%s</b>:\n<code>%s</code>":   "<b>MCP-клиент %s просит выполнить</b> #%d на <b>%s</b>:\n<code>%s</code>",
 	"<b>the agent asks to run</b> #%d on <b>%s</b>:\n<code>%s</code>":       "<b>агент просит выполнить</b> #%d на <b>%s</b>:\n<code>%s</code>",
 	"@every: at most once every %s":                                         "@every: не чаще раза в %s",
 	"Acknowledge: /ack &lt;id&gt;":                                          "Подтвердить: /ack &lt;id&gt;",
@@ -222,4 +223,10 @@ var ru = map[string]string{
 	"the new agent reports version %s instead of %s":                                   "новый агент сообщает версию %s вместо %s",
 	"%s; restoring the previous agent failed: %s":                                      "%s; вернуть прежний агент не удалось: %s",
 	"%s; the previous agent is restored":                                               "%s; прежний агент восстановлен",
+	// Panel heartbeat (dead man's switch).
+	"no connection: %s":          "нет связи: %s",
+	"rules not evaluated for %s": "правила не проверялись %s",
+	"srvmon %s: problems:":       "srvmon %s: проблемы:",
+	"the ping URL starts with http:// or https:// and has no spaces": "URL пинга начинается с http:// или https:// и без пробелов",
+	"set the ping URL first": "сначала укажите URL пинга",
 }

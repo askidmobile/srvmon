@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/askidmobile/srvmon/internal/alerts"
+	"github.com/askidmobile/srvmon/internal/heartbeat"
 	"github.com/askidmobile/srvmon/internal/i18n"
 	"github.com/askidmobile/srvmon/internal/store"
 	"github.com/askidmobile/srvmon/internal/telegram"
@@ -28,6 +29,8 @@ func (s *Server) alertRoutes(mux *http.ServeMux) {
 	h("PUT /api/notify/telegram", s.handleTelegramSave)
 	h("POST /api/notify/telegram/test", s.handleTelegramTest)
 	h("PUT /api/notify/quiet", s.handleQuietSave)
+	h("PUT /api/notify/heartbeat", s.handleHeartbeatSave)
+	h("POST /api/notify/heartbeat/test", s.handleHeartbeatTest)
 }
 
 func pathID(r *http.Request) (int64, bool) {
@@ -301,8 +304,9 @@ func (s *Server) reevaluate(r *http.Request) {
 // --- notifications ---
 
 type notifyView struct {
-	Telegram telegram.Status `json:"telegram"`
-	Quiet    alerts.Quiet    `json:"quiet"`
+	Telegram  telegram.Status   `json:"telegram"`
+	Quiet     alerts.Quiet      `json:"quiet"`
+	Heartbeat *heartbeat.Status `json:"heartbeat,omitempty"`
 }
 
 func (s *Server) handleNotify(w http.ResponseWriter, r *http.Request) {
@@ -314,6 +318,10 @@ func (s *Server) handleNotify(w http.ResponseWriter, r *http.Request) {
 	v := notifyView{Quiet: q}
 	if s.bot != nil {
 		v.Telegram = s.bot.Status()
+	}
+	if s.heartbeat != nil {
+		hb := s.heartbeat.Status()
+		v.Heartbeat = &hb
 	}
 	writeJSON(w, http.StatusOK, v)
 }

@@ -24,6 +24,7 @@ var zh = map[string]string{
 	"<b>srvmon</b>: %d/%d online · alerts %d":                               "<b>srvmon</b>：%d/%d 在线 · 告警 %d",
 	"<b>srvmon</b>: a test message. Notifications will arrive here.":        "<b>srvmon</b>：测试消息。通知将发送到这里。",
 	"<b>task #%d %s</b>\n%s":                                                "<b>任务 #%d %s</b>\n%s",
+	"<b>MCP client %s asks to run</b> #%d on <b>%s</b>:\n<code>%s</code>":   "<b>MCP 客户端 %s 请求执行</b> #%d，服务器 <b>%s</b>：\n<code>%s</code>",
 	"<b>the agent asks to run</b> #%d on <b>%s</b>:\n<code>%s</code>":       "<b>智能体请求执行</b> #%d，服务器 <b>%s</b>：\n<code>%s</code>",
 	"@every: at most once every %s":                                         "@every：最频繁每 %s 一次",
 	"Acknowledge: /ack &lt;id&gt;":                                          "确认：/ack &lt;id&gt;",
@@ -222,4 +223,10 @@ var zh = map[string]string{
 	"the new agent reports version %s instead of %s":                                   "新代理上报的版本是 %s，而不是 %s",
 	"%s; restoring the previous agent failed: %s":                                      "%s；恢复旧代理失败：%s",
 	"%s; the previous agent is restored":                                               "%s；已恢复旧代理",
+	// Panel heartbeat (dead man's switch).
+	"no connection: %s":          "无法连接：%s",
+	"rules not evaluated for %s": "规则已有 %s 未评估",
+	"srvmon %s: problems:":       "srvmon %s：问题：",
+	"the ping URL starts with http:// or https:// and has no spaces": "ping URL 须以 http:// 或 https:// 开头且不含空格",
+	"set the ping URL first": "请先设置 ping URL",
 }

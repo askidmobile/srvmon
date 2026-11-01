@@ -11,6 +11,7 @@ import {
   type Alert,
   type AlertsView,
   type Channel,
+  type HeartbeatStatus,
   type NotifyView,
   type Quiet,
   type Rule,
@@ -638,6 +639,138 @@ function TelegramPanel() {
   );
 }
 
+// --- dead man's switch ---
+
+function HeartbeatPanel() {
+  const [hb, setHb] = useState<HeartbeatStatus | null | undefined>(undefined);
+  const [url, setUrl] = useState("");
+  const [fail, setFail] = useState(true);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(
+    (resetFail: boolean) =>
+      api
+        .notify()
+        .then((v) => {
+          setHb(v.heartbeat ?? null);
+          if (resetFail && v.heartbeat) setFail(v.heartbeat.fail_endpoint);
+        })
+        .catch(() => undefined),
+    [],
+  );
+  useEffect(() => {
+    load(true);
+    const t = setInterval(() => load(false), 10000);
+    return () => clearInterval(t);
+  }, [load]);
+
+  const run = async (f: () => Promise<unknown>, ok: string) => {
+    setBusy(true);
+    setMsg(null);
+    try {
+      await f();
+      setMsg({ ok: true, text: ok });
+      setUrl("");
+      await load(true);
+    } catch (e) {
+      setMsg({ ok: false, text: e instanceof ApiError && e.code === "no_master_key" ? t("no master key on the server") : errorMessage(e, t("error")) });
+    }
+    setBusy(false);
+  };
+
+  const title = t("panel heartbeat");
+  if (hb === undefined) return <Panel title={title}>{t("loading…")}</Panel>;
+  if (hb === null) return <Panel title={title}>{t("unavailable")}</Panel>;
+
+  const status = !hb.configured ? (
+    <span className="text-muted-foreground">○ {t("not set up")}</span>
+  ) : hb.last_result === "error" ? (
+    <span className="text-crit">✕ {hb.last_error}</span>
+  ) : hb.last_result === "fail" ? (
+    <span className="text-crit">✕ {t("problems reported")}</span>
+  ) : hb.last_result === "skipped" ? (
+    <span className="text-warn">… {t("ping skipped: problems")}</span>
+  ) : hb.last_result === "ok" ? (
+    <span className="text-primary">● {t("ok")}</span>
+  ) : (
+    <span className="text-warn">… {t("waiting for the first ping")}</span>
+  );
+
+  return (
+    <Panel title={title} right={t("every 1 min")}>
+      <div className="flex flex-col gap-2.5">
+        <div className="text-sm text-muted-foreground">
+          {t("If the panel goes down, the pings stop and the external service alerts you by email or its own channels.")}
+        </div>
+        <div className="flex flex-col gap-1">
+          <label className="text-sm text-muted-foreground" htmlFor="hb-url">
+            {t("ping URL")}
+          </label>
+          <input
+            id="hb-url"
+            type="password"
+            autoComplete="off"
+            className={fieldCls}
+            value={url}
+            placeholder={hb.configured ? `${hb.target} · ${t("leave empty to keep it")}` : "https://hc-ping.com/<uuid>"}
+            onChange={(e) => setUrl(e.target.value)}
+          />
+        </div>
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" checked={fail} onChange={(e) => setFail(e.target.checked)} />
+          <span>
+            {t("report problems to")} <span className="text-hi">URL/fail</span>{" "}
+            <span className="text-muted-foreground">{t("(healthchecks.io; off: skip the ping instead)")}</span>
+          </span>
+        </label>
+        <div className="text-sm">
+          <span className="text-muted-foreground">{t("status")}</span> {status}
+          {hb.last_ping && <span className="text-muted-foreground"> · {t("last ping")} {when(hb.last_ping)}</span>}
+        </div>
+        {hb.problems && hb.problems.length > 0 && (
+          <ul className="text-sm text-crit">
+            {hb.problems.map((p) => (
+              <li key={p}>✕ {p}</li>
+            ))}
+          </ul>
+        )}
+        <div className="flex flex-wrap gap-2">
+          <Button disabled={busy} onClick={() => run(() => api.saveHeartbeat(fail, url.trim() || undefined), t("saved"))}>
+            {t("save")}
+          </Button>
+          <Button variant="outline" disabled={busy || !hb.configured} onClick={() => run(api.testHeartbeat, t("ping sent"))}>
+            {t("ping now")}
+          </Button>
+          {hb.configured && (
+            <Button
+              variant="ghost"
+              className="hover:text-crit"
+              disabled={busy}
+              onClick={() =>
+                confirm(t("Turn the heartbeat off? The external check will report the panel as down.")) &&
+                run(() => api.saveHeartbeat(fail, ""), t("heartbeat off"))
+              }
+            >
+              {t("turn off")}
+            </Button>
+          )}
+        </div>
+        {msg && <div className={cn("text-sm", msg.ok ? "text-primary" : "text-crit")}>{msg.text}</div>}
+        {!hb.configured && (
+          <ol className="list-decimal space-y-0.5 pl-5 text-xs text-muted-foreground">
+            <li>
+              {t("On")} <span className="text-hi">healthchecks.io</span> {t("add a check: period 1 minute, grace 5 minutes.")}
+            </li>
+            <li>{t("Copy its ping URL into the field above and press “save”.")}</li>
+            <li>{t("In the check's integrations pick where to be alerted: email, Telegram and others.")}</li>
+          </ol>
+        )}
+      </div>
+    </Panel>
+  );
+}
+
 // --- page ---
 
 export function AlertsPage({ route, version, onLogout }: { route: Route; version: string; onLogout: () => void }) {
@@ -701,7 +834,10 @@ export function AlertsPage({ route, version, onLogout }: { route: Route; version
 
       <div className="grid grid-cols-1 gap-x-6 gap-y-7 xl:grid-cols-2">
         <RulesPanel />
-        <TelegramPanel />
+        <div className="flex flex-col gap-y-7">
+          <TelegramPanel />
+          <HeartbeatPanel />
+        </div>
       </div>
 
       <Panel title={t("history")} right={t("events and alerts for 90 days")}>

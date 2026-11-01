@@ -93,6 +93,8 @@ var migrations = []string{
 	agentSchema,
 	// AI settings in the panel: a chat may pick its own model.
 	migrationAgentModel,
+	// MCP access tokens and the source of agent actions (mcp.go).
+	migrationMCP,
 	// HTTP/TCP/TLS checks from the panel (checks.go).
 	migrationChecks,
 }

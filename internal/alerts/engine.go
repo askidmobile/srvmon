@@ -10,6 +10,7 @@ import (
 	"math"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/askidmobile/srvmon/internal/checks"
@@ -76,6 +77,7 @@ type Engine struct {
 
 	restarts *restartTracker
 	checks   CheckSource
+	lastEval atomic.Int64 // unix nanos of the last successful Evaluate in Run
 }
 
 // CheckSource gives the latest results of the HTTP/TCP checks of a server.
@@ -140,8 +142,12 @@ func (e *Engine) Run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			if err := e.Evaluate(ctx); err != nil && ctx.Err() == nil {
-				e.log.Error("alerts: evaluate", "err", err)
+			if err := e.Evaluate(ctx); err != nil {
+				if ctx.Err() == nil {
+					e.log.Error("alerts: evaluate", "err", err)
+				}
+			} else {
+				e.lastEval.Store(e.now().UnixNano())
 			}
 		case <-purge.C:
 			if err := e.st.PurgeAlerts(ctx, e.now().Add(-keepHistory)); err != nil {
@@ -149,6 +155,20 @@ func (e *Engine) Run(ctx context.Context) {
 			}
 		}
 	}
+}
+
+// Healthy reports whether Run keeps evaluating rules: the heartbeat's
+// self-check. Right after start it waits a few intervals.
+func (e *Engine) Healthy() error {
+	now := e.now()
+	last := e.started
+	if v := e.lastEval.Load(); v != 0 {
+		last = time.Unix(0, v)
+	}
+	if d := now.Sub(last); d > 4*Interval {
+		return fmt.Errorf("%s", i18n.T("rules not evaluated for %s", d.Round(time.Second).String()))
+	}
+	return nil
 }
 
 // Evaluate checks all rules once.

@@ -37,8 +37,13 @@ func (s *Server) wireAgentTelegram(b *telegram.Bot) {
 
 func actionText(a store.AgentAction) string {
 	var b strings.Builder
-	b.WriteString("🤖 " + i18n.T("<b>the agent asks to run</b> #%d on <b>%s</b>:\n<code>%s</code>", a.ID,
-		html.EscapeString(a.ServerName), html.EscapeString(a.Command)))
+	if name, ok := strings.CutPrefix(a.Source, "mcp:"); ok {
+		b.WriteString("🔌 " + i18n.T("<b>MCP client %s asks to run</b> #%d on <b>%s</b>:\n<code>%s</code>",
+			html.EscapeString(name), a.ID, html.EscapeString(a.ServerName), html.EscapeString(a.Command)))
+	} else {
+		b.WriteString("🤖 " + i18n.T("<b>the agent asks to run</b> #%d on <b>%s</b>:\n<code>%s</code>", a.ID,
+			html.EscapeString(a.ServerName), html.EscapeString(a.Command)))
+	}
 	if a.Reason != "" {
 		b.WriteString("\n" + i18n.T("why: %s", html.EscapeString(a.Reason)))
 	}
