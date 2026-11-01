@@ -25,22 +25,27 @@ export function SudoPicker({
   disabled?: boolean;
 }) {
   return (
-    <div className="flex flex-wrap gap-1" role="radiogroup" aria-label={t("sudo for srvmon")}>
-      {SUDO_MODES.map((m) => (
-        <Button
-          key={m.v}
-          type="button"
-          size="sm"
-          role="radio"
-          aria-checked={value === m.v}
-          variant={value === m.v ? "default" : "outline"}
-          disabled={disabled}
-          title={t(m.hint)}
-          onClick={() => onChange(m.v)}
-        >
-          {t(m.l)}
-        </Button>
-      ))}
+    // Equal-width options: one column in a narrow passport, a row of three
+    // once the container is wide enough. Labels wrap instead of overflowing.
+    <div className="@container w-full max-w-lg">
+      <div className="grid grid-cols-1 gap-1 @min-[26rem]:grid-cols-3" role="radiogroup" aria-label={t("sudo for srvmon")}>
+        {SUDO_MODES.map((m) => (
+          <Button
+            key={m.v}
+            type="button"
+            size="sm"
+            className="h-auto min-h-6 py-0.5 whitespace-normal"
+            role="radio"
+            aria-checked={value === m.v}
+            variant={value === m.v ? "default" : "outline"}
+            disabled={disabled}
+            title={t(m.hint)}
+            onClick={() => onChange(m.v)}
+          >
+            {t(m.l)}
+          </Button>
+        ))}
+      </div>
     </div>
   );
 }
@@ -76,7 +81,7 @@ export function SudoMode({ id }: { id: number }) {
     return <span className={error ? "text-crit" : "text-muted-foreground"}>{error || t("checking…")}</span>;
   }
   return (
-    <span className="inline-flex flex-col gap-1">
+    <div className="flex w-full flex-col gap-1">
       <span>
         <span className={state.mode === "full" ? "text-warn" : undefined}>{sudoLabel(state.mode)}</span>
         <span className="text-muted-foreground"> · {state.user}</span>
@@ -84,6 +89,6 @@ export function SudoMode({ id }: { id: number }) {
       </span>
       <SudoPicker value={state.mode} onChange={change} disabled={busy} />
       {error && <span className="text-crit">{error}</span>}
-    </span>
+    </div>
   );
 }

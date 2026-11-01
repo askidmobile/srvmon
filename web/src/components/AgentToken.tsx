@@ -3,6 +3,10 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { api, type AgentToken as Token, type ServerView } from "@/lib/api";
 import { t } from "@/lib/i18n";
+import { cn } from "@/lib/utils";
+
+// Buttons in the passport may get a narrow column: let labels wrap.
+const wrap = "h-auto min-h-6 py-0.5 whitespace-normal";
 
 // AgentToken reissues the server's agent token. The panel keeps only a hash,
 // so the token is shown once, with commands for a manual install. The old
@@ -33,18 +37,23 @@ export function AgentToken({ s }: { s: ServerView }) {
   };
   if (!tok) {
     return (
-      <span className="inline-flex flex-wrap items-center gap-2">
+      <div className="flex w-full flex-col gap-1">
         <span className="text-muted-foreground">{t("stored as a hash, not shown")}</span>
-        {s.has_ssh && s.has_agent && (
-          <Button size="sm" variant="outline" disabled={busy} onClick={() => issue(true)}>
-            {t("reissue on the server")}
-          </Button>
-        )}
-        <Button size="sm" variant="outline" disabled={busy} onClick={() => issue(false)}>
-          {s.has_agent ? t("new token for a manual install") : t("token for a manual install")}
-        </Button>
+        {/* Equal-width actions: stacked when narrow, side by side when there is room. */}
+        <div className="@container w-full max-w-lg">
+          <div className={cn("grid grid-cols-1 gap-1", s.has_ssh && s.has_agent && "@min-[26rem]:grid-cols-2")}>
+            {s.has_ssh && s.has_agent && (
+              <Button size="sm" variant="outline" className={wrap} disabled={busy} onClick={() => issue(true)}>
+                {t("reissue on the server")}
+              </Button>
+            )}
+            <Button size="sm" variant="outline" className={wrap} disabled={busy} onClick={() => issue(false)}>
+              {s.has_agent ? t("new token for a manual install") : t("token for a manual install")}
+            </Button>
+          </div>
+        </div>
         {error && <span className="text-crit">{error}</span>}
-      </span>
+      </div>
     );
   }
   const block = (key: string, title: string, text: string) => (
