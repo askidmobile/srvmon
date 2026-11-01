@@ -187,6 +187,8 @@ Alerts come from the panel itself, so a dead panel cannot tell you it is dead. T
 
 When a self-check fails for 3 minutes in a row, the panel sends the problems to `<url>/fail`, so healthchecks.io alerts right away and shows what broke. For other receivers (an Uptime Kuma push monitor, your own second server) uncheck "report problems to URL/fail": the panel then just skips pings while something is broken. The URL is stored encrypted with the master key.
 
+Step-by-step setup, including [Better Stack](https://betterstack.com) when the healthchecks.io sign-up email does not arrive: [docs/heartbeat.md](docs/heartbeat.md).
+
 ## AI agent
 
 The `srvmon-ai` container (pi SDK, `ai/`) has only srvmon tools: list servers and containers, read metrics and logs, run commands on servers through the SSH gateway, and manage scheduled tasks. It has no SSH keys of its own. The agent lives in two places: the panel next to the terminal in `[3] terminal` (`F9` shows or hides it) and the `[4] agent` screen with the confirmation log.

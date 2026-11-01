@@ -178,6 +178,11 @@ func (s *Server) handleTerminal(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 	out.rec = rec
+	// Before the shell starts, so the notice comes ahead of any output; if
+	// the shell fails the connection is closed right after.
+	if rec != nil {
+		out.control(map[string]any{"type": "rec", "on": true, "id": rec.id})
+	}
 	sess.Stdout = out
 	sess.Stderr = out
 	// Before the shell starts: its first output (the prompt) must not

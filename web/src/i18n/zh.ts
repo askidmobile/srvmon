@@ -500,7 +500,7 @@ export const zh: Dict = {
   "If the panel goes down, the pings stop and the external service alerts you by email or its own channels.": "如果面板宕机，ping 会停止，外部服务会通过邮件或其自身渠道提醒您。",
   "ping URL": "ping URL",
   "report problems to": "将问题报告到",
-  "(healthchecks.io; off: skip the ping instead)": "（healthchecks.io；关闭时改为跳过 ping）",
+  "(healthchecks.io, Better Stack; off: skip the ping instead)": "（healthchecks.io、Better Stack；关闭时改为跳过 ping）",
   "last ping": "上次 ping",
   "ping sent": "ping 已发送",
   "ping now": "立即 ping",

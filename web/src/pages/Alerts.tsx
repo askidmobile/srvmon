@@ -839,7 +839,7 @@ function HeartbeatPanel() {
         </div>
         <Check className="text-sm" checked={fail} onChange={setFail}>
           {t("report problems to")} <span className="text-hi">URL/fail</span>{" "}
-          <span className="text-muted-foreground">{t("(healthchecks.io; off: skip the ping instead)")}</span>
+          <span className="text-muted-foreground">{t("(healthchecks.io, Better Stack; off: skip the ping instead)")}</span>
         </Check>
         <div className="text-sm">
           <span className="text-muted-foreground">{t("status")}</span> {status}
