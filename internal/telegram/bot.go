@@ -23,6 +23,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/askidmobile/srvmon/internal/alerts"
+	"github.com/askidmobile/srvmon/internal/checks"
 	"github.com/askidmobile/srvmon/internal/i18n"
 	"github.com/askidmobile/srvmon/internal/metrics"
 	"github.com/askidmobile/srvmon/internal/secret"
@@ -88,6 +89,13 @@ type Options struct {
 	Log     *slog.Logger
 	API     string       // Bot API base URL; default DefaultAPI
 	Client  *http.Client // default: 70 s timeout (long polling waits 50 s)
+	// Checks gives domain expiry dates for /bills; nil leaves them out.
+	Checks DomainSource
+}
+
+// DomainSource lists the domains the panel checks with their expiry.
+type DomainSource interface {
+	Domains() []checks.DomainInfo
 }
 
 // Bot is the Telegram bot. Run starts it; it idles until a token is set.
@@ -98,6 +106,7 @@ type Bot struct {
 	box    *secret.Box
 	engine *alerts.Engine
 	latest *metrics.Latest
+	checks DomainSource
 	log    *slog.Logger
 	now    func() time.Time
 
@@ -161,7 +170,7 @@ func New(ctx context.Context, o Options) (*Bot, error) {
 	}
 	b := &Bot{
 		api: strings.TrimRight(o.API, "/"), client: o.Client, st: o.Store, box: o.Secrets, engine: o.Engine,
-		latest: o.Latest, log: o.Log, now: time.Now,
+		latest: o.Latest, checks: o.Checks, log: o.Log, now: time.Now,
 		reload: make(chan struct{}, 1), out: make(chan outMsg, 100),
 	}
 	b.started = b.now()

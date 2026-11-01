@@ -143,6 +143,8 @@ export interface ServerView {
   agent_update?: AgentUpdate;
   // Hours until a growing filesystem is full, by mount point (≤ 30 days).
   disk_full_hours?: Record<string, number>;
+  // HTTP/TCP checks of the server, when it has any.
+  checks?: { total: number; down: number };
 }
 
 export interface AgentUpdate {
@@ -204,7 +206,50 @@ export const api = {
   updateChannel: (id: number, c: ChannelInput) => request<NotifyChannel>("PUT", `/api/notify/channels/${id}`, c),
   deleteChannel: (id: number) => request<unknown>("DELETE", `/api/notify/channels/${id}`),
   testChannel: (id: number) => request<unknown>("POST", `/api/notify/channels/${id}/test`),
+  checks: (id: number) => request<ChecksView>("GET", `/api/servers/${id}/checks`).then(normalizeChecks),
+  saveChecks: (id: number, targets: string[]) =>
+    request<ChecksView>("PUT", `/api/servers/${id}/checks`, { targets }).then(normalizeChecks),
 };
+
+// --- HTTP/TCP/TLS checks from the panel ---
+
+export interface CheckResult {
+  up: boolean;
+  latency_ms: number;
+  status?: number;
+  error?: string;
+  checked_at: string;
+  down_since?: string;
+  cert?: { subject: string; issuer: string; not_after: string };
+}
+
+export interface CheckState {
+  id: number;
+  target: string;
+  kind: "http" | "tcp";
+  tls: boolean;
+  domain?: string;
+  result?: CheckResult;
+}
+
+export interface DomainInfo {
+  domain: string;
+  expires?: string;
+  source?: "rdap" | "whois";
+  error?: string;
+  checked_at: string;
+}
+
+export interface ChecksView {
+  checks: CheckState[];
+  domains: DomainInfo[];
+}
+
+function normalizeChecks(v: ChecksView): ChecksView {
+  v.checks ??= [];
+  v.domains ??= [];
+  return v;
+}
 
 // --- stage 4: alerts and Telegram ---
 

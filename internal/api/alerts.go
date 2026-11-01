@@ -215,6 +215,11 @@ func validateRule(r *store.Rule) string {
 			return i18n.T("threshold: from 0 to 60 days")
 		}
 		r.DurationSec = 0
+	case store.KindCertExpiry, store.KindDomainExpiry:
+		if r.Threshold < 0 || r.Threshold > 120 || r.Threshold != float64(int(r.Threshold)) {
+			return i18n.T("threshold: from 0 to 120 days")
+		}
+		r.DurationSec = 0
 	case store.KindAgentSilent:
 		if r.DurationSec < 30 {
 			return i18n.T("the agent sends data every 5 s: the threshold is at least 30 seconds")

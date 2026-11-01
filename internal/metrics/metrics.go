@@ -40,6 +40,14 @@ func (w *Writer) Write(ctx context.Context, server string, reports ...protocol.R
 	for _, r := range reports {
 		body = append(body, Encode(server, r)...)
 	}
+	return w.WriteText(ctx, body)
+}
+
+// WriteText sends lines already in Prometheus text format.
+func (w *Writer) WriteText(ctx context.Context, body []byte) error {
+	if w == nil || len(body) == 0 {
+		return nil
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, w.base+"/api/v1/import/prometheus", bytes.NewReader(body))
 	if err != nil {
 		return err
@@ -156,3 +164,6 @@ func Encode(server string, r protocol.Report) []byte {
 var labelEscaper = strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\n", `\n`)
 
 func escape(s string) string { return labelEscaper.Replace(s) }
+
+// EscapeLabel escapes a label value for the Prometheus text format.
+func EscapeLabel(s string) string { return escape(s) }

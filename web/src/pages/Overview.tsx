@@ -71,6 +71,14 @@ function Row({ s, onDelete }: { s: ServerView; onDelete: (s: ServerView) => void
             {t("update failed")}
           </span>
         )}
+        {s.checks && (
+          <span
+            className={cn("ml-2 text-xs", s.checks.down > 0 ? "text-crit" : "text-muted-foreground")}
+            title={t("checks: {up} of {total} respond", { up: s.checks.total - s.checks.down, total: s.checks.total })}
+          >
+            {s.checks.down > 0 ? `✗ ${t("{n} down", { n: s.checks.down })}` : `✓ ${s.checks.total}`}
+          </span>
+        )}
         {s.description && <div className="text-xs text-muted-foreground">{s.description}</div>}
       </td>
       <td className="pr-4 text-muted-foreground">{s.group || "—"}</td>

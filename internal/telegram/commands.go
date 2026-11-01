@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/askidmobile/srvmon/internal/alerts"
+	"github.com/askidmobile/srvmon/internal/checks"
 	"github.com/askidmobile/srvmon/internal/i18n"
 	"github.com/askidmobile/srvmon/internal/store"
 )
@@ -455,7 +456,40 @@ func (b *Bot) billsText(ctx context.Context) string {
 		}
 		out.WriteString("\n" + i18n.T("Per month: %s", strings.Join(parts, " + ")))
 	}
+	out.WriteString(b.domainsText())
 	return strings.TrimRight(out.String(), "\n")
+}
+
+// domainsText lists the registrations of the checked domains, soonest first.
+func (b *Bot) domainsText() string {
+	if b.checks == nil {
+		return ""
+	}
+	var list []checks.DomainInfo
+	for _, d := range b.checks.Domains() {
+		if d.Expires != nil {
+			list = append(list, d)
+		}
+	}
+	if len(list) == 0 {
+		return ""
+	}
+	sort.Slice(list, func(i, j int) bool { return list[i].Expires.Before(*list[j].Expires) })
+	var out strings.Builder
+	out.WriteString("\n\n<b>" + i18n.T("Domains") + "</b>\n")
+	now := b.now()
+	for _, d := range list {
+		days := alerts.DaysLeft(now, *d.Expires)
+		mark := "·"
+		switch {
+		case days < 0:
+			mark = "🔴"
+		case days <= 30:
+			mark = "🟡"
+		}
+		fmt.Fprintf(&out, "%s %s\n", mark, esc(alerts.DomainText(d.Domain, days, *d.Expires)))
+	}
+	return out.String()
 }
 
 func bytesText(n uint64) string {

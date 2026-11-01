@@ -2,6 +2,7 @@ import * as React from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { AgentVersion } from "@/components/AgentVersion";
+import { ChecksPanel, DomainLine } from "@/components/ChecksPanel";
 import { SudoMode } from "@/components/SudoMode";
 import { Hotkey, Shell } from "@/components/Shell";
 import { Button } from "@/components/ui/button";
@@ -10,7 +11,9 @@ import {
   api,
   ApiError,
   historyRanges,
+  type ChecksView,
   type Container,
+  type DomainInfo,
   type ContainerHistory,
   type DiskHealth,
   type History,
@@ -956,11 +959,13 @@ function PassportForm({ data, onDone }: { data: ServerDetailView; onDone: (saved
 
 function Passport({
   data,
+  domains,
   editing,
   setEditing,
   onSaved,
 }: {
   data: ServerDetailView;
+  domains: DomainInfo[];
   editing: boolean;
   setEditing: (v: boolean) => void;
   onSaved: () => void;
@@ -1000,6 +1005,8 @@ function Passport({
         "—"
       ),
     ],
+    // Domain registrations of the checked sites sit next to the payments.
+    ...domains.map((d): [string, React.ReactNode] => [t("domain"), <DomainLine key={d.domain} d={d} />]),
     ["ssh", data.host ? `${data.host}:${data.port}` : t("not set up")],
     ...(data.has_ssh ? ([["sudo", <SudoMode key="sudo" id={data.id} />]] as [string, React.ReactNode][]) : []),
     [t("os"), inv?.os || "—"],
@@ -1038,8 +1045,8 @@ function Passport({
         />
       ) : (
         <div className="grid grid-cols-[120px_minmax(0,1fr)] gap-x-3 gap-y-1">
-          {kv.map(([k, v]) => (
-            <React.Fragment key={k}>
+          {kv.map(([k, v], i) => (
+            <React.Fragment key={i}>
               <span className="text-muted-foreground">{k}</span>
               <span className="min-w-0 break-words">{v}</span>
             </React.Fragment>
@@ -1082,6 +1089,7 @@ export function ServerScreen({
   const [range, setRangeState] = useState<HistoryRange>(loadRange);
   const [editing, setEditing] = useState(false);
   const [logSource, setLogSource] = useState("");
+  const [checks, setChecks] = useState<ChecksView | null>(null);
   const filterRef = useRef<HTMLInputElement>(null);
   const logsRef = useRef<HTMLDivElement>(null);
 
@@ -1141,6 +1149,23 @@ export function ServerScreen({
       clearInterval(t);
     };
   }, [id, range]);
+
+  // Checks run once a minute on the panel; a slower poll is enough.
+  useEffect(() => {
+    let alive = true;
+    setChecks(null);
+    const tick = () =>
+      api
+        .checks(id)
+        .then((v) => alive && setChecks(v))
+        .catch(() => undefined);
+    tick();
+    const t = setInterval(tick, 15000);
+    return () => {
+      alive = false;
+      clearInterval(t);
+    };
+  }, [id]);
 
   const showLogs = useCallback((name: string) => {
     setLogSource(name);
@@ -1269,6 +1294,8 @@ export function ServerScreen({
         <DockerPanel data={data} onLogs={showLogs} />
         <SmartPanel data={data} onChanged={load} />
 
+        <ChecksPanel serverId={id} view={checks} onChange={setChecks} />
+
         <div className="flex flex-wrap gap-x-4 gap-y-5">
           <LogsPanel
             logs={data.logs}
@@ -1277,7 +1304,7 @@ export function ServerScreen({
             watching={!!data.detail}
             panelRef={logsRef}
           />
-          <Passport data={data} editing={editing} setEditing={setEditing} onSaved={load} />
+          <Passport data={data} domains={checks?.domains ?? []} editing={editing} setEditing={setEditing} onSaved={load} />
         </div>
       </>
     );

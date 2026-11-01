@@ -21,6 +21,7 @@ import (
 	"github.com/askidmobile/srvmon/internal/alerts"
 	"github.com/askidmobile/srvmon/internal/auth"
 	"github.com/askidmobile/srvmon/internal/backup"
+	"github.com/askidmobile/srvmon/internal/checks"
 	"github.com/askidmobile/srvmon/internal/config"
 	"github.com/askidmobile/srvmon/internal/heartbeat"
 	"github.com/askidmobile/srvmon/internal/i18n"
@@ -55,6 +56,7 @@ type Server struct {
 	files     *sftpPool
 	csp       string
 	alerts    *alerts.Engine
+	checks    *checks.Runner
 	bot       *telegram.Bot      // nil when its settings cannot be loaded
 	heartbeat *heartbeat.Monitor // nil when its settings cannot be loaded
 	backup    *backup.Runner     // nil without a master key
@@ -163,8 +165,11 @@ func New(o Options) *Server {
 		}
 	}
 	srv.alerts.SetForecasts(srv.forecasts)
+	srv.checks = checks.New(o.Store, o.VM, o.Log)
+	srv.alerts.SetChecks(srv.checks)
 	bot, err := telegram.New(context.Background(), telegram.Options{
 		Store: o.Store, Secrets: o.Secrets, Engine: srv.alerts, Latest: srv.latest, Log: o.Log, API: o.TelegramAPI,
+		Checks: srv.checks,
 	})
 	if err != nil {
 		o.Log.Error("telegram: load settings", "err", err)
@@ -205,6 +210,7 @@ func New(o Options) *Server {
 // fail2ban bans of the host.
 func (s *Server) Start(ctx context.Context, fail2banEvents, hostName string) {
 	go s.alerts.Run(ctx)
+	go s.checks.Run(ctx)
 	if s.heartbeat != nil {
 		go s.heartbeat.Run(ctx)
 	}
@@ -251,6 +257,8 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /api/servers/{id}/containers/{name}/{action}", s.requireSession(http.HandlerFunc(s.handleContainerAction)))
 	mux.Handle("GET /api/servers/{id}", s.requireSession(http.HandlerFunc(s.handleServer)))
 	mux.Handle("PATCH /api/servers/{id}", s.requireSession(http.HandlerFunc(s.handleServerCard)))
+	mux.Handle("GET /api/servers/{id}/checks", s.requireSession(http.HandlerFunc(s.handleChecks)))
+	mux.Handle("PUT /api/servers/{id}/checks", s.requireSession(http.HandlerFunc(s.handleChecksUpdate)))
 	mux.Handle("GET /api/servers/{id}/history", s.requireSession(http.HandlerFunc(s.handleHistory)))
 	mux.Handle("GET /api/servers/{id}/containers/{name}/history", s.requireSession(http.HandlerFunc(s.handleContainerHistory)))
 	mux.Handle("POST /api/servers/{id}/agent/update", s.requireSession(http.HandlerFunc(s.handleAgentUpdate)))

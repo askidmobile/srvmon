@@ -103,6 +103,8 @@ var migrations = []string{
 	migrationDiskRules,
 	// Terminal session recordings (recordings.go).
 	migrationRecordings,
+	// HTTP/TCP/TLS checks from the panel (checks.go).
+	migrationChecks,
 }
 
 func (s *Store) migrate(ctx context.Context) error {

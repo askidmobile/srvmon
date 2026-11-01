@@ -20,13 +20,14 @@
 - **服务器详情页。** 按核心的 CPU、内存、磁盘、网络、进程、容器状态/健康检查/重启次数、syslog 与 docker 日志，页面打开期间实时刷新。点击容器可查看其 CPU 和内存历史（1 小时到 7 天；每次推送都从容器的 cgroup 读取用量，因此即使无人查看也会记录历史）。每个磁盘都会显示基于最近 6 小时线性回归的写满预测（“约 13 小时后写满”）。
 - **磁盘健康（S.M.A.R.T.）。** 可选，按服务器开启：PASSED/FAILED、温度、通电时间、重映射/待映射/不可纠正扇区（SATA），或磨损、备用空间和介质错误（NVMe）。代理每 30 分钟自行读取一次，不会唤醒休眠的磁盘。由于需要对磁盘的原始读取权限，默认关闭。可在服务器页面一键开启（面板通过 SSH 以 `CAP_SYS_RAWIO`、`CAP_SYS_ADMIN` 和 SATA/NVMe 块设备只读权限重建代理容器）；监控服务器本身用 `SRVMON_SMART=1`（GitHub 变量或 `.env`）；手动安装则取消 `deploy/agent/docker-compose.yml` 中相应注释。
 - **服务器档案与续费。** 每台服务器有一份档案：描述、项目、分组、标签、提供商、套餐、费用（含币种）和下次付款日期。续费信息显示在总览中、Telegram（`/bills`）里，并会在到期前几天发出告警。
+- **网站、端口与证书检查。** 在服务器页面添加其 URL 和端口；面板每分钟从自身网络检查一次（HTTP 状态、TCP 连接、TLS 握手），在目标无法访问、TLS 证书或域名注册即将到期时发出告警。域名到期日期（RDAP，没有 RDAP 的后缀用 WHOIS）显示在档案中的续费信息旁和 `/bills` 中。
 - **添加向导。** 校验 SSH 主机密钥，用密码或你自己的私钥登录一次。srvmon 创建 `srvmon` 用户及其 ed25519 密钥，安装代理，并可关闭密码登录。一次性密码或密钥不会被保存。
 - **Web 终端。** xterm.js ↔ WebSocket ↔ `srvmon-server` 内的 SSH 客户端 ↔ sshd。支持多标签、分屏（最多四个会话并排或上下排列）、窗口缩放、`docker exec` 进入容器。终端旁边是 AI 代理面板（`F9` 显示或隐藏），在该服务器的上下文中工作。私钥从不离开监控服务器，并以 XChaCha20-Poly1305 加密存储。
 - **SFTP 文件。** 终端旁边的文件面板（`F8`）：浏览、下载、上传（支持拖放）、新建文件夹、重命名和删除，权限与 `srvmon` 用户相同。每次修改和下载都会写入审计日志。
 - **会话录制。** 每个网页终端会话都以 [asciinema](https://asciinema.org) 格式录制，可在面板中回放（暂停、拖动进度、1–8 倍速）或下载为 `.cast` 文件。只记录输出和窗口大小变化，不记录按键，因此在隐藏提示符下输入的密码不会被录入。输出中仍可能包含机密，因此录像用主密钥加密，并在保留期满后删除（默认 30 天）。可以在 `[6] 设置` 中关闭录制、修改保留期和单个会话的大小上限。
 - **AI 代理。** 基于 [pi](https://pi.dev) SDK，支持任意提供商（DeepSeek、Anthropic、OpenAI、OpenRouter、Google、Ollama，以及任何 OpenAI / Anthropic 兼容接口）。只读命令直接执行；任何会修改服务器的命令都必须经你明确批准，策略由 `srvmon-server` 而非模型执行。每台服务器有独立的对话上下文，对话保留历史，每个对话可单独选择模型。定时任务（cron）结果可发送到 Telegram，也可以在 Telegram 中用 `/ask` 向代理提问。
 - **MCP 服务器。** Claude Desktop、Cursor 和 Claude Code 使用带权限、可撤销的令牌连接 `/mcp`，工具相同，变更同样需要在面板或 Telegram 中确认。
-- **告警与 Telegram。** 代理离线、容器停止或不健康、频繁重启、CPU、磁盘、磁盘即将写满、S.M.A.R.T. 异常、主机续费提醒、fail2ban 封禁、登录尝试。规则可编辑（阈值、持续时间、级别、渠道：通知或仅面板）。按你的时区设置静默时段（严重告警仍会发送），支持确认与临时静音，保留 90 天历史，严重告警附带 AI 诊断。机器人命令：`/status`、`/server`、`/alerts`、`/ack`、`/bills`、`/ask`。
+- **告警与 Telegram。** 代理离线、容器停止或不健康、频繁重启、CPU、磁盘、磁盘即将写满、S.M.A.R.T. 异常、网站和端口无法访问、证书和域名即将到期、主机续费提醒、fail2ban 封禁、登录尝试。规则可编辑（阈值、持续时间、级别、渠道：通知或仅面板）。按你的时区设置静默时段（严重告警仍会发送），支持确认与临时静音，保留 90 天历史，严重告警附带 AI 诊断。机器人命令：`/status`、`/server`、`/alerts`、`/ack`、`/bills`、`/ask`。
 - **更多通知通道。** 除 Telegram 外，告警还可以发送到邮件、ntfy、Discord、Gotify、Slack、Matrix、Pushover、Webhook 以及 [Shoutrrr](https://shoutrrr.nickfedor.com/) 支持的其他服务，每个通道可设置最低级别。
 - **面板心跳（dead man's switch）。** 面板每分钟自检一次并 ping 一个外部 URL，例如 [healthchecks.io](https://healthchecks.io)。如果面板宕机，ping 会停止，该服务会通过邮件或其自身渠道提醒您。
 - **备份与应急访问。** 按计划将面板数据库加密备份到任意 S3 兼容存储（AWS、Yandex Object Storage、R2、B2、MinIO），支持保留份数，失败时 Telegram 告警；主密钥需凭 TOTP 验证码单独导出。您自己的 SSH 公钥会保存在每台服务器的 `authorized_keys` 中，面板丢失也不会被锁在服务器外。详见 [docs/backup.md](docs/backup.md)。
@@ -112,6 +113,22 @@ docker compose exec server /srvmon-server add-server -name shop-db -group prod -
 SRVMON_URL=https://mon.example.com SRVMON_TOKEN=a_... docker compose up -d
 ```
 
+## 网站与端口检查
+
+在服务器页面的“检查”面板中每行填写一个目标：
+
+| 目标 | 检查内容 |
+|---|---|
+| `https://example.com/health` | HTTP GET，状态码低于 400 视为正常（最多 5 次重定向），并检查 TLS 证书 |
+| `http://10.0.0.5:8080/` | HTTP GET |
+| `tls://mail.example.com:993` | TCP 连接和 TLS 握手，并检查证书 |
+| `db.example.com:5432` | TCP 连接（`tcp://` 可省略） |
+
+- 监控服务器每分钟检查一次每个目标；检查失败会在 3 秒后重试一次，仍失败才视为无法访问。每台服务器最多 20 个目标。
+- 面板显示状态、延迟、证书到期和域名注册到期时间。历史写入 VictoriaMetrics：`srvmon_check_up`、`srvmon_check_latency_ms`、`srvmon_check_cert_days`。
+- 域名到期时间每天通过 RDAP（IANA 引导文件）查询两次，没有 RDAP 的后缀（如 `.ru`、`.рф`）使用 WHOIS。监控服务器需要能访问外网 HTTPS 和 TCP 43 端口。
+- 告警规则：“网站 / 端口无法访问”持续 2 分钟（crit），“证书 ≤ 14 天内到期”和“域名 ≤ 30 天内到期”（warn）。阈值可在告警页面修改。
+
 ## 服务器访问权限
 
 面板在受管服务器上能做什么、不能做什么：
@@ -124,7 +141,7 @@ SRVMON_URL=https://mon.example.com SRVMON_TOKEN=a_... docker compose up -d
 
 `[5] 告警` 页面（`#/alerts`）显示活动告警（可“确认”或“静音 1 小时”）、规则、Telegram 机器人、静默时段和 90 天历史。
 
-- 默认规则：代理静默超过 2 分钟（crit），容器停止或不健康 1 分钟（crit），每小时重启超过 2 次，CPU > 90% 持续 5 分钟，内存 > 95% 持续 5 分钟（默认关闭，仅面板），磁盘 > 85%，按当前增长速度 24 小时内写满，S.M.A.R.T. 异常（自检失败、待映射或不可纠正扇区、NVMe 严重警告、备用空间或寿命耗尽；crit），3 天内需续费；以及事件：监控服务器上的 fail2ban 封禁、面板密码爆破、面板登录。
+- 默认规则：代理静默超过 2 分钟（crit），容器停止或不健康 1 分钟（crit），每小时重启超过 2 次，CPU > 90% 持续 5 分钟，内存 > 95% 持续 5 分钟（默认关闭，仅面板），磁盘 > 85%，按当前增长速度 24 小时内写满，S.M.A.R.T. 异常（自检失败、待映射或不可纠正扇区、NVMe 严重警告、备用空间或寿命耗尽；crit），3 天内需续费，网站或端口无法访问 2 分钟（crit），TLS 证书 14 天内到期，域名 30 天内到期；以及事件：监控服务器上的 fail2ban 封禁、面板密码爆破、面板登录。
 - 每条规则都可以关闭、修改（阈值、持续时间、级别 crit/warn/info）或指定渠道：`notify`（面板、Telegram 和通知通道）或 `web`（仅面板）。`+ 规则` 可添加新规则。以退出码 0 停止的容器不算告警。
 - 静默时段（例如 `Europe/Moscow` 时区 01:00–07:00）内通知会延后到时段结束；严重告警始终发送。
 

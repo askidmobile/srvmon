@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/askidmobile/srvmon/internal/checks"
 	"github.com/askidmobile/srvmon/internal/i18n"
 	"github.com/askidmobile/srvmon/internal/metrics"
 	"github.com/askidmobile/srvmon/internal/protocol"
@@ -64,6 +65,10 @@ type condKey struct {
 type cond struct {
 	subject string
 	message string
+	// unknown: the data for this subject is missing (a certificate not
+	// seen since the restart, a failed domain lookup). An open alert stays
+	// as it is; nothing new fires.
+	unknown bool
 }
 
 // Engine evaluates rules. Create it with New and run Run in a goroutine.
@@ -81,7 +86,20 @@ type Engine struct {
 
 	restarts  *restartTracker
 	forecasts *metrics.Forecasts
+	checks    CheckSource
 	lastEval  atomic.Int64 // unix nanos of the last successful Evaluate in Run
+}
+
+// CheckSource gives the latest results of the HTTP/TCP checks of a server.
+type CheckSource interface {
+	State(serverID int64) checks.ServerState
+}
+
+// SetChecks sets where check results come from.
+func (e *Engine) SetChecks(c CheckSource) {
+	e.mu.Lock()
+	e.checks = c
+	e.mu.Unlock()
 }
 
 // New returns an engine over the store and the live metrics cache.
@@ -287,6 +305,12 @@ func (e *Engine) Evaluate(ctx context.Context) error {
 			}
 			for _, c := range conds {
 				k := condKey{r.ID, srv.ID, c.subject}
+				if c.unknown {
+					if _, isOpen := openBy[k]; isOpen {
+						evaluated[k] = true
+					}
+					continue
+				}
 				since, seen := e.pending[k]
 				if !seen {
 					since = now
@@ -517,6 +541,8 @@ func (e *Engine) check(r store.Rule, srv store.Server, now time.Time) ([]cond, b
 			return nil, true
 		}
 		return []cond{{subject: srv.NextPayment, message: PaymentText(srv, days)}}, true
+	case store.KindCheckDown, store.KindCertExpiry, store.KindDomainExpiry:
+		return e.checkTargets(r, srv, now)
 	}
 	return nil, false
 }
@@ -548,6 +574,83 @@ func SmartProblem(d protocol.DiskHealth) string {
 		why = append(why, i18n.T("spare capacity %d%% (threshold %d%%)", *d.AvailableSpare, *d.SpareThreshold))
 	}
 	return strings.Join(why, ", ")
+}
+
+// checkTargets evaluates the rules over the HTTP/TCP checks of a server.
+// Until every check (or domain) had a first result nothing is decided, so a
+// restart of the panel neither fires nor resolves anything.
+func (e *Engine) checkTargets(r store.Rule, srv store.Server, now time.Time) ([]cond, bool) {
+	if e.checks == nil {
+		return nil, false
+	}
+	st := e.checks.State(srv.ID)
+	var out []cond
+	switch r.Kind {
+	case store.KindCheckDown:
+		if !st.Ready {
+			return nil, false
+		}
+		for _, c := range st.Checks {
+			if c.Result != nil && !c.Result.Up {
+				out = append(out, cond{subject: c.Target, message: i18n.T("%s is down: %s", c.Target, c.Result.Error)})
+			}
+		}
+	case store.KindCertExpiry:
+		if !st.Ready {
+			return nil, false
+		}
+		for _, c := range st.Checks {
+			if !c.TLS {
+				continue
+			}
+			if c.Result == nil || c.Result.Cert == nil {
+				out = append(out, cond{subject: c.Target, unknown: true})
+				continue
+			}
+			days := DaysLeft(now, c.Result.Cert.NotAfter)
+			if float64(days) <= r.Threshold {
+				out = append(out, cond{subject: c.Target, message: CertText(c.Target, days, c.Result.Cert.NotAfter)})
+			}
+		}
+	case store.KindDomainExpiry:
+		if !st.DomainsReady {
+			return nil, false
+		}
+		for _, d := range st.Domains {
+			if d.Expires == nil {
+				out = append(out, cond{subject: d.Domain, unknown: true})
+				continue
+			}
+			days := DaysLeft(now, *d.Expires)
+			if float64(days) <= r.Threshold {
+				out = append(out, cond{subject: d.Domain, message: DomainText(d.Domain, days, *d.Expires)})
+			}
+		}
+	}
+	return out, true
+}
+
+// DaysLeft returns whole days until t (negative once it passed).
+func DaysLeft(now, t time.Time) int {
+	return int(math.Floor(t.Sub(now).Hours() / 24))
+}
+
+// CertText describes a certificate that expires soon.
+func CertText(target string, days int, at time.Time) string {
+	date := at.UTC().Format("02.01.2006")
+	if days < 0 {
+		return i18n.N(-days, "certificate of %s expired %d day ago (%s)", "certificate of %s expired %d days ago (%s)", target, -days, date)
+	}
+	return i18n.N(days, "certificate of %s expires in %d day (%s)", "certificate of %s expires in %d days (%s)", target, days, date)
+}
+
+// DomainText describes a domain registration that expires soon.
+func DomainText(domain string, days int, at time.Time) string {
+	date := at.UTC().Format("02.01.2006")
+	if days < 0 {
+		return i18n.N(-days, "domain %s expired %d day ago (%s)", "domain %s expired %d days ago (%s)", domain, -days, date)
+	}
+	return i18n.N(days, "domain %s expires in %d day (%s)", "domain %s expires in %d days (%s)", domain, days, date)
 }
 
 // PaymentText describes an upcoming payment of a server.

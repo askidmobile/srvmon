@@ -76,6 +76,7 @@ type serverView struct {
 	// DiskFull is hours until a growing filesystem is full, by mount
 	// point, when that is within metrics.ForecastHorizon.
 	DiskFull map[string]float64 `json:"disk_full_hours,omitempty"`
+	Checks   *checkSummary      `json:"checks,omitempty"`
 }
 
 func (s *Server) handleServers(w http.ResponseWriter, r *http.Request) {
@@ -94,6 +95,7 @@ func (s *Server) handleServers(w http.ResponseWriter, r *http.Request) {
 			v.Online = now.Sub(snap.Received) < offlineAfter
 		}
 		s.decorateAgent(&v)
+		s.decorateChecks(&v)
 		out = append(out, v)
 	}
 	writeJSON(w, http.StatusOK, out)
