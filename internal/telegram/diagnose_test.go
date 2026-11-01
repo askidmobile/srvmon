@@ -68,6 +68,16 @@ func TestDiagnosisRepliesToAlertMessage(t *testing.T) {
 	if d["reply_markup"] != nil {
 		t.Fatal("a diagnosis has no buttons")
 	}
+	// A warning's diagnosis waits for no one in quiet hours: not sent.
+	w, _ := e.st.CreateAlert(ctx, store.Alert{RuleID: ruleID, Kind: store.KindContainerDown, ServerID: e.srvID,
+		ServerName: "shop-db", Subject: "redis", Severity: store.SevWarn, Channel: store.ChanTelegram,
+		State: store.AlertFiring, Message: "warn", StartedAt: time.Now(), Notified: true})
+	now := time.Now().UTC()
+	_ = alerts.SaveQuiet(ctx, e.st, alerts.Quiet{From: now.Add(-time.Hour).Format("15:04"), To: now.Add(time.Hour).Format("15:04"), TZ: "UTC"})
+	if e.engine.NotifyDiagnosis(ctx, w.ID, "x") {
+		t.Fatal("warning diagnosis sent in quiet hours")
+	}
+	_ = alerts.SaveQuiet(ctx, e.st, alerts.Quiet{})
 	// Silenced meanwhile: nothing more is sent.
 	if _, _, err := e.engine.Silence(ctx, a.ID, time.Hour); err != nil {
 		t.Fatal(err)

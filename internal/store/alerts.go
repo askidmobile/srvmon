@@ -372,6 +372,9 @@ func (s *Store) PurgeAlerts(ctx context.Context, t time.Time) error {
 		t.Unix()); err != nil {
 		return err
 	}
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM diagnosis_runs WHERE started_at < ?`, t.Unix()); err != nil {
+		return err
+	}
 	_, err := s.db.ExecContext(ctx, `DELETE FROM alert_silences WHERE until < ?`, time.Now().Unix())
 	return err
 }

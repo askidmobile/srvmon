@@ -107,7 +107,8 @@ func (e *Engine) OnFire(f func(store.Alert)) {
 
 // NotifyDiagnosis sends the AI diagnosis of an alert where its notification
 // went. Nothing is sent when the alert was not notified (web only, silenced,
-// held back) or the silence started meanwhile.
+// held back), the silence started meanwhile, or quiet hours hold back a
+// noncritical one.
 func (e *Engine) NotifyDiagnosis(ctx context.Context, alertID int64, text string) bool {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -118,6 +119,13 @@ func (e *Engine) NotifyDiagnosis(ctx context.Context, alertID int64, text string
 	until, err := e.st.SilencedUntil(ctx, store.SilenceKey{RuleID: a.RuleID, ServerID: a.ServerID, Subject: a.Subject}, e.now())
 	if err != nil || !until.IsZero() {
 		return false
+	}
+	// Quiet hours hold back everything but critical alerts; a diagnosis is
+	// not worth waking up for either (it stays in the panel).
+	if a.Severity != store.SevCrit {
+		if q, err := LoadQuiet(ctx, e.st); err != nil || q.Active(e.now()) {
+			return false
+		}
 	}
 	return e.notifier.Notify(Notification{Alert: a, Diagnosis: text})
 }

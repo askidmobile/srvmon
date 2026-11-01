@@ -134,6 +134,27 @@ func TestDiagnosisQueueLimitsAndResult(t *testing.T) {
 		t.Fatalf("%+v", d)
 	}
 
+	// A refused rerun keeps the shown diagnosis.
+	if _, err := s.queueDiagnosis(ctx, crit, "manual"); !errors.Is(err, errDiagLimit) {
+		t.Fatalf("rerun over limit: %v", err)
+	}
+	if d, _ := a.st.GetDiagnosis(ctx, crit.ID); d.State != store.DiagDone {
+		t.Fatalf("rerun overwrote the result: %+v", d)
+	}
+	// Reruns of one alert count every time: with room for one more run,
+	// the first rerun goes, the second is refused.
+	raw, _ = json.Marshal(diagSettings{Enabled: true, PerHour: 2, PerDay: 5})
+	_ = a.st.SetSetting(ctx, settingDiagnose, string(raw))
+	if _, err := s.queueDiagnosis(ctx, crit, "manual"); err != nil {
+		t.Fatal(err)
+	}
+	s.diagnose(ctx, <-s.diag.queue)
+	if _, err := s.queueDiagnosis(ctx, crit, "manual"); !errors.Is(err, errDiagLimit) {
+		t.Fatalf("second rerun: %v", err)
+	}
+	raw, _ = json.Marshal(diagSettings{Enabled: true, PerHour: 1, PerDay: 5})
+	_ = a.st.SetSetting(ctx, settingDiagnose, string(raw))
+
 	// The alert list carries the diagnosis.
 	var view alertsView
 	resp := a.get(t, "/api/alerts")

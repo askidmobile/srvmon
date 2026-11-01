@@ -121,7 +121,8 @@ func (s *Server) onAlertFired(a store.Alert) {
 
 // queueDiagnosis checks the limits and queues a diagnosis. Automatic ones
 // that the settings do not want return errDiagOff without leaving a trace;
-// those over a limit leave a skipped row, so the alert shows why.
+// those over a limit leave a skipped row, so the alert shows why, unless
+// the alert already has a diagnosis (a refused rerun keeps it).
 func (s *Server) queueDiagnosis(ctx context.Context, a store.Alert, trigger string) (store.Diagnosis, error) {
 	if s.ai == nil {
 		return store.Diagnosis{}, errDiagOff
@@ -140,7 +141,9 @@ func (s *Server) queueDiagnosis(ctx context.Context, a store.Alert, trigger stri
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	now := s.now().UTC()
-	if prev, err := s.store.GetDiagnosis(ctx, a.ID); err == nil && (prev.State == store.DiagQueued || prev.State == store.DiagRunning) {
+	prev, err := s.store.GetDiagnosis(ctx, a.ID)
+	hasPrev := err == nil && prev.State != store.DiagSkipped
+	if err == nil && (prev.State == store.DiagQueued || prev.State == store.DiagRunning) {
 		return prev, errDiagRunning
 	}
 	if auto {
@@ -155,8 +158,10 @@ func (s *Server) queueDiagnosis(ctx context.Context, a store.Alert, trigger stri
 	diag := store.Diagnosis{AlertID: a.ID, State: store.DiagQueued, Trigger: trigger, StartedAt: now}
 	skip := func(why string) (store.Diagnosis, error) {
 		diag.State, diag.Text, diag.FinishedAt = store.DiagSkipped, why, &now
-		if err := s.store.PutDiagnosis(ctx, diag); err != nil {
-			return diag, err
+		if !hasPrev {
+			if err := s.store.PutDiagnosis(ctx, diag); err != nil {
+				return diag, err
+			}
 		}
 		return diag, errDiagLimit
 	}
@@ -173,16 +178,18 @@ func (s *Server) queueDiagnosis(ctx context.Context, a store.Alert, trigger stri
 		return skip(i18n.T("skipped: the limit of %d diagnoses per hour is reached", set.PerHour))
 	case day >= set.PerDay:
 		return skip(i18n.T("skipped: the limit of %d diagnoses per day is reached", set.PerDay))
+	case len(d.queue) >= cap(d.queue):
+		// Only queueDiagnosis sends, under d.mu: the send below cannot block.
+		return skip(i18n.T("skipped: too many diagnoses at once"))
+	}
+	if err := s.store.RecordDiagnosisRun(ctx, a, trigger, now); err != nil {
+		return diag, err
 	}
 	if err := s.store.PutDiagnosis(ctx, diag); err != nil {
 		return diag, err
 	}
-	select {
-	case d.queue <- diagJob{alert: a, model: set.Model}:
-		return diag, nil
-	default:
-		return skip(i18n.T("skipped: too many diagnoses at once"))
-	}
+	d.queue <- diagJob{alert: a, model: set.Model}
+	return diag, nil
 }
 
 // runDiagnoses works the queue until ctx ends.

@@ -22,7 +22,19 @@ const migrationDiagnoses = `CREATE TABLE alert_diagnoses (
 		started_at  INTEGER NOT NULL,
 		finished_at INTEGER
 	);
-	CREATE INDEX alert_diagnoses_started ON alert_diagnoses(started_at);`
+	CREATE INDEX alert_diagnoses_started ON alert_diagnoses(started_at);
+	-- Every run started, kept apart from the shown result: a rerun replaces
+	-- the diagnosis of an alert but must not erase its cost from the limits.
+	CREATE TABLE diagnosis_runs (
+		id         INTEGER PRIMARY KEY,
+		alert_id   INTEGER NOT NULL,
+		rule_id    INTEGER NOT NULL,
+		server_id  INTEGER NOT NULL,
+		subject    TEXT NOT NULL,
+		trigger    TEXT NOT NULL,
+		started_at INTEGER NOT NULL
+	);
+	CREATE INDEX diagnosis_runs_started ON diagnosis_runs(started_at);`
 
 // Diagnosis states.
 const (
@@ -132,12 +144,17 @@ func (s *Store) AttachDiagnoses(ctx context.Context, lists ...[]Alert) error {
 	return nil
 }
 
-// CountDiagnosesSince counts diagnoses started at or after t that were not
-// skipped (those cost nothing).
+// RecordDiagnosisRun counts a started diagnosis run towards the limits.
+func (s *Store) RecordDiagnosisRun(ctx context.Context, a Alert, trigger string, at time.Time) error {
+	_, err := s.db.ExecContext(ctx, `INSERT INTO diagnosis_runs (alert_id, rule_id, server_id, subject, trigger, started_at)
+		VALUES (?, ?, ?, ?, ?, ?)`, a.ID, a.RuleID, a.ServerID, a.Subject, trigger, at.Unix())
+	return err
+}
+
+// CountDiagnosesSince counts diagnosis runs started at or after t.
 func (s *Store) CountDiagnosesSince(ctx context.Context, t time.Time) (int, error) {
 	var n int
-	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM alert_diagnoses WHERE started_at >= ? AND state != 'skipped'`,
-		t.Unix()).Scan(&n)
+	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM diagnosis_runs WHERE started_at >= ?`, t.Unix()).Scan(&n)
 	return n, err
 }
 
@@ -145,8 +162,8 @@ func (s *Store) CountDiagnosesSince(ctx context.Context, t time.Time) (int, erro
 // diagnosed automatically (zero if never).
 func (s *Store) LastAutoDiagnosis(ctx context.Context, k SilenceKey) (time.Time, error) {
 	var at sql.NullInt64
-	err := s.db.QueryRowContext(ctx, `SELECT MAX(d.started_at) FROM alert_diagnoses d JOIN alerts a ON a.id = d.alert_id
-		WHERE a.rule_id = ? AND a.server_id = ? AND a.subject = ? AND d.trigger = 'auto' AND d.state != 'skipped'`,
+	err := s.db.QueryRowContext(ctx, `SELECT MAX(started_at) FROM diagnosis_runs
+		WHERE rule_id = ? AND server_id = ? AND subject = ? AND trigger = 'auto'`,
 		k.RuleID, k.ServerID, k.Subject).Scan(&at)
 	if err != nil || !at.Valid {
 		return time.Time{}, err
