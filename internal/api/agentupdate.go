@@ -109,8 +109,10 @@ func (s *Server) agentVersionKnown() bool { return s.version != "" && s.version 
 // agentOutdated reports whether an agent reporting v differs from the panel.
 func (s *Server) agentOutdated(v string) bool { return s.agentVersionKnown() && v != s.version }
 
-// decorateAgent fills the agent version fields of a server view.
+// decorateAgent fills the agent version fields and disk forecasts of a
+// server view.
 func (s *Server) decorateAgent(v *serverView) {
+	v.DiskFull, _ = s.forecasts.Server(v.Name)
 	if v.Snapshot != nil && s.agentOutdated(v.Snapshot.Report.AgentVersion) {
 		v.AgentOutdated = true
 		v.AgentLatest = s.version
@@ -135,14 +137,15 @@ func (s *Server) maybeAutoUpdate(id int64, agentVersion string) {
 	}
 	u.mu.Unlock()
 	if !skip {
-		go s.updateAgent(id, "", true)
+		go s.updateAgent(id, "", true, nil)
 	}
 }
 
 // updateAgent replaces the agent of one server. It returns without a trace
 // when the server has no stored SSH key (e.g. the panel's own host, whose
-// agent is updated by the deploy).
-func (s *Server) updateAgent(id int64, ip string, auto bool) {
+// agent is updated by the deploy). smart switches S.M.A.R.T. on or off; nil
+// keeps the agent's current setting.
+func (s *Server) updateAgent(id int64, ip string, auto bool, smart *bool) {
 	access, err := s.store.ServerSSH(context.Background(), id)
 	if err != nil {
 		if !errors.Is(err, store.ErrNotFound) {
@@ -174,10 +177,16 @@ func (s *Server) updateAgent(id int64, ip string, auto bool) {
 	err = sshgw.AgentUpdate(ctx, client, sshgw.AgentInstall{
 		Image: image, URL: s.cfg.PublicOrigin,
 		RegistryUser: s.cfg.AgentRegistryUser, RegistryToken: s.cfg.AgentRegistryToken,
+		Smart: smart,
 	})
 	event := "agent_update"
-	if auto {
+	switch {
+	case auto:
 		event = "agent_autoupdate"
+	case smart != nil && *smart:
+		event = "agent_smart_on"
+	case smart != nil:
+		event = "agent_smart_off"
 	}
 	_ = s.store.Audit(context.Background(), ip, event, access.Name+" "+image)
 	if errors.Is(err, sshgw.ErrSwapInterrupted) {
@@ -276,6 +285,23 @@ func short(v string) string {
 
 // handleAgentUpdate starts the agent update of one server.
 func (s *Server) handleAgentUpdate(w http.ResponseWriter, r *http.Request) {
+	s.startAgentUpdate(w, r, nil)
+}
+
+// handleAgentSmart reinstalls the agent of one server with S.M.A.R.T. on
+// or off ({"enabled": bool}).
+func (s *Server) handleAgentSmart(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Enabled *bool `json:"enabled"`
+	}
+	if err := readJSON(r, &req); err != nil || req.Enabled == nil {
+		writeError(w, http.StatusBadRequest, "bad_request")
+		return
+	}
+	s.startAgentUpdate(w, r, req.Enabled)
+}
+
+func (s *Server) startAgentUpdate(w http.ResponseWriter, r *http.Request, smart *bool) {
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil || id <= 0 {
 		writeError(w, http.StatusBadRequest, "bad_id")
@@ -296,7 +322,7 @@ func (s *Server) handleAgentUpdate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, "onboarding")
 		return
 	}
-	go s.updateAgent(id, s.clientIP(r), false)
+	go s.updateAgent(id, s.clientIP(r), false, smart)
 	writeJSON(w, http.StatusAccepted, map[string]bool{"started": true})
 }
 
@@ -317,7 +343,7 @@ func (s *Server) handleAgentUpdateAll(w http.ResponseWriter, r *http.Request) {
 		if u, ok := s.updates.get(srv.ID); ok && u.State == "running" {
 			continue
 		}
-		go s.updateAgent(srv.ID, ip, false)
+		go s.updateAgent(srv.ID, ip, false, nil)
 		n++
 	}
 	writeJSON(w, http.StatusAccepted, map[string]int{"started": n})

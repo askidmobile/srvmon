@@ -45,6 +45,7 @@ type Server struct {
 	vm        *metrics.Writer
 	vmRead    *metrics.Reader
 	latest    *metrics.Latest
+	forecasts *metrics.Forecasts
 	web       fs.FS
 	version   string
 	secrets   *secret.Box
@@ -114,6 +115,7 @@ func New(o Options) *Server {
 		vm:        o.VM,
 		vmRead:    o.VMRead,
 		latest:    metrics.NewLatest(),
+		forecasts: metrics.NewForecasts(),
 		web:       o.Web,
 		version:   o.Version,
 		secrets:   o.Secrets,
@@ -158,6 +160,7 @@ func New(o Options) *Server {
 			srv.notify = hub.SendText
 		}
 	}
+	srv.alerts.SetForecasts(srv.forecasts)
 	bot, err := telegram.New(context.Background(), telegram.Options{
 		Store: o.Store, Secrets: o.Secrets, Engine: srv.alerts, Latest: srv.latest, Log: o.Log, API: o.TelegramAPI,
 	})
@@ -209,6 +212,7 @@ func (s *Server) Start(ctx context.Context, fail2banEvents, hostName string) {
 	if s.hub != nil {
 		go s.hub.Run(ctx)
 	}
+	go metrics.RunForecasts(ctx, s.vmRead, s.forecasts, s.log)
 	if s.bot != nil {
 		go s.bot.Run(ctx)
 	}
@@ -245,7 +249,9 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/servers/{id}", s.requireSession(http.HandlerFunc(s.handleServer)))
 	mux.Handle("PATCH /api/servers/{id}", s.requireSession(http.HandlerFunc(s.handleServerCard)))
 	mux.Handle("GET /api/servers/{id}/history", s.requireSession(http.HandlerFunc(s.handleHistory)))
+	mux.Handle("GET /api/servers/{id}/containers/{name}/history", s.requireSession(http.HandlerFunc(s.handleContainerHistory)))
 	mux.Handle("POST /api/servers/{id}/agent/update", s.requireSession(http.HandlerFunc(s.handleAgentUpdate)))
+	mux.Handle("POST /api/servers/{id}/agent/smart", s.requireSession(http.HandlerFunc(s.handleAgentSmart)))
 	mux.Handle("POST /api/servers/agents/update", s.requireSession(http.HandlerFunc(s.handleAgentUpdateAll)))
 	mux.Handle("GET /api/servers/{id}/sudo", s.requireSession(http.HandlerFunc(s.handleSudo)))
 	mux.Handle("PUT /api/servers/{id}/sudo", s.requireSession(http.HandlerFunc(s.handleSetSudo)))

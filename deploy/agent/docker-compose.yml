@@ -43,6 +43,11 @@ services:
       - /host/run:ro,size=64k
     depends_on:
       - dockerproxy
+    # Optional S.M.A.R.T. (disk health every 30 min): uncomment. The agent
+    # then gets raw read access to SATA (major 8) and NVMe (259) disks.
+    # environment: SRVMON_SMART: "1"   (add to the environment above)
+    # cap_add: [SYS_RAWIO, SYS_ADMIN]
+    # device_cgroup_rules: ["b 8:* r", "b 259:* r"]
 
 volumes:
   dockerproxy:

@@ -1,0 +1,17 @@
+# S.M.A.R.T. for the monitoring host's own agent. remote-deploy.sh adds this
+# file (COMPOSE_FILE) when .env has SRVMON_SMART=1 (GitHub variable
+# SRVMON_SMART). The agent then reads disk health every 30 minutes, which
+# needs raw access to the disks:
+#   SYS_RAWIO  ATA commands through SG_IO (SATA disks)
+#   SYS_ADMIN  NVMe admin commands (health log)
+#   read-only access to SCSI/SATA (major 8) and NVMe (259) block devices
+services:
+  agent:
+    environment:
+      SRVMON_SMART: "1"
+    cap_add:
+      - SYS_RAWIO
+      - SYS_ADMIN
+    device_cgroup_rules:
+      - "b 8:* r"
+      - "b 259:* r"

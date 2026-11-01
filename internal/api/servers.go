@@ -78,6 +78,34 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, metrics.BuildHistory(rng, end, series, mem))
 }
 
+// handleContainerHistory returns the CPU and memory graphs of one container.
+func (s *Server) handleContainerHistory(w http.ResponseWriter, r *http.Request) {
+	srv, ok := s.serverFromPath(w, r)
+	if !ok {
+		return
+	}
+	name := r.PathValue("name")
+	if name == "" || len(name) > 255 {
+		writeError(w, http.StatusBadRequest, "bad_name")
+		return
+	}
+	rng := r.URL.Query().Get("range")
+	if rng == "" {
+		rng = "24h"
+	}
+	if _, ok := metrics.Ranges[rng]; !ok {
+		writeError(w, http.StatusBadRequest, "bad_range")
+		return
+	}
+	h, err := s.vmRead.ContainerSeries(r.Context(), srv.Name, name, rng, s.now())
+	if err != nil {
+		s.log.Warn("victoriametrics query", "server", srv.Name, "container", name, "err", err)
+		writeError(w, http.StatusBadGateway, "storage_unavailable")
+		return
+	}
+	writeJSON(w, http.StatusOK, h)
+}
+
 var datePattern = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
 
 func (s *Server) handleServerCard(w http.ResponseWriter, r *http.Request) {

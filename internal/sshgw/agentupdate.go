@@ -92,15 +92,18 @@ $D start srvmon-agent >/dev/null
 func agentUpdateScript(a AgentInstall) string {
 	var b strings.Builder
 	b.WriteString(dockerAccess)
-	fmt.Fprintf(&b, "IMG=%s\nDEFURL=%s\nRU=%s\nRT=%s\n",
-		shq(a.Image), shq(a.URL), shq(a.RegistryUser), shq(a.RegistryToken))
+	fmt.Fprintf(&b, "IMG=%s\nDEFURL=%s\nRU=%s\nRT=%s\nSM=%s\n",
+		shq(a.Image), shq(a.URL), shq(a.RegistryUser), shq(a.RegistryToken), smartWanted(a.Smart))
 	b.WriteString(`$D inspect srvmon-agent >/dev/null 2>&1 || { echo srvmon:no-agent >&2; exit 3; }
 ENVS=$($D inspect -f '{{range .Config.Env}}{{println .}}{{end}}' srvmon-agent)
 printf '%s\n' "$ENVS" | grep -qx 'SRVMON_TOKEN_FILE=/etc/srvmon/agent.token' || {
   echo srvmon:not-panel >&2; exit 3; }
 URL=$(printf '%s\n' "$ENVS" | sed -n 's/^SRVMON_URL=//p' | head -n 1)
 [ -n "$URL" ] || URL=$DEFURL
-REG=${IMG%%/*}
+if [ "$SM" = keep ]; then
+  if printf '%s\n' "$ENVS" | grep -qx 'SRVMON_SMART=1'; then SM=1; else SM=0; fi
+fi
+` + smartScript + `REG=${IMG%%/*}
 if [ -n "$RU" ]; then printf '%s' "$RT" | $D login "$REG" -u "$RU" --password-stdin >/dev/null; fi
 pulled=0
 $D pull -q "$IMG" >/dev/null 2>&1 && pulled=1

@@ -223,6 +223,8 @@ func readMilliC(p string) (float64, bool) {
 type ContainerUsage struct {
 	CPUPercent float64
 	MemBytes   uint64
+	// noCPU: only one cgroup sample so far, the CPU rate is not known yet.
+	noCPU bool
 }
 
 type procSample struct {

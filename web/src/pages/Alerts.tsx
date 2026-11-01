@@ -39,6 +39,13 @@ const KINDS: Record<
   cpu: { name: "cpu >", label: (v) => `cpu > ${v}%`, unit: "%", dur: "for" },
   mem: { name: "mem >", label: (v) => `mem > ${v}%`, unit: "%", dur: "for" },
   disk: { name: "disk >", label: (v) => `disk > ${v}%`, unit: "%", dur: "for" },
+  disk_fill: {
+    name: "disk full in <",
+    label: (v) => t("disk full in < {n} h", { n: v }),
+    unit: "hours",
+    dur: null,
+  },
+  smart: { name: "disk S.M.A.R.T. problem", label: () => t("disk S.M.A.R.T. problem"), dur: null },
   container_down: { name: "container down / unhealthy", label: () => t("container down / unhealthy"), dur: "for" },
   container_restarts: {
     name: "container restarts >",
@@ -63,6 +70,8 @@ const NEW_DEFAULTS: Record<string, Pick<Rule, "threshold" | "duration_sec">> = {
   cpu: { threshold: 95, duration_sec: 600 },
   mem: { threshold: 90, duration_sec: 300 },
   disk: { threshold: 95, duration_sec: 0 },
+  disk_fill: { threshold: 24, duration_sec: 0 },
+  smart: { threshold: 0, duration_sec: 0 },
   container_down: { threshold: 0, duration_sec: 300 },
   container_restarts: { threshold: 5, duration_sec: 3600 },
   payment_due: { threshold: 7, duration_sec: 0 },

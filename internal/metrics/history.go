@@ -137,6 +137,49 @@ func (r *Reader) ServerSeries(ctx context.Context, server, rangeName string, end
 	return out, nil
 }
 
+// ContainerHistory is the CPU (percent of one core) and memory (bytes) of
+// one container over a window, HistoryPoints buckets each.
+type ContainerHistory struct {
+	Range     string     `json:"range"`
+	Container string     `json:"container"`
+	Start     time.Time  `json:"start"`
+	StepSec   float64    `json:"step_sec"`
+	CPU       []*float64 `json:"cpu"`
+	Mem       []*float64 `json:"mem"`
+}
+
+// ContainerSeries loads the CPU and memory history of one container. A nil
+// reader (no VictoriaMetrics) gives empty graphs.
+func (r *Reader) ContainerSeries(ctx context.Context, server, container, rangeName string, end time.Time) (ContainerHistory, error) {
+	span := Ranges[rangeName]
+	step := span / HistoryPoints
+	start := end.Add(-span)
+	out := ContainerHistory{Range: rangeName, Container: container, Start: start, StepSec: step.Seconds()}
+	var cpu, mem []sample
+	if r != nil {
+		// Average over each bucket, so short spikes between steps count.
+		win := int(max(step, 15*time.Second).Seconds())
+		sel := fmt.Sprintf(`{server="%s",container="%s"}`, escape(server), escape(container))
+		var err error
+		if cpu, err = r.queryRange(ctx, fmt.Sprintf("avg_over_time(srvmon_container_cpu_percent%s[%ds])", sel, win), start, end, step); err != nil {
+			return out, err
+		}
+		if mem, err = r.queryRange(ctx, fmt.Sprintf("avg_over_time(srvmon_container_mem_bytes%s[%ds])", sel, win), start, end, step); err != nil {
+			return out, err
+		}
+	}
+	// query_range stamps a bucket with its end; shift to the start.
+	shift := func(ss []sample) []sample {
+		for i := range ss {
+			ss[i].t = ss[i].t.Add(-step)
+		}
+		return ss
+	}
+	out.CPU = buckets(start, step, HistoryPoints, shift(cpu))
+	out.Mem = buckets(start, step, HistoryPoints, shift(mem))
+	return out, nil
+}
+
 func (r *Reader) queryRange(ctx context.Context, q string, start, end time.Time, step time.Duration) ([]sample, error) {
 	v := url.Values{}
 	v.Set("query", q)

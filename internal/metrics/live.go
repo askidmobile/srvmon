@@ -41,6 +41,8 @@ type serverState struct {
 	detail    *protocol.Detail
 	detailAt  time.Time
 	inventory *protocol.Inventory
+	smart     []protocol.DiskHealth
+	smartAt   time.Time
 	logs      []protocol.LogLine // oldest first
 	logKeys   map[logKey]struct{}
 	ring      []Point
@@ -97,10 +99,13 @@ func (l *Latest) Put(serverID int64, reports ...protocol.Report) {
 		if r.Inventory != nil {
 			st.inventory = r.Inventory
 		}
+		if len(r.Smart) > 0 {
+			st.smart, st.smartAt = r.Smart, r.Timestamp
+		}
 		st.addPoint(r)
 	}
 	last := reports[len(reports)-1]
-	last.Detail, last.Inventory = nil, nil
+	last.Detail, last.Inventory, last.Smart = nil, nil, nil
 	st.snap = Snapshot{Received: now, Report: last}
 	st.hasSnap = true
 }
@@ -177,6 +182,9 @@ type Details struct {
 	DetailAt  *time.Time          `json:"detail_at,omitempty"`
 	Inventory *protocol.Inventory `json:"inventory,omitempty"`
 	Logs      []protocol.LogLine  `json:"logs"` // newest first
+	// Smart is the last S.M.A.R.T. read (agents with it enabled only).
+	Smart   []protocol.DiskHealth `json:"smart,omitempty"`
+	SmartAt *time.Time            `json:"smart_at,omitempty"`
 }
 
 // Details returns detail, inventory and the newest logs (up to limit).
@@ -189,6 +197,11 @@ func (l *Latest) Details(serverID int64, limit int) Details {
 		return out
 	}
 	out.Detail, out.Inventory = st.detail, st.inventory
+	if len(st.smart) > 0 {
+		out.Smart = st.smart
+		t := st.smartAt
+		out.SmartAt = &t
+	}
 	if st.detail != nil {
 		t := st.detailAt
 		out.DetailAt = &t
@@ -197,6 +210,30 @@ func (l *Latest) Details(serverID int64, limit int) Details {
 		out.Logs = append(out.Logs, st.logs[i])
 	}
 	return out
+}
+
+// Smart returns the last S.M.A.R.T. read of a server and when it was taken.
+func (l *Latest) Smart(serverID int64) ([]protocol.DiskHealth, time.Time) {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	st, ok := l.data[serverID]
+	if !ok {
+		return nil, time.Time{}
+	}
+	return st.smart, st.smartAt
+}
+
+// smartStale: older S.M.A.R.T. data is asked for again (the agent reads
+// every 30 minutes).
+const smartStale = time.Hour
+
+// WantsSmart reports whether the panel has no recent S.M.A.R.T. data of a
+// server; the ingest handler then asks the agent to read its disks.
+func (l *Latest) WantsSmart(serverID int64) bool {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	st, ok := l.data[serverID]
+	return !ok || st.smartAt.IsZero() || l.now().Sub(st.smartAt) > smartStale
 }
 
 // Points returns the in-memory graph points newer than since.
