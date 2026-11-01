@@ -10,7 +10,7 @@ import { cn } from "@/lib/utils";
 const nav: { key: string; label: string; to?: string; match: Route["name"][] }[] = [
   { key: "1", label: "overview", to: href.overview(), match: ["overview"] },
   { key: "2", label: "servers", match: ["server", "add"] },
-  { key: "3", label: "terminal", to: href.terminal(), match: ["terminal"] },
+  { key: "3", label: "terminal", to: href.terminal(), match: ["terminal", "recordings"] },
   { key: "4", label: "agent", to: href.agent(), match: ["agent"] },
   { key: "5", label: "alerts", to: href.alerts(), match: ["alerts"] },
   { key: "6", label: "settings", to: href.settings(), match: ["settings"] },

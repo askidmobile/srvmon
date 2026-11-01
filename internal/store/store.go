@@ -101,6 +101,8 @@ var migrations = []string{
 	migrationBackupRule,
 	// Disk fill forecast and S.M.A.R.T. alert rules.
 	migrationDiskRules,
+	// Terminal session recordings (recordings.go).
+	migrationRecordings,
 }
 
 func (s *Store) migrate(ctx context.Context) error {

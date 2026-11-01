@@ -52,6 +52,7 @@ type Server struct {
 	jobs      *jobs
 	updates   *agentUpdates
 	setupKeys *setupKeys
+	files     *sftpPool
 	csp       string
 	alerts    *alerts.Engine
 	bot       *telegram.Bot      // nil when its settings cannot be loaded
@@ -138,6 +139,7 @@ func New(o Options) *Server {
 	if v, err := o.Store.GetSetting(context.Background(), i18n.SettingKey); err == nil {
 		i18n.Set(v)
 	}
+	srv.files = newSFTPPool(srv.dialSFTP)
 	srv.alerts = alerts.New(o.Store, srv.latest, o.Log)
 	srv.alerts.OnFire(srv.onAlertFired)
 	if o.Secrets != nil {
@@ -213,6 +215,7 @@ func (s *Server) Start(ctx context.Context, fail2banEvents, hostName string) {
 		go s.hub.Run(ctx)
 	}
 	go metrics.RunForecasts(ctx, s.vmRead, s.forecasts, s.log)
+	go s.runRecordingPurge(ctx)
 	if s.bot != nil {
 		go s.bot.Run(ctx)
 	}
@@ -285,6 +288,8 @@ func (s *Server) Handler() http.Handler {
 	s.mcpRoutes(mux)
 	s.backupRoutes(mux)
 	s.accessRoutes(mux)
+	s.recordingRoutes(mux)
+	s.fileRoutes(mux)
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "not_found")
 	})
