@@ -119,6 +119,7 @@ export interface AgentAction {
   decided_by?: string;
   exit_code?: number;
   output?: string;
+  source?: string; // "mcp:<token name>" for a command from an MCP client
 }
 
 export interface AgentTask {
@@ -162,7 +163,18 @@ async function req<T>(method: string, path: string, body?: unknown): Promise<T> 
   return data as T;
 }
 
+// Automatic AI diagnosis of alerts.
+export interface DiagnoseSettings {
+  enabled: boolean;
+  warn: boolean; // warnings too, not only critical alerts
+  per_hour: number;
+  per_day: number;
+  model: string; // "" = the default model
+}
+
 export const agentApi = {
+  diagnoseSettings: () => req<DiagnoseSettings>("GET", "/api/agent/diagnose"),
+  saveDiagnoseSettings: (d: DiagnoseSettings) => req<DiagnoseSettings>("PUT", "/api/agent/diagnose", d),
   status: () => req<AgentStatus>("GET", "/api/agent/status"),
   chats: () => req<AgentChat[]>("GET", "/api/agent/chats"),
   newChat: (serverId?: number) => req<AgentChat>("POST", "/api/agent/chats", serverId ? { server_id: serverId } : {}),

@@ -1,5 +1,7 @@
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { McpPanel } from "@/components/McpPanel";
+import { BackupPanel, EmergencyPanel } from "@/components/Recovery";
 import { Hotkey, Shell } from "@/components/Shell";
 import { Button } from "@/components/ui/button";
 import { Panel } from "@/components/ui/panel";
@@ -10,6 +12,7 @@ import {
   type AISettings,
   type AISettingsInput,
   type AITest,
+  type DiagnoseSettings,
 } from "@/lib/agent";
 import { api as panelApi, ApiError } from "@/lib/api";
 import { LANGS, type Lang, setLang, t, tn, useLang } from "@/lib/i18n";
@@ -522,6 +525,86 @@ function AIPanel() {
   );
 }
 
+// Automatic AI diagnosis of alerts: limits keep the model bill bounded.
+function DiagnosePanel() {
+  const [d, setD] = useState<DiagnoseSettings | null>(null);
+  const [models, setModels] = useState<string[]>([]);
+  const [hour, setHour] = useState("");
+  const [day, setDay] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  useEffect(() => {
+    agentApi
+      .diagnoseSettings()
+      .then((v) => {
+        setD(v);
+        setHour(String(v.per_hour));
+        setDay(String(v.per_day));
+      })
+      .catch((e) => setMsg({ ok: false, text: errText(e, t("could not load")) }));
+    agentApi
+      .status()
+      .then((st) => setModels(st.models ?? []))
+      .catch(() => undefined);
+  }, []);
+  if (!d) return msg ? <Panel title={t("AI diagnosis of alerts")}><div className="text-crit">{msg.text}</div></Panel> : null;
+  const save = async () => {
+    setBusy(true);
+    setMsg(null);
+    try {
+      const v = await agentApi.saveDiagnoseSettings({ ...d, per_hour: Number(hour), per_day: Number(day) });
+      setD(v);
+      setMsg({ ok: true, text: t("saved") });
+    } catch (e) {
+      setMsg({ ok: false, text: e instanceof ApiError && e.message !== e.code ? e.message : errText(e, t("could not save")) });
+    }
+    setBusy(false);
+  };
+  const check = (on: boolean, label: string, set: (v: boolean) => void) => (
+    <button type="button" className="flex items-center gap-2 text-left" onClick={() => set(!on)} aria-pressed={on}>
+      <span className={cn("whitespace-pre", on ? "text-primary" : "text-muted-foreground")}>{on ? "[x]" : "[ ]"}</span>
+      <span>{label}</span>
+    </button>
+  );
+  return (
+    <Panel title={t("AI diagnosis of alerts")}>
+      <div className="flex flex-col gap-3">
+        <div className="text-xs text-muted-foreground">
+          {t(
+            "When an alert fires, the agent collects logs with read-only commands and sends the likely cause as a reply to the Telegram alert. Commands that change a server are refused. The same alert on the same server is diagnosed at most once in 6 hours.",
+          )}
+        </div>
+        {check(d.enabled, t("diagnose critical alerts automatically"), (v) => setD({ ...d, enabled: v }))}
+        {check(d.warn, t("warnings too"), (v) => setD({ ...d, warn: v }))}
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <Field label={t("per hour, at most")} htmlFor="diag-hour">
+            <input id="diag-hour" className={fieldCls} inputMode="numeric" value={hour} onChange={(e) => setHour(e.target.value)} />
+          </Field>
+          <Field label={t("per day, at most")} htmlFor="diag-day">
+            <input id="diag-day" className={fieldCls} inputMode="numeric" value={day} onChange={(e) => setDay(e.target.value)} />
+          </Field>
+          <Field label={t("model")} htmlFor="diag-model" hint={t("a cheaper model is enough")}>
+            <select id="diag-model" className={fieldCls} value={d.model} onChange={(e) => setD({ ...d, model: e.target.value })}>
+              <option value="">{t("default")}</option>
+              {[...new Set([...models, ...(d.model ? [d.model] : [])])].map((m) => (
+                <option key={m} value={m}>
+                  {m}
+                </option>
+              ))}
+            </select>
+          </Field>
+        </div>
+        <div className="flex items-center gap-3">
+          <Button disabled={busy} onClick={() => void save()}>
+            {t("save")}
+          </Button>
+          {msg && <span className={cn("text-sm", msg.ok ? "text-primary" : "text-crit")}>{msg.text}</span>}
+        </div>
+      </div>
+    </Panel>
+  );
+}
+
 export function SettingsPage({ route, version, onLogout }: { route: Route; version: string; onLogout: () => void }) {
   useEffect(() => {
     // A dead session shows up as 401 on the first request.
@@ -542,6 +625,10 @@ export function SettingsPage({ route, version, onLogout }: { route: Route; versi
       <div className="flex max-w-5xl flex-col gap-5">
         <LanguagePanel />
         <AIPanel />
+        <DiagnosePanel />
+        <McpPanel />
+        <BackupPanel />
+        <EmergencyPanel />
       </div>
     </Shell>
   );

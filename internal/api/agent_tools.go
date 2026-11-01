@@ -126,15 +126,23 @@ func (s *Server) toolView(srv store.Server) toolServerView {
 	return v
 }
 
-func (s *Server) toolServers(w http.ResponseWriter, r *http.Request) {
-	list, err := s.store.ListServers(r.Context())
+func (s *Server) toolServerList(ctx context.Context) ([]toolServerView, error) {
+	list, err := s.store.ListServers(ctx)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal")
-		return
+		return nil, err
 	}
 	out := make([]toolServerView, 0, len(list))
 	for _, srv := range list {
 		out = append(out, s.toolView(srv))
+	}
+	return out, nil
+}
+
+func (s *Server) toolServers(w http.ResponseWriter, r *http.Request) {
+	out, err := s.toolServerList(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal")
+		return
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -156,6 +164,11 @@ func (s *Server) toolServer(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal")
 		return
 	}
+	writeJSON(w, http.StatusOK, s.toolServerDetail(srv))
+}
+
+// toolServerDetail is what the agent and MCP clients see of one server.
+func (s *Server) toolServerDetail(srv store.Server) map[string]any {
 	out := map[string]any{"server": s.toolView(srv)}
 	if snap, ok := s.latest.Get(srv.ID); ok {
 		h := snap.Report.Host
@@ -174,7 +187,7 @@ func (s *Server) toolServer(w http.ResponseWriter, r *http.Request) {
 	if srv.Provider != "" {
 		out["provider"] = srv.Provider + " " + srv.Plan
 	}
-	writeJSON(w, http.StatusOK, out)
+	return out
 }
 
 type execRequest struct {
@@ -183,10 +196,12 @@ type execRequest struct {
 	Reason  string `json:"reason"`
 	ChatID  int64  `json:"chat_id"`
 	TaskID  int64  `json:"task_id"`
+	// DiagnoseID: a read-only diagnosis of this alert (see diagnose.go).
+	DiagnoseID int64 `json:"diagnose_id"`
 }
 
 type execResult struct {
-	Status   string `json:"status"` // ok | error | rejected | expired
+	Status   string `json:"status"` // ok | error | rejected | expired | refused
 	ReadOnly bool   `json:"read_only"`
 	ExitCode *int   `json:"exit_code,omitempty"`
 	Output   string `json:"output,omitempty"`
@@ -276,8 +291,17 @@ func (s *Server) toolExec(w http.ResponseWriter, r *http.Request) {
 	if req.TaskID > 0 {
 		who = "agent task " + strconv.FormatInt(req.TaskID, 10)
 	}
+	ro, why := aiagent.Classify(req.Command)
+	if req.DiagnoseID > 0 {
+		who = "agent diagnosis " + strconv.FormatInt(req.DiagnoseID, 10)
+		if note := s.diagExecCheck(req.DiagnoseID, ro); note != "" {
+			_ = s.store.Audit(context.Background(), who, "agent_exec_refused", srv.Name+": "+truncate(req.Command, 500))
+			writeJSON(w, http.StatusOK, execResult{Status: "refused", ReadOnly: ro, Note: note})
+			return
+		}
+	}
 
-	if ro, _ := aiagent.Classify(req.Command); ro {
+	if ro {
 		code, out, err := s.runOnServer(r.Context(), access, req.Command, toolReadTimeout)
 		_ = s.store.Audit(context.Background(), who, "agent_exec", srv.Name+": "+truncate(req.Command, 500))
 		res := execResult{Status: "ok", ReadOnly: true, ExitCode: &code, Output: out}
@@ -290,7 +314,6 @@ func (s *Server) toolExec(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, why := aiagent.Classify(req.Command)
 	reason := strings.TrimSpace(req.Reason)
 	if reason == "" {
 		reason = why
@@ -424,13 +447,7 @@ func (s *Server) toolNewTask(w http.ResponseWriter, r *http.Request) {
 	}
 	t, field, err := s.createTask(r.Context(), in, "agent")
 	if field != "" {
-		msg := map[string]string{
-			"name":     "name of 1–64 characters",
-			"prompt":   "a prompt is required, up to 4000 characters",
-			"schedule": "a 5-field cron (UTC, at most every 5 minutes) or @every 15m",
-			"notify":   "notify: empty or telegram",
-			"servers":  "an unknown server in the list",
-		}[field]
+		msg := taskHints[field]
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid", "field": field, "hint": msg})
 		return
 	}

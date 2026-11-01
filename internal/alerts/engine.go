@@ -38,6 +38,9 @@ const (
 type Notification struct {
 	Alert    store.Alert
 	Resolved bool
+	// Diagnosis, when set, is the AI agent's read-only diagnosis of an alert
+	// already notified: a follow-up to that notification.
+	Diagnosis string
 }
 
 // Notifier delivers notifications. Notify must not block; it returns false
@@ -69,6 +72,7 @@ type Engine struct {
 	pending  map[condKey]time.Time
 	started  time.Time
 	notifier Notifier
+	onFire   func(store.Alert)
 
 	restarts *restartTracker
 	lastEval atomic.Int64 // unix nanos of the last successful Evaluate in Run
@@ -90,6 +94,40 @@ func (e *Engine) SetNotifier(n Notifier) {
 	e.mu.Lock()
 	e.notifier = n
 	e.mu.Unlock()
+}
+
+// OnFire sets a hook called for every new firing alert (after its
+// notification was handed over). It runs under the engine lock: it must not
+// block or call back into the engine.
+func (e *Engine) OnFire(f func(store.Alert)) {
+	e.mu.Lock()
+	e.onFire = f
+	e.mu.Unlock()
+}
+
+// NotifyDiagnosis sends the AI diagnosis of an alert where its notification
+// went. Nothing is sent when the alert was not notified (web only, silenced,
+// held back), the silence started meanwhile, or quiet hours hold back a
+// noncritical one.
+func (e *Engine) NotifyDiagnosis(ctx context.Context, alertID int64, text string) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	a, err := e.st.GetAlert(ctx, alertID)
+	if err != nil || !a.Notified || a.Channel != store.ChanTelegram || e.notifier == nil {
+		return false
+	}
+	until, err := e.st.SilencedUntil(ctx, store.SilenceKey{RuleID: a.RuleID, ServerID: a.ServerID, Subject: a.Subject}, e.now())
+	if err != nil || !until.IsZero() {
+		return false
+	}
+	// Quiet hours hold back everything but critical alerts; a diagnosis is
+	// not worth waking up for either (it stays in the panel).
+	if a.Severity != store.SevCrit {
+		if q, err := LoadQuiet(ctx, e.st); err != nil || q.Active(e.now()) {
+			return false
+		}
+	}
+	return e.notifier.Notify(Notification{Alert: a, Diagnosis: text})
 }
 
 // Observe feeds every pushed report to the restart tracker: container
@@ -267,6 +305,9 @@ func (e *Engine) Evaluate(ctx context.Context) error {
 				}
 				e.log.Info("alert firing", "id", a.ID, "kind", a.Kind, "server", a.ServerName, "subject", a.Subject)
 				e.notify(ctx, a, false)
+				if e.onFire != nil {
+					e.onFire(a)
+				}
 			}
 		}
 	}

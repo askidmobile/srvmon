@@ -262,16 +262,19 @@ type AgentAction struct {
 	DecidedBy  string     `json:"decided_by,omitempty"`
 	ExitCode   *int       `json:"exit_code,omitempty"`
 	Output     string     `json:"output,omitempty"`
+	// Source is empty for the built-in agent and "mcp:<token name>" for a
+	// command from an MCP client.
+	Source string `json:"source,omitempty"`
 }
 
-const actionCols = `id, chat_id, task_id, server_id, server_name, command, reason, state, created_at, decided_at, decided_by, exit_code, output`
+const actionCols = `id, chat_id, task_id, server_id, server_name, command, reason, state, created_at, decided_at, decided_by, exit_code, output, source`
 
 func scanAction(row scanner) (AgentAction, error) {
 	var a AgentAction
 	var chat, task, decided, code sql.NullInt64
 	var created int64
 	if err := row.Scan(&a.ID, &chat, &task, &a.ServerID, &a.ServerName, &a.Command, &a.Reason, &a.State,
-		&created, &decided, &a.DecidedBy, &code, &a.Output); err != nil {
+		&created, &decided, &a.DecidedBy, &code, &a.Output, &a.Source); err != nil {
 		return a, err
 	}
 	if chat.Valid {
@@ -295,8 +298,8 @@ func scanAction(row scanner) (AgentAction, error) {
 // CreateAgentAction records a pending command.
 func (s *Store) CreateAgentAction(ctx context.Context, a AgentAction) (AgentAction, error) {
 	res, err := s.db.ExecContext(ctx, `INSERT INTO agent_actions
-		(chat_id, task_id, server_id, server_name, command, reason, state, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		a.ChatID, a.TaskID, a.ServerID, a.ServerName, a.Command, a.Reason, ActionPending, time.Now().Unix())
+		(chat_id, task_id, server_id, server_name, command, reason, state, created_at, source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		a.ChatID, a.TaskID, a.ServerID, a.ServerName, a.Command, a.Reason, ActionPending, time.Now().Unix(), a.Source)
 	if err != nil {
 		return a, err
 	}

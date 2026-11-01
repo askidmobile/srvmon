@@ -22,8 +22,10 @@ The interface is a dark TUI-style dashboard (btop-like) with a green accent. The
 - **Onboarding wizard.** Add a server, verify its SSH host key, log in once with a password or your own key. srvmon creates a `srvmon` user with its own ed25519 key, installs the agent and can disable password auth. The one-time password or key is never stored.
 - **Web terminal.** xterm.js ↔ WebSocket ↔ SSH client inside `srvmon-server` ↔ sshd. Tabs, resize, `docker exec` into a container. The AI agent panel sits next to the terminal (`F9` shows or hides it) and works in the context of that server. Private keys never leave the monitoring server; they are encrypted at rest (XChaCha20-Poly1305).
 - **AI agent.** Built on the [pi](https://pi.dev) SDK, any provider (DeepSeek, Anthropic, OpenAI, OpenRouter, Google, Ollama, any OpenAI- or Anthropic-compatible endpoint). Read-only commands run immediately; anything that changes a server waits for your explicit approval. The policy is enforced by `srvmon-server`, not by the model. Each server has its own chat context, chats keep their history, and the model can be picked per chat. Scheduled tasks (cron) report to Telegram, and you can ask the agent from Telegram with `/ask`.
-- **Alerts and Telegram.** Agent offline, container down/unhealthy, restart loops, CPU, disk, upcoming hosting payments, fail2ban bans, login attempts. Rules are editable (threshold, duration, level, channel: Telegram or panel only). Quiet hours in your time zone (critical alerts still go through), ack and mute, 90-day history. The bot answers `/status`, `/server`, `/alerts`, `/ack`, `/bills`, `/ask`.
+- **MCP server.** Claude Desktop, Cursor and Claude Code connect to `/mcp` with revocable tokens that carry scopes. They get the same tools and the same confirmation of changes in the panel or Telegram.
+- **Alerts and Telegram.** Agent offline, container down/unhealthy, restart loops, CPU, disk, upcoming hosting payments, fail2ban bans, login attempts. Rules are editable (threshold, duration, level, channel: Telegram or panel only). Quiet hours in your time zone (critical alerts still go through), ack and mute, 90-day history, an AI diagnosis attached to critical alerts. The bot answers `/status`, `/server`, `/alerts`, `/ack`, `/bills`, `/ask`.
 - **Panel heartbeat (dead man's switch).** Once a minute the panel checks itself and pings an external URL such as [healthchecks.io](https://healthchecks.io). If the panel dies, the pings stop and that service alerts you by email or its own channels.
+- **Backups and emergency access.** Scheduled encrypted backups of the panel database to any S3-compatible storage (AWS, Yandex Object Storage, R2, B2, MinIO) with retention and a Telegram alert on failure; the master key is exported separately behind a TOTP code. Your own SSH public keys are kept in `authorized_keys` on every server, so losing the panel never locks you out. See [docs/backup.md](docs/backup.md).
 - **Security.** Password (argon2id) + TOTP or backup code, no username. Rate limiting, an audit log and fail2ban jails for the panel and sshd. On servers, only the `srvmon-dockerproxy` container sees the docker socket, and the `srvmon` user gets limited sudo by default (see [Server access](#server-access)).
 
 ## Screenshots
@@ -80,7 +82,7 @@ Open `https://<your domain>`, enter the password, then the TOTP code. The monito
 
 If the host already runs nginx (or another proxy) on 80/443, set `SRVMON_PROXY=external` in `.env`: Caddy is not started, srvmon listens on `127.0.0.1:8088` (`SRVMON_HTTP_BIND`), and you include [deploy/nginx/srvmon.conf](deploy/nginx/srvmon.conf) in your nginx.
 
-Back up the `/data` volume together with `/data/master.key`: without the master key the stored SSH keys cannot be decrypted.
+Backups: set up S3-compatible storage in settings → backup, then export the master key there (or `docker compose exec server /srvmon-server master-key`) and keep it offline. Backups are encrypted with it and never contain it. Restore steps and emergency SSH keys: [docs/backup.md](docs/backup.md).
 
 ## Continuous deployment from your fork
 
@@ -157,10 +159,46 @@ The `srvmon-ai` container (pi SDK, `ai/`) has only srvmon tools: list servers an
 - **Command confirmation.** Read-only commands (`docker ps/logs/inspect`, `df`, `journalctl`, `systemctl status` …) run immediately. Anything that changes a server appears as a "⚠ confirm" card and runs only after you press "✓ run". The decision is made by `srvmon-server` (`internal/aiagent/policy.go`), not by the model. Every command and its result goes into the confirmation log.
 - **Tasks.** A request like "every 15 minutes check container restarts, if more than 2 per hour send to Telegram" becomes a task with cron `*/15 * * * *` (UTC). Tasks are listed in the "tasks" tab; a result with an alarm goes to Telegram.
 - **Telegram.** The bot sends the agent's commands for confirmation with approve and reject buttons, and `/ask <question>` asks the agent straight from Telegram.
+- **Alert diagnosis.** When a critical alert fires, the agent investigates it on its own with read-only commands (container logs, `inspect`, `df`, `journalctl` …) and sends the likely cause, the evidence and a suggested fix as a reply to the Telegram alert; the diagnosis is also shown under the alert in `[5] alerts`, where a "diagnose" button runs it by hand. `srvmon-server` refuses every changing command of a diagnosis without asking (no confirmations), caps it at 12 commands and 5 minutes, runs one at a time, diagnoses the same alert on the same server at most once in 6 hours and keeps hourly and daily limits (4 and 20 by default). Settings → AI diagnosis of alerts: on/off, warnings too, limits and a separate (cheaper) model.
 
 Enable it in the panel: settings → AI agent. Pick a provider (any from the pi catalog or a custom OpenAI/Anthropic-compatible URL), paste an API key (stored encrypted, never returned to the browser), load and select models, then "save and apply". Until something is saved in the panel, `srvmon-ai` uses `SRVMON_AI_PROVIDER`, `SRVMON_AI_MODEL` and `SRVMON_AI_API_KEY` from `.env`.
 
 The agent can list servers and containers, run commands through the SSH gateway and run scheduled tasks. Commands that change a server show up as a confirmation card in the panel and in Telegram and run only after you approve them.
+
+## MCP: Claude Desktop, Cursor, Claude Code
+
+srvmon is also an [MCP](https://modelcontextprotocol.io) server at `https://<your domain>/mcp` (Streamable HTTP). An MCP client gets the same tools and the same confirmation policy as the built-in agent, and the `srvmon-ai` container is not needed for it.
+
+| Tool | Scope | What it does |
+|---|---|---|
+| `list_servers`, `get_server` | `read` | servers, metrics, containers, recent log warnings |
+| `list_alerts`, `list_tasks` | `read` | open alerts, scheduled agent tasks |
+| `run_command` | `exec` | a command over SSH: reads run at once, changes wait for you |
+| `action_status` | `exec` | state and output of a command that waited for confirmation |
+| `create_task`, `delete_task` | `tasks` | scheduled tasks of the built-in agent |
+
+1. Open `[6] settings` → "MCP access", name the token (one per client), pick scopes and an expiry, then press "create token". The token (`smcp_…`) is shown once, together with ready-made configs. Only its hash is stored. Revoke it on the same page.
+2. Connect the client:
+
+```bash
+# Claude Code
+claude mcp add --transport http srvmon https://srvmon.example.com/mcp --header "Authorization: Bearer smcp_…"
+```
+
+```jsonc
+// Cursor: ~/.cursor/mcp.json (or .cursor/mcp.json in a project)
+{ "mcpServers": { "srvmon": { "url": "https://srvmon.example.com/mcp",
+  "headers": { "Authorization": "Bearer smcp_…" } } } }
+```
+
+```jsonc
+// Claude Desktop: Settings → Developer → Edit config (claude_desktop_config.json); needs Node.js
+{ "mcpServers": { "srvmon": { "command": "npx",
+  "args": ["-y", "mcp-remote@latest", "https://srvmon.example.com/mcp", "--header", "Authorization:${SRVMON_MCP_AUTH}"],
+  "env": { "SRVMON_MCP_AUTH": "Bearer smcp_…" } } } }
+```
+
+A command that changes a server shows up as a "⚠ confirm" card in the agent panel and in Telegram, marked "MCP <token name>". MCP clients give up on a tool call after about a minute, so `run_command` waits 40 seconds and then answers `pending` with an `action_id`. The command keeps waiting for your decision for 15 minutes, and the client fetches the result with `action_status`. A wrong token counts towards the same per-IP limit as the login and goes to the fail2ban log.
 
 ## Local development
 

@@ -4,6 +4,8 @@
 //	srvmon-server init                      set the panel password and Google Authenticator
 //	srvmon-server add-server -name shop-db  register a server and print an agent token
 //	srvmon-server healthcheck               exit 0 if /healthz answers (for Docker)
+//	srvmon-server master-key [-import]      print (or import from stdin) the master key
+//	srvmon-server restore -file F | -s3-... restore the database from a backup
 package main
 
 import (
@@ -54,10 +56,14 @@ func main() {
 		err = addServer(args)
 	case "healthcheck":
 		err = healthcheck()
+	case "master-key":
+		err = masterKey(args)
+	case "restore":
+		err = restore(args)
 	case "version":
 		fmt.Println(version)
 	default:
-		err = fmt.Errorf("unknown command %q (serve | init | add-server | healthcheck | version)", cmd)
+		err = fmt.Errorf("unknown command %q (serve | init | add-server | healthcheck | master-key | restore | version)", cmd)
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "srvmon-server:", err)

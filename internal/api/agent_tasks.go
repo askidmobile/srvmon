@@ -22,9 +22,11 @@ const (
 func (s *Server) RunAgentScheduler(ctx context.Context) {
 	_ = s.store.ResetRunningAgentTasks(ctx)
 	_ = s.store.ExpirePendingAgentActions(ctx)
+	_ = s.store.ResetRunningDiagnoses(ctx)
 	if s.ai == nil {
 		return
 	}
+	go s.runDiagnoses(ctx)
 	t := time.NewTicker(taskTick)
 	defer t.Stop()
 	for {
