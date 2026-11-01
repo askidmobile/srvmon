@@ -413,17 +413,12 @@ func (s *Server) handleAlertChat(w http.ResponseWriter, r *http.Request) {
 			serverID = &a.ServerID
 		}
 	}
-	chats, err := s.store.ListAgentChats(ctx, 100)
-	if err != nil {
-		s.internalError(w, "list chats", err)
+	if c, err := s.store.AgentChatByTitlePrefix(ctx, diagChatPrefix(a.ID)); err == nil {
+		writeJSON(w, http.StatusOK, s.chatView(ctx, c))
 		return
-	}
-	prefix := diagChatPrefix(a.ID)
-	for _, c := range chats {
-		if strings.HasPrefix(c.Title, prefix) && ((c.ServerID == nil) == (serverID == nil)) {
-			writeJSON(w, http.StatusOK, s.chatView(ctx, c))
-			return
-		}
+	} else if !errors.Is(err, store.ErrNotFound) {
+		s.internalError(w, "find chat", err)
+		return
 	}
 	c, err := s.store.CreateAgentChat(ctx, serverID, diagChatTitle(a))
 	if err != nil {
@@ -439,17 +434,22 @@ func (s *Server) handleAlertChat(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, s.chatView(ctx, c))
 }
 
-// seededContext returns what the model has to be told before the first
-// question of a chat opened from a diagnosis: the srvmon-ai session of a new
-// chat is empty, while the transcript already shows the agent's diagnosis.
-// Empty for any chat that already had a question.
+// seededContext returns what the model has to be told before a question in
+// a chat opened from a diagnosis: the srvmon-ai session of a new chat is
+// empty, while the transcript already shows the agent's diagnosis. The seed
+// is the assistant text before the first question; it goes along until the
+// model has answered once without an error (a run that never reached
+// srvmon-ai must not lose it). Empty for any other chat.
 func seededContext(msgs []store.AgentMessage) string {
 	var seed []string
+	asked := false
 	for _, m := range msgs {
-		if m.Role == "user" {
-			return ""
-		}
-		if m.Role == "assistant" && strings.TrimSpace(m.Text) != "" {
+		switch {
+		case m.Role == "user":
+			asked = true
+		case m.Role == "assistant" && asked && m.Error == "":
+			return "" // the model has seen it
+		case m.Role == "assistant" && !asked && strings.TrimSpace(m.Text) != "":
 			seed = append(seed, m.Text)
 		}
 	}

@@ -251,3 +251,44 @@ func TestAlertChatContinuesDiagnosis(t *testing.T) {
 		t.Fatalf("%+v", msgs)
 	}
 }
+
+func TestSeededContextSurvivesFailedRun(t *testing.T) {
+	diag := store.AgentMessage{Role: "assistant", Text: "OOM"}
+	q := store.AgentMessage{Role: "user", Text: "?"}
+	if seededContext([]store.AgentMessage{diag}) == "" {
+		t.Fatal("no seed before the first question")
+	}
+	failed := store.AgentMessage{Role: "assistant", Error: "srvmon-ai: connection refused"}
+	if !strings.Contains(seededContext([]store.AgentMessage{diag, q, failed}), "OOM") {
+		t.Fatal("seed lost after a run that never reached the model")
+	}
+	ok := store.AgentMessage{Role: "assistant", Text: "answer"}
+	if seededContext([]store.AgentMessage{diag, q, failed, q, ok}) != "" {
+		t.Fatal("seed resent after the model answered")
+	}
+	if seededContext([]store.AgentMessage{q, ok}) != "" {
+		t.Fatal("seed in an ordinary chat")
+	}
+}
+
+func TestAlertChatReopensPastHistoryPage(t *testing.T) {
+	ai, _ := diagAI(t)
+	a := newAgentEnv(t, ai.URL)
+	ctx := context.Background()
+	al := a.alert(t, store.SevCrit, "pg")
+	if _, err := a.srv.queueDiagnosis(ctx, al, "manual"); err != nil {
+		t.Fatal(err)
+	}
+	a.srv.diagnose(ctx, <-a.srv.diag.queue)
+	var first, again chatView
+	if code := a.postJSON(t, fmt.Sprintf("/api/alerts/%d/chat", al.ID), nil, &first); code != 200 {
+		t.Fatal(code)
+	}
+	for i := 0; i < 105; i++ {
+		c, _ := a.st.CreateAgentChat(ctx, nil, "")
+		_, _ = a.st.AddAgentMessage(ctx, c.ID, store.AgentMessage{Role: "user", Text: "hi"})
+	}
+	if code := a.postJSON(t, fmt.Sprintf("/api/alerts/%d/chat", al.ID), nil, &again); code != 200 || again.ID != first.ID {
+		t.Fatalf("%d: chat %d, want %d", code, again.ID, first.ID)
+	}
+}
