@@ -191,6 +191,10 @@ export const api = {
   saveHeartbeat: (fail_endpoint: boolean, url?: string) =>
     request<HeartbeatStatus>("PUT", "/api/notify/heartbeat", url === undefined ? { fail_endpoint } : { fail_endpoint, url }),
   testHeartbeat: () => request<HeartbeatStatus>("POST", "/api/notify/heartbeat/test"),
+  createChannel: (c: ChannelInput & { url: string }) => request<NotifyChannel>("POST", "/api/notify/channels", c),
+  updateChannel: (id: number, c: ChannelInput) => request<NotifyChannel>("PUT", `/api/notify/channels/${id}`, c),
+  deleteChannel: (id: number) => request<unknown>("DELETE", `/api/notify/channels/${id}`),
+  testChannel: (id: number) => request<unknown>("POST", `/api/notify/channels/${id}/test`),
 };
 
 // --- stage 4: alerts and Telegram ---
@@ -238,6 +242,8 @@ export interface AlertSummary {
   crit: number;
   last24h: number;
   telegram: "ok" | "off" | "error";
+  channels: number; // enabled Shoutrrr channels
+  channels_failing: number;
   latest: Alert[];
 }
 
@@ -279,10 +285,33 @@ export interface HeartbeatStatus {
   problems?: string[];
 }
 
+// A Shoutrrr notification channel; the URL (with its credentials) never
+// comes back from the server.
+export interface NotifyChannel {
+  id: number;
+  name: string;
+  service: string;
+  target: string;
+  min_severity: Severity;
+  enabled: boolean;
+  last_sent?: string;
+  last_error?: string;
+}
+
+export interface ChannelInput {
+  name: string;
+  url?: string; // absent on update: keep the stored one
+  min_severity: Severity;
+  enabled: boolean;
+}
+
 export interface NotifyView {
   telegram: TelegramStatus;
   quiet: Quiet;
   heartbeat?: HeartbeatStatus;
+  channels: NotifyChannel[];
+  services: string[];
+  channels_ok: boolean; // false: no master key to seal channel URLs
 }
 
 // --- server screen (stage 2) ---

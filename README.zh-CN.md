@@ -23,7 +23,8 @@
 - **Web 终端。** xterm.js ↔ WebSocket ↔ `srvmon-server` 内的 SSH 客户端 ↔ sshd。支持多标签、窗口缩放、`docker exec` 进入容器。终端旁边是 AI 代理面板（`F9` 显示或隐藏），在该服务器的上下文中工作。私钥从不离开监控服务器，并以 XChaCha20-Poly1305 加密存储。
 - **AI 代理。** 基于 [pi](https://pi.dev) SDK，支持任意提供商（DeepSeek、Anthropic、OpenAI、OpenRouter、Google、Ollama，以及任何 OpenAI / Anthropic 兼容接口）。只读命令直接执行；任何会修改服务器的命令都必须经你明确批准，策略由 `srvmon-server` 而非模型执行。每台服务器有独立的对话上下文，对话保留历史，每个对话可单独选择模型。定时任务（cron）结果可发送到 Telegram，也可以在 Telegram 中用 `/ask` 向代理提问。
 - **MCP 服务器。** Claude Desktop、Cursor 和 Claude Code 使用带权限、可撤销的令牌连接 `/mcp`，工具相同，变更同样需要在面板或 Telegram 中确认。
-- **告警与 Telegram。** 代理离线、容器停止或不健康、频繁重启、CPU、磁盘、主机续费提醒、fail2ban 封禁、登录尝试。规则可编辑（阈值、持续时间、级别、渠道：Telegram 或仅面板）。按你的时区设置静默时段（严重告警仍会发送），支持确认与临时静音，保留 90 天历史，严重告警附带 AI 诊断。机器人命令：`/status`、`/server`、`/alerts`、`/ack`、`/bills`、`/ask`。
+- **告警与 Telegram。** 代理离线、容器停止或不健康、频繁重启、CPU、磁盘、主机续费提醒、fail2ban 封禁、登录尝试。规则可编辑（阈值、持续时间、级别、渠道：通知或仅面板）。按你的时区设置静默时段（严重告警仍会发送），支持确认与临时静音，保留 90 天历史，严重告警附带 AI 诊断。机器人命令：`/status`、`/server`、`/alerts`、`/ack`、`/bills`、`/ask`。
+- **更多通知通道。** 除 Telegram 外，告警还可以发送到邮件、ntfy、Discord、Gotify、Slack、Matrix、Pushover、Webhook 以及 [Shoutrrr](https://shoutrrr.nickfedor.com/) 支持的其他服务，每个通道可设置最低级别。
 - **面板心跳（dead man's switch）。** 面板每分钟自检一次并 ping 一个外部 URL，例如 [healthchecks.io](https://healthchecks.io)。如果面板宕机，ping 会停止，该服务会通过邮件或其自身渠道提醒您。
 - **备份与应急访问。** 按计划将面板数据库加密备份到任意 S3 兼容存储（AWS、Yandex Object Storage、R2、B2、MinIO），支持保留份数，失败时 Telegram 告警；主密钥需凭 TOTP 验证码单独导出。您自己的 SSH 公钥会保存在每台服务器的 `authorized_keys` 中，面板丢失也不会被锁在服务器外。详见 [docs/backup.md](docs/backup.md)。
 - **安全。** 密码（argon2id）+ TOTP 或备用码，无需用户名。限流、审计日志，以及面板和 sshd 的 fail2ban 规则。在服务器上只有 `srvmon-dockerproxy` 容器能访问 docker socket，`srvmon` 用户默认只有受限 sudo（见[服务器访问权限](#服务器访问权限)）。
@@ -121,8 +122,8 @@ SRVMON_URL=https://mon.example.com SRVMON_TOKEN=a_... docker compose up -d
 `[5] 告警` 页面（`#/alerts`）显示活动告警（可“确认”或“静音 1 小时”）、规则、Telegram 机器人、静默时段和 90 天历史。
 
 - 默认规则：代理静默超过 2 分钟（crit），容器停止或不健康 1 分钟（crit），每小时重启超过 2 次，CPU > 90% 持续 5 分钟，内存 > 95% 持续 5 分钟（默认关闭，仅面板），磁盘 > 85%，3 天内需续费；以及事件：监控服务器上的 fail2ban 封禁、面板密码爆破、面板登录。
-- 每条规则都可以关闭、修改（阈值、持续时间、级别 crit/warn/info）或指定渠道：`tg`（Telegram 和面板）或 `web`（仅面板）。`+ 规则` 可添加新规则。以退出码 0 停止的容器不算告警。
-- 静默时段（例如 `Europe/Moscow` 时区 01:00–07:00）内 Telegram 通知会延后到时段结束；严重告警始终发送。
+- 每条规则都可以关闭、修改（阈值、持续时间、级别 crit/warn/info）或指定渠道：`notify`（面板、Telegram 和通知通道）或 `web`（仅面板）。`+ 规则` 可添加新规则。以退出码 0 停止的容器不算告警。
+- 静默时段（例如 `Europe/Moscow` 时区 01:00–07:00）内通知会延后到时段结束；严重告警始终发送。
 
 机器人设置：
 
@@ -132,6 +133,22 @@ SRVMON_URL=https://mon.example.com SRVMON_TOKEN=a_... docker compose up -d
 4. 发送测试消息。
 
 如果监控服务器无法访问 `api.telegram.org`，可以用 Cloudflare Worker 搭一个代理并设置 `SRVMON_TELEGRAM_API`，见 [docs/telegram-proxy.md](docs/telegram-proxy.md)。
+
+### 通知通道（Shoutrrr）
+
+同一页面的“通知通道”面板可以用 [Shoutrrr](https://shoutrrr.nickfedor.com/) URL 添加更多告警去处：
+
+| 服务 | URL |
+|---|---|
+| 邮件 | `smtp://user:password@smtp.example.com:587/?from=srvmon@example.com&to=me@example.com` |
+| ntfy | `ntfy://ntfy.sh/my-secret-topic` |
+| Discord | `discord://token@webhook-id` |
+| Gotify | `gotify://gotify.example.com/app-token` |
+| Webhook | `generic+https://hooks.example.com/srvmon` |
+
+- 每个通道有最低级别：`crit+`（仅严重）、`warn+` 或全部。渠道为 `notify` 的告警会发送到 Telegram 以及所有符合条件的已启用通道；静默时段和静音对所有通道生效。
+- URL 中包含凭据，因此会用主密钥加密存储，面板只显示服务和主机。“测试”会发送一条测试消息；通道旁显示最后发送时间或错误，页头显示 `ch: N`，失败的通道标红。
+- 发送失败会重试三次。AI 代理任务的告警也会发送到这些通道。
 
 ### 面板心跳（dead man's switch）
 

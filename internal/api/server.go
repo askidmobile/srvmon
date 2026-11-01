@@ -25,6 +25,7 @@ import (
 	"github.com/askidmobile/srvmon/internal/heartbeat"
 	"github.com/askidmobile/srvmon/internal/i18n"
 	"github.com/askidmobile/srvmon/internal/metrics"
+	"github.com/askidmobile/srvmon/internal/notify"
 	"github.com/askidmobile/srvmon/internal/secret"
 	"github.com/askidmobile/srvmon/internal/store"
 	"github.com/askidmobile/srvmon/internal/telegram"
@@ -56,6 +57,7 @@ type Server struct {
 	heartbeat *heartbeat.Monitor // nil when its settings cannot be loaded
 	backup    *backup.Runner     // nil without a master key
 	emergency *emergencyState
+	hub       *notify.Hub // nil when its settings cannot be loaded
 
 	ai              *aiagent.Client // nil: agent disabled
 	agent           *agentState
@@ -81,8 +83,11 @@ type Options struct {
 	Version string
 	Secrets *secret.Box // seals SSH private keys; nil disables the add wizard
 	// Notify sends a critical HTML message for agent tasks; default: the
-	// Telegram bot.
+	// notification hub (Telegram and the Shoutrrr channels).
 	Notify func(ctx context.Context, text string) error
+	// NotifySender delivers to Shoutrrr channels; default: Shoutrrr (tests
+	// put a fake here).
+	NotifySender notify.Sender
 	// OnActionPending is called when the agent asks to run a command that
 	// needs confirmation; default: Telegram approve / reject buttons, which
 	// call Server.DecideAgentAction.
@@ -139,6 +144,20 @@ func New(o Options) *Server {
 			srv.alerts.Event(ctx, store.KindBackup, 0, "", "", i18n.T("panel backup failed: %s", msg))
 		}
 	}
+	// Every notification goes through the hub: it hands alerts to the
+	// Telegram bot and to the Shoutrrr channels set up in the panel.
+	hub, err := notify.New(context.Background(), notify.Options{
+		Store: o.Store, Secrets: o.Secrets, Log: o.Log, Sender: o.NotifySender, PanelURL: o.Config.PublicOrigin,
+	})
+	if err != nil {
+		o.Log.Error("notify: load channels", "err", err)
+	} else {
+		srv.hub = hub
+		srv.alerts.SetNotifier(hub)
+		if srv.notify == nil {
+			srv.notify = hub.SendText
+		}
+	}
 	bot, err := telegram.New(context.Background(), telegram.Options{
 		Store: o.Store, Secrets: o.Secrets, Engine: srv.alerts, Latest: srv.latest, Log: o.Log, API: o.TelegramAPI,
 	})
@@ -146,7 +165,11 @@ func New(o Options) *Server {
 		o.Log.Error("telegram: load settings", "err", err)
 	} else {
 		srv.bot = bot
-		srv.alerts.SetNotifier(bot)
+		if hub != nil {
+			hub.SetTelegram(bot)
+		} else {
+			srv.alerts.SetNotifier(bot)
+		}
 		srv.wireAgentTelegram(bot)
 	}
 	hb, err := heartbeat.New(context.Background(), heartbeat.Options{
@@ -172,8 +195,9 @@ func New(o Options) *Server {
 	return srv
 }
 
-// Start runs the background work: alert evaluation, the heartbeat, the Telegram bot and,
-// when fail2banEvents is set, following fail2ban bans of the host.
+// Start runs the background work: alert evaluation, notification delivery,
+// the heartbeat, the Telegram bot and, when fail2banEvents is set, following
+// fail2ban bans of the host.
 func (s *Server) Start(ctx context.Context, fail2banEvents, hostName string) {
 	go s.alerts.Run(ctx)
 	if s.heartbeat != nil {
@@ -181,6 +205,9 @@ func (s *Server) Start(ctx context.Context, fail2banEvents, hostName string) {
 	}
 	if s.backup != nil {
 		go s.backup.Run(ctx)
+	}
+	if s.hub != nil {
+		go s.hub.Run(ctx)
 	}
 	if s.bot != nil {
 		go s.bot.Run(ctx)

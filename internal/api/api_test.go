@@ -30,7 +30,7 @@ type env struct {
 	st      *store.Store
 }
 
-func newEnv(t *testing.T) *env {
+func newEnv(t *testing.T, mods ...func(*Options)) *env {
 	t.Helper()
 	st, err := store.Open(filepath.Join(t.TempDir(), "t.db"))
 	if err != nil {
@@ -44,13 +44,17 @@ func newEnv(t *testing.T) *env {
 	}
 	logBuf := &bytes.Buffer{}
 	web := fstest.MapFS{"index.html": {Data: []byte("<html>app</html>")}}
-	s := New(Options{
+	o := Options{
 		Config:  config.Config{SessionTTL: time.Hour},
 		Store:   st,
 		AuthLog: logBuf,
 		Web:     web,
 		Version: "test",
-	})
+	}
+	for _, m := range mods {
+		m(&o)
+	}
+	s := New(o)
 	ts := httptest.NewServer(s.Handler())
 	t.Cleanup(ts.Close)
 	jar, _ := cookiejar.New(nil)
