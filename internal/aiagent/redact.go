@@ -26,9 +26,20 @@ func Redact(s string) string {
 	for _, re := range tokenFormats {
 		s = re.ReplaceAllString(s, "***")
 	}
+	// "KEY=value with spaces" inside a JSON string (docker inspect Env):
+	// the value runs to the closing quote, not to the first space.
+	s = jsonAssign.ReplaceAllStringFunc(s, func(m string) string {
+		eq := strings.IndexByte(m, '=')
+		if keepValue(m[eq+1 : len(m)-1]) {
+			return m
+		}
+		return m[:eq+1] + `***"`
+	})
 	s = secretAssign.ReplaceAllStringFunc(s, redactAssign)
 	return s
 }
+
+const secretKey = `[A-Za-z0-9_.-]*(?i:pass(?:wd|word|phrase)?|secret|token|api[_-]?key|access[_-]?key|private[_-]?key|credentials?|dsn)[A-Za-z0-9_.-]*`
 
 var (
 	privateKeyBlock = regexp.MustCompile(`(?s)-----BEGIN [A-Z0-9 ]*PRIVATE KEY( BLOCK)?-----.*?(-----END [A-Z0-9 ]*PRIVATE KEY( BLOCK)?-----|\z)`)
@@ -45,9 +56,12 @@ var (
 		regexp.MustCompile(`\bsmcp_[A-Za-z0-9_-]{16,}`),         // srvmon MCP token
 		regexp.MustCompile(`\bglpat-[A-Za-z0-9_-]{20,}`),
 	}
+	jsonAssign = regexp.MustCompile(`"` + secretKey + `=(?:[^"\\\n]|\\.)*"`)
 	// KEY=value, KEY: value, "key": "value" where the key names a secret.
-	secretAssign = regexp.MustCompile(`[A-Za-z0-9_.-]*(?i:pass(?:wd|word|phrase)?|secret|token|api[_-]?key|access[_-]?key|private[_-]?key|credentials?|dsn)[A-Za-z0-9_.-]*"?[ \t]*[:=][ \t]*("[^"\n]*"|'[^'\n]*'|[^\s"',;}\]]+)`)
-	assignSep    = regexp.MustCompile(`"?[ \t]*[:=][ \t]*`)
+	secretAssign = regexp.MustCompile(secretKey + `"?[ \t]*[:=][ \t]*("(?:[^"\\\n]|\\.)*"|'[^'\n]*'|\$\{[^}\s]*\}|[^\s"',;}\]]+)`)
+	// A placeholder, not a value: ${DB_PASSWORD}, ${X:-default}, $DB_PASSWORD.
+	placeholder = regexp.MustCompile(`^\$(\{[A-Za-z_][A-Za-z0-9_]*(:?[-=?+][^}]*)?\}|[A-Z_][A-Z0-9_]*)$`)
+	assignSep   = regexp.MustCompile(`"?[ \t]*[:=][ \t]*`)
 )
 
 // keepValues are values that say how something is configured, not a secret.
@@ -60,9 +74,7 @@ func redactAssign(m string) string {
 		return m
 	}
 	key, sep, val := m[:loc[0]], m[loc[0]:loc[1]], m[loc[1]:]
-	inner := strings.Trim(val, `"'`)
-	if keepValues[strings.ToLower(val)] || keepValues[strings.ToLower(inner)] ||
-		strings.HasPrefix(inner, "$") || strings.HasPrefix(inner, "[redacted") {
+	if keepValue(val) {
 		return m
 	}
 	q := ""
@@ -70,4 +82,10 @@ func redactAssign(m string) string {
 		q = val[:1]
 	}
 	return key + sep + q + "***" + q
+}
+
+func keepValue(val string) bool {
+	inner := strings.Trim(val, `"'`)
+	return keepValues[strings.ToLower(val)] || keepValues[strings.ToLower(inner)] ||
+		placeholder.MatchString(inner) || strings.HasPrefix(inner, "[redacted") || strings.HasPrefix(inner, "***")
 }

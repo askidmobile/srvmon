@@ -18,6 +18,13 @@ func TestRedact(t *testing.T) {
 		{"x ghp_abcdefghijklmnopqrstuvwxyz0123456789 y", "x *** y"},
 		{"key sk-ant-api03-abcdefghijklmnopqrstuvwxyz", "key ***"},
 		{"bot 123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsawq", "bot ***"},
+		{`"Env": ["POSTGRES_PASSWORD=abc secret-rest", "TZ=UTC"]`, `"Env": ["POSTGRES_PASSWORD=***", "TZ=UTC"]`},
+		{`"password": "ab\"c d"`, `"password": "***"`},
+		{`"Env": ["DB_PASSWORD=a\"b c"]`, `"Env": ["DB_PASSWORD=***"]`},
+		{"PASSWORD=$uperSecret123", "PASSWORD=***"},
+		{"password: $2b$12$abcdefghijklmnopqrstuv", "password: ***"},
+		{"PASSWORD: ${DB_PASSWORD:-changeme}", "PASSWORD: ${DB_PASSWORD:-changeme}"},
+		{"PASSWORD=$DB_PASSWORD", "PASSWORD=$DB_PASSWORD"},
 		// Configuration, not secrets: kept.
 		{"PasswordAuthentication no", "PasswordAuthentication no"},
 		{"auth_required: true", "auth_required: true"},
