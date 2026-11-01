@@ -222,4 +222,10 @@ var zh = map[string]string{
 	"the new agent reports version %s instead of %s":                                   "新代理上报的版本是 %s，而不是 %s",
 	"%s; restoring the previous agent failed: %s":                                      "%s；恢复旧代理失败：%s",
 	"%s; the previous agent is restored":                                               "%s；已恢复旧代理",
+	// Panel heartbeat (dead man's switch).
+	"no connection: %s":          "无法连接：%s",
+	"rules not evaluated for %s": "规则已有 %s 未评估",
+	"srvmon %s: problems:":       "srvmon %s：问题：",
+	"the ping URL starts with http:// or https:// and has no spaces": "ping URL 须以 http:// 或 https:// 开头且不含空格",
+	"set the ping URL first": "请先设置 ping URL",
 }

@@ -107,3 +107,25 @@ func TestQuietAndTelegramValidation(t *testing.T) {
 		t.Fatalf("test without config: %d", r.StatusCode)
 	}
 }
+
+func TestHeartbeatAPI(t *testing.T) {
+	e := newEnv(t)
+	e.login(t)
+	if r := e.do(t, http.MethodPut, "/api/notify/heartbeat", map[string]any{"url": "hc-ping.com/x", "fail_endpoint": true}); r.StatusCode != http.StatusBadRequest {
+		t.Fatalf("bad url accepted: %d", r.StatusCode)
+	}
+	if r := e.do(t, http.MethodPost, "/api/notify/heartbeat/test", nil); r.StatusCode != http.StatusBadRequest {
+		t.Fatalf("test without url: %d", r.StatusCode)
+	}
+	var v struct {
+		Heartbeat *struct {
+			Configured bool `json:"configured"`
+		} `json:"heartbeat"`
+	}
+	r := e.get(t, "/api/notify")
+	_ = json.NewDecoder(r.Body).Decode(&v)
+	r.Body.Close()
+	if v.Heartbeat == nil || v.Heartbeat.Configured {
+		t.Fatalf("notify heartbeat = %+v", v.Heartbeat)
+	}
+}
