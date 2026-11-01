@@ -229,6 +229,13 @@ var zh = map[string]string{
 	"srvmon %s: problems:":       "srvmon %s：问题：",
 	"the ping URL starts with http:// or https:// and has no spaces": "ping URL 须以 http:// 或 https:// 开头且不含空格",
 	"set the ping URL first": "请先设置 ping URL",
+	"no sudo for %s":         "%s 无 sudo",
+	"limited sudo for %s: services, journalctl, docker":                                  "%s 的受限 sudo：服务、journalctl、docker",
+	"sudo is not installed on the server (no visudo or /etc/sudoers.d)":                  "服务器上未安装 sudo（没有 visudo 或 /etc/sudoers.d）",
+	"visudo refused the new sudoers file, nothing changed":                               "visudo 拒绝了新的 sudoers 文件，未做任何更改",
+	"the panel's SSH user has neither docker access nor passwordless sudo on the server": "面板的 SSH 用户在服务器上既没有 docker 权限，也没有免密 sudo",
+	"writing the sudoers file failed: %s":                                                "写入 sudoers 文件失败：%s",
+	"sudo change: %s":                                                                    "更改 sudo：%s",
 	// AI diagnosis of alerts.
 	"AI diagnosis":                                                                     "AI 诊断",
 	"diagnoses per hour: 1–60":                                                         "每小时诊断次数：1–60",

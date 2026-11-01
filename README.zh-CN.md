@@ -16,7 +16,7 @@
 ## 功能
 
 - **总览。** 一张表展示所有服务器：CPU、内存和磁盘条形图，运行/总容器数（失败的会标出），运行时间，内存大小，下次主机续费金额及日期，以及最新告警。可按分组筛选，一键打开终端。快捷键：`1` 总览、`3` 终端、`4` 代理、`5` 告警、`6` 设置。
-- **指标与容器。** 每台服务器上运行一个小型 Go 代理（`srvmon-agent`），从 `/proc` 读取 CPU、内存、swap、负载、磁盘、网络和运行时间，通过 docker socket（只读）读取容器信息并推送到面板。面板不可达时最多缓存一小时。指标存储在 VictoriaMetrics 中。
+- **指标与容器。** 每台服务器上运行一个小型 Go 代理（`srvmon-agent`），从 `/proc` 读取 CPU、内存、swap、负载、磁盘、网络和运行时间，通过 `srvmon-dockerproxy`（经过过滤的只读 Docker API：不能写入，也看不到容器的环境变量）读取容器信息并推送到面板。面板不可达时最多缓存一小时。指标存储在 VictoriaMetrics 中。
 - **服务器详情页。** 按核心的 CPU、内存、磁盘、网络、进程、容器状态/健康检查/重启次数、syslog 与 docker 日志，页面打开期间实时刷新。
 - **服务器档案与续费。** 每台服务器有一份档案：描述、项目、分组、标签、提供商、套餐、费用（含币种）和下次付款日期。续费信息显示在总览中、Telegram（`/bills`）里，并会在到期前几天发出告警。
 - **添加向导。** 校验 SSH 主机密钥，用密码或你自己的私钥登录一次。srvmon 创建 `srvmon` 用户及其 ed25519 密钥，安装代理，并可关闭密码登录。一次性密码或密钥不会被保存。
@@ -26,7 +26,7 @@
 - **告警与 Telegram。** 代理离线、容器停止或不健康、频繁重启、CPU、磁盘、主机续费提醒、fail2ban 封禁、登录尝试。规则可编辑（阈值、持续时间、级别、渠道：Telegram 或仅面板）。按你的时区设置静默时段（严重告警仍会发送），支持确认与临时静音，保留 90 天历史，严重告警附带 AI 诊断。机器人命令：`/status`、`/server`、`/alerts`、`/ack`、`/bills`、`/ask`。
 - **面板心跳（dead man's switch）。** 面板每分钟自检一次并 ping 一个外部 URL，例如 [healthchecks.io](https://healthchecks.io)。如果面板宕机，ping 会停止，该服务会通过邮件或其自身渠道提醒您。
 - **备份与应急访问。** 按计划将面板数据库加密备份到任意 S3 兼容存储（AWS、Yandex Object Storage、R2、B2、MinIO），支持保留份数，失败时 Telegram 告警；主密钥需凭 TOTP 验证码单独导出。您自己的 SSH 公钥会保存在每台服务器的 `authorized_keys` 中，面板丢失也不会被锁在服务器外。详见 [docs/backup.md](docs/backup.md)。
-- **安全。** 密码（argon2id）+ TOTP 或备用码，无需用户名。限流、审计日志，以及面板和 sshd 的 fail2ban 规则。
+- **安全。** 密码（argon2id）+ TOTP 或备用码，无需用户名。限流、审计日志，以及面板和 sshd 的 fail2ban 规则。在服务器上只有 `srvmon-dockerproxy` 容器能访问 docker socket，`srvmon` 用户默认只有受限 sudo（见[服务器访问权限](#服务器访问权限)）。
 
 ## 截图
 
@@ -98,7 +98,7 @@ sudo docker compose exec -it server /srvmon-server init   # 设置密码并显�
 
 ## 添加服务器
 
-面板中的向导（`#/add`）：填写名称、`host:port`、项目、分组、标签；校验并确认主机密钥指纹；选择一次性登录方式（密码、你自己的私钥，或把面板公钥加入 `authorized_keys`）。随后 srvmon 创建 `srvmon` 用户、验证密钥登录、以 `/etc/srvmon/agent.token`（0600）中的令牌启动 `srvmon-agent` 容器，并可选择关闭 `PasswordAuthentication`。
+面板中的向导（`#/add`）：填写名称、`host:port`、项目、分组、标签；校验并确认主机密钥指纹；选择一次性登录方式（密码、你自己的私钥，或把面板公钥加入 `authorized_keys`）。随后 srvmon 创建 `srvmon` 用户（docker 组，sudo 模式可选，见下文）、验证密钥登录、以 `/etc/srvmon/agent.token`（0600）中的令牌启动 `srvmon-agent` 容器，并可选择关闭 `PasswordAuthentication`。
 
 不使用向导时：
 
@@ -107,6 +107,14 @@ docker compose exec server /srvmon-server add-server -name shop-db -group prod -
 # 在目标服务器上，使用 deploy/agent/docker-compose.yml：
 SRVMON_URL=https://mon.example.com SRVMON_TOKEN=a_... docker compose up -d
 ```
+
+## 服务器访问权限
+
+面板在受管服务器上能做什么、不能做什么：
+
+- **代理。** `srvmon-agent` 不接触 docker socket。socket 由单独的 `srvmon-dockerproxy` 容器持有（同一镜像，无网络、无 capabilities、只读根文件系统），它只向代理提供 `GET /_ping`、`/version`、`/containers/json`、`/containers/{id}/json` 和 `/containers/{id}/logs`；容器 inspect 结果中的 `Env` 会被删除，环境变量中的密钥不会离开服务器。主机的 `/run`（docker 和 containerd 的 socket）在代理的 `/host` 中被隐藏。面板更新代理时会自动把旧代理迁移到这种结构。
+- **`srvmon` 的 sudo。** 三种模式，在向导中选择，并可在服务器档案中切换：**无 sudo**；**受限**（默认：`systemctl status/start/stop/restart/reload/…`、`journalctl`、`service`、`docker`；不能 `sudo -i`，不能编辑或启用 unit）；**完整**（`NOPASSWD:ALL`，终端中为 root）。面板通过 `sudo -n -l` 实时读取当前模式；此前添加的服务器保持完整 sudo，直到你手动切换。
+- **边界说明。** `srvmon` 仍在 `docker` 组中，而 docker 权限等同于 root。受限 sudo 防的是误操作（你自己的，或你批准的 AI 智能体命令），而不是已经控制面板的人。也正因如此，面板可以重新放宽 sudo：它先在服务器上用 `visudo -c` 检查文件，再通过代理镜像的一次性容器写入 `/etc/sudoers.d/srvmon`。
 
 ## 告警与 Telegram
 

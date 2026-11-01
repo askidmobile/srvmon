@@ -68,6 +68,22 @@ services:
     depends_on:
       - victoriametrics
 
+  # The only container with the docker socket: serves the agent a filtered
+  # read-only Docker API (GET containers/version/_ping, no Env in inspect).
+  dockerproxy:
+    image: ghcr.io/askidmobile/srvmon-agent:${SRVMON_TAG:-latest}
+    entrypoint: ["/srvmon-agent", "dockerproxy"]
+    restart: unless-stopped
+    network_mode: none
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges=true
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - dockerproxy:/run/srvmon
+
   # Agent for the monitoring host itself; the server registers it on start
   # and writes the token into its data volume.
   agent:
@@ -83,14 +99,21 @@ services:
       SRVMON_URL: http://${SRVMON_HTTP_BIND:-127.0.0.1:8088}
       SRVMON_TOKEN_FILE: /srvmon-data/self-agent.token
       SRVMON_INTERVAL: ${SRVMON_INTERVAL:-5s}
+      DOCKER_SOCK: /run/srvmon/docker.sock
     volumes:
       - /proc:/host/proc:ro
       - /:/host:ro,rslave
-      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # Docker API through the dockerproxy service below, read-only calls only.
+      - dockerproxy:/run/srvmon:ro
       - srvmon-data:/srvmon-data:ro
+    tmpfs:
+      # Hides the host's /run (docker and containerd sockets) from /host.
+      - /host/run:ro,size=64k
     depends_on:
       server:
         condition: service_healthy
+      dockerproxy:
+        condition: service_started
 
   # AI agent (pi SDK). Only srvmon tools: no SSH keys, no shell of its own;
   # commands that change a server wait for the owner's confirmation in
@@ -165,4 +188,5 @@ volumes:
   srvmon-logs:
   vm-data:
   ai-data:
+  dockerproxy:
   fail2ban-data:

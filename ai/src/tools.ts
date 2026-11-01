@@ -107,6 +107,7 @@ export function srvmonTools(ctx: ToolContext): ToolDefinition[] {
       "Read-only commands (docker ps/logs/inspect, df, free, journalctl, systemctl status, cat, grep, pipelines with | and so on) run at once. " +
       "Any other command (restart, up -d, rm, sudo, writing files, ; && > and so on) waits for the owner's confirmation in the panel, up to 15 minutes, and runs only after it. " +
       "Unquoted name patterns (* ? [) also need confirmation: to read, use find -name '*.log' or exact paths. " +
+      "sudo of srvmon may be limited (systemctl, service, journalctl, docker) or absent: if sudo asks for a password, the server's sudo mode does not allow the command; the owner changes it in the server passport. " +
       "Timeout: 60 s for reads, 10 minutes for confirmed commands. Output is cut to 32 KB.",
     promptSnippet: "srvmon_exec: a command on a server (changes only after the owner confirms)",
     promptGuidelines: [

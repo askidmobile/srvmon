@@ -229,6 +229,13 @@ var ru = map[string]string{
 	"srvmon %s: problems:":       "srvmon %s: проблемы:",
 	"the ping URL starts with http:// or https:// and has no spaces": "URL пинга начинается с http:// или https:// и без пробелов",
 	"set the ping URL first": "сначала укажите URL пинга",
+	"no sudo for %s":         "без sudo для %s",
+	"limited sudo for %s: services, journalctl, docker":                                  "ограниченный sudo для %s: службы, journalctl, docker",
+	"sudo is not installed on the server (no visudo or /etc/sudoers.d)":                  "на сервере нет sudo (нет visudo или /etc/sudoers.d)",
+	"visudo refused the new sudoers file, nothing changed":                               "visudo не принял новый файл sudoers, ничего не изменено",
+	"the panel's SSH user has neither docker access nor passwordless sudo on the server": "у SSH-пользователя панели на сервере нет ни доступа к docker, ни sudo без пароля",
+	"writing the sudoers file failed: %s":                                                "не удалось записать файл sudoers: %s",
+	"sudo change: %s":                                                                    "смена sudo: %s",
 	// AI diagnosis of alerts.
 	"AI diagnosis":                                                                     "AI-диагноз",
 	"diagnoses per hour: 1–60":                                                         "диагнозов в час: 1–60",

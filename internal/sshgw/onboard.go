@@ -52,7 +52,7 @@ type OnboardParams struct {
 
 	Key             KeyPair // installed for SSHUser
 	SSHUser         string  // account srvmon uses from now on, normally "srvmon"
-	Sudo            bool    // passwordless sudo for SSHUser
+	SudoMode        string  // SudoNone, SudoLimited or SudoFull for SSHUser; "" leaves sudo as is
 	DisablePassword bool    // PasswordAuthentication no
 	Agent           *AgentInstall
 
@@ -118,6 +118,9 @@ func Onboard(ctx context.Context, p OnboardParams, log Logger) (Result, error) {
 	if !userRe.MatchString(p.SSHUser) {
 		return res, fmt.Errorf("bad ssh user %q", p.SSHUser)
 	}
+	if p.SudoMode != "" && !ValidSudoMode(p.SudoMode) {
+		return res, fmt.Errorf("bad sudo mode %q", p.SudoMode)
+	}
 	var auth []ssh.AuthMethod
 	how := i18n.T("with a password")
 	if p.LoginKey != nil {
@@ -168,7 +171,7 @@ func Onboard(ctx context.Context, p OnboardParams, log Logger) (Result, error) {
 		log(StepOK, i18n.T("root rights via sudo"))
 	}
 
-	out, errOut, err := pr.run(ctx, userScript(p.SSHUser, p.Key.Public, p.Sudo))
+	out, errOut, err := pr.run(ctx, userScript(p.SSHUser, p.Key.Public))
 	if err != nil {
 		return res, i18n.Errorf("creating user %s: %s", p.SSHUser, firstLine(errOut, err))
 	}
@@ -177,13 +180,6 @@ func Onboard(ctx context.Context, p OnboardParams, log Logger) (Result, error) {
 		groups = i18n.T("docker group")
 	}
 	log(StepOK, i18n.T("user %s (%s), authorized_keys ← %s", p.SSHUser, groups, p.Key.Fingerprint))
-	if p.Sudo {
-		if strings.Contains(out, "sudo-ok") {
-			log(StepOK, i18n.T("passwordless sudo for %s", p.SSHUser))
-		} else {
-			log(StepWarn, i18n.T("sudo not set up (no sudo/visudo on the server)"))
-		}
-	}
 
 	kc, err := DialKey(ctx, p.Addr, p.SSHUser, p.HostKey, p.Key.Private)
 	if err != nil {
@@ -251,6 +247,25 @@ func Onboard(ctx context.Context, p OnboardParams, log Logger) (Result, error) {
 			log(StepOK, "sshd: PasswordAuthentication no · reload")
 		}
 	}
+
+	// sudo rules go last: when the login user is SSHUser itself, its
+	// current sudo is what runs the steps above, and a narrower mode must
+	// not take it away before they are done.
+	if p.SudoMode != "" {
+		out, errOut, err := pr.run(ctx, "set -e\nU="+shq(p.SSHUser)+"\n"+sudoersRootScript(p.SudoMode))
+		switch {
+		case err != nil:
+			log(StepWarn, i18n.T("sudo not set up: %s", firstLine(errOut, err)))
+		case p.SudoMode == SudoNone:
+			log(StepOK, i18n.T("no sudo for %s", p.SSHUser))
+		case !strings.Contains(out, "sudo-ok"):
+			log(StepWarn, i18n.T("sudo not set up (no sudo/visudo on the server)"))
+		case p.SudoMode == SudoLimited:
+			log(StepOK, i18n.T("limited sudo for %s: services, journalctl, docker", p.SSHUser))
+		default:
+			log(StepOK, i18n.T("passwordless sudo for %s", p.SSHUser))
+		}
+	}
 	return res, nil
 }
 
@@ -287,9 +302,10 @@ rm -f "$T"
 `, shq(blob))
 }
 
-// userScript creates the account, adds it to docker, installs the public key
-// and optionally grants passwordless sudo. Prints markers for the log.
-func userScript(user, pubKey string, sudo bool) string {
+// userScript creates the account, adds it to docker and installs the public
+// key. Prints markers for the log. Sudo rules are written at the end of
+// Onboard (sudoersRootScript).
+func userScript(user, pubKey string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "set -e\nU=%s\nKEY=%s\n", shq(user), shq(pubKey))
 	b.WriteString(`if ! id -u "$U" >/dev/null 2>&1; then
@@ -314,16 +330,6 @@ grep -qxF "$KEY" "$H/.ssh/authorized_keys" || printf '%s\n' "$KEY" >> "$H/.ssh/a
 chown "$U:$G" "$H/.ssh/authorized_keys"
 chmod 600 "$H/.ssh/authorized_keys"
 `)
-	if sudo {
-		b.WriteString(`if command -v visudo >/dev/null 2>&1 && [ -d /etc/sudoers.d ]; then
-  T=$(mktemp)
-  printf '%s ALL=(ALL) NOPASSWD:ALL\n' "$U" > "$T"
-  if visudo -cf "$T" >/dev/null; then
-    chmod 440 "$T"; mv "$T" "/etc/sudoers.d/$U"; echo sudo-ok
-  else rm -f "$T"; fi
-fi
-`)
-	}
 	return b.String()
 }
 
@@ -374,16 +380,36 @@ if [ -n "$RU" ]; then docker logout "$REG" >/dev/null 2>&1 || true; fi
 [ "$pulled" = 1 ] || { rm -f /etc/srvmon/agent.token.new; echo "docker pull $IMG failed (a private image? registry access is needed)" >&2; exit 4; }
 docker rm -f srvmon-agent >/dev/null 2>&1 || true
 mv -f /etc/srvmon/agent.token.new /etc/srvmon/agent.token
-docker run -d --name srvmon-agent --restart unless-stopped \
-  --network host --pid host --read-only --security-opt no-new-privileges=true \
-  -e SRVMON_URL="$URL" -e SRVMON_TOKEN_FILE=/etc/srvmon/agent.token \
-  -v /etc/srvmon/agent.token:/etc/srvmon/agent.token:ro \
-  -v /proc:/host/proc:ro -v /:/host:ro,rslave \
-  -v /var/run/docker.sock:/var/run/docker.sock:ro \
-  "$IMG" >/dev/null
+D=docker
+` + dockerProxyRun + `
+` + agentRun + `
 `)
 	return b.String()
 }
+
+// dockerProxyRun (re)starts srvmon-dockerproxy from $IMG: the only
+// container with the host's docker socket. It has no network, no
+// capabilities and a read-only root, and serves the agent a filtered
+// read-only Docker API on a socket in the srvmon-dockerproxy volume.
+const dockerProxyRun = `$D rm -f srvmon-dockerproxy >/dev/null 2>&1 || true
+$D run -d --name srvmon-dockerproxy --restart unless-stopped \
+  --network none --read-only --cap-drop ALL --security-opt no-new-privileges=true \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -v srvmon-dockerproxy:/run/srvmon \
+  --entrypoint /srvmon-agent "$IMG" dockerproxy >/dev/null`
+
+// agentRun starts srvmon-agent from $IMG with the mounts of
+// deploy/agent/docker-compose.yml. The docker socket comes from
+// srvmon-dockerproxy; the host's /run (docker and containerd sockets) is
+// hidden under an empty read-only tmpfs.
+const agentRun = `$D run -d --name srvmon-agent --restart unless-stopped \
+  --network host --pid host --read-only --security-opt no-new-privileges=true \
+  -e SRVMON_URL="$URL" -e SRVMON_TOKEN_FILE=/etc/srvmon/agent.token \
+  -e DOCKER_SOCK=/run/srvmon/docker.sock \
+  -v /etc/srvmon/agent.token:/etc/srvmon/agent.token:ro \
+  -v /proc:/host/proc:ro -v /:/host:ro,rslave --tmpfs /host/run:ro,size=64k \
+  -v srvmon-dockerproxy:/run/srvmon:ro \
+  "$IMG" >/dev/null`
 
 // disablePasswordScript turns off password logins. sshd takes the first
 // value it reads, and an Include may come before or after other settings,

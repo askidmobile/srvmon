@@ -171,6 +171,8 @@ export const api = {
     request<{ ok: boolean }>("POST", `/api/servers/${id}/containers/${encodeURIComponent(name)}/${action}`),
   updateAgent: (id: number) => request<{ started: boolean }>("POST", `/api/servers/${id}/agent/update`),
   updateAgents: () => request<{ started: number }>("POST", "/api/servers/agents/update"),
+  sudo: (id: number) => request<SudoState>("GET", `/api/servers/${id}/sudo`),
+  setSudo: (id: number, mode: SudoMode) => request<SudoState>("PUT", `/api/servers/${id}/sudo`, { mode }),
   alerts: () => request<AlertsView>("GET", "/api/alerts"),
   alertSummary: () => request<AlertSummary>("GET", "/api/alerts/summary"),
   ackAlert: (id: number) => request<Alert>("POST", `/api/alerts/${id}/ack`),
@@ -384,6 +386,13 @@ export interface SetupKey {
   command: string;
 }
 
+// Sudo of the panel's SSH user on a server ("custom": rules srvmon did not write).
+export type SudoMode = "none" | "limited" | "full";
+export interface SudoState {
+  mode: SudoMode | "custom";
+  user: string;
+}
+
 export interface OnboardRequest {
   server_id: number;
   card: NewServerCard;
@@ -394,7 +403,7 @@ export interface OnboardRequest {
   passphrase: string;
   setup_key: string;
   host_key: string;
-  sudo: boolean;
+  sudo_mode: SudoMode;
   disable_password: boolean;
   install_agent: boolean;
 }

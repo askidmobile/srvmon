@@ -27,7 +27,7 @@ flowchart LR
     AI[srvmon-ai<br/>pi SDK] -->|tool API| S
   end
   subgraph T[Ваши серверы]
-    A[srvmon-agent<br/>/proc, docker.sock]
+    A[srvmon-agent<br/>/proc, srvmon-dockerproxy]
     SSH[sshd :22<br/>только по ключу]
     D[docker]
   end
@@ -45,7 +45,7 @@ flowchart LR
 | Что | Откуда | Как часто |
 | --- | --- | --- |
 | CPU, load, RAM, swap, диски, сеть, uptime | `/proc`, `/sys` хоста (read-only mount) | 5 с |
-| Контейнеры: статус, health, рестарты, CPU/RAM, образ, порты | Docker API через `/var/run/docker.sock` (ro) | 5 с + события сразу |
+| Контейнеры: статус, health, рестарты, CPU/RAM, образ, порты | Docker API через `srvmon-dockerproxy` (только GET к containers/version/_ping, без `Env`) | 5 с + события сразу |
 | Инвентарь: ОС, ядро, версия docker, обновления пакетов | файлы хоста | раз в час |
 
 Для экрана сервера в стиле btop агент дополнительно шлёт загрузку по ядрам, температуру, топ-30 процессов (с привязкой к контейнеру) и строки journald/docker-логов уровня warn и выше. Процессы уходят раз в 1–2 с только пока экран сервера открыт: сервер сообщает об этом агенту в ответе на ingest.
@@ -53,6 +53,8 @@ flowchart LR
 Доставка: `POST https://<monitor>/api/ingest` с персональным токеном агента (выдаётся при добавлении, можно отозвать). Пачки в JSON+gzip; при потере связи агент держит буфер и досылает. Отсутствие данных дольше порога = алерт «сервер молчит».
 
 Агент ничего не выполняет по команде извне: все действия идут через SSH с сервера мониторинга. Украденный токен агента даёт только право слать метрики.
+
+Docker-сокет хоста монтируется только в контейнер `srvmon-dockerproxy` (режим `srvmon-agent dockerproxy` того же образа: без сети, `cap_drop: ALL`, read-only). Он пропускает к Docker API лишь GET-запросы агента и вырезает `Env` из inspect; агент видит его unix-сокет через volume `srvmon-dockerproxy`, а `/run` хоста в его `/host` закрыт tmpfs. Пользователь `srvmon` получает sudo в одном из режимов: нет, ограниченный (службы, journalctl, docker) или полный; режим меняется из паспорта сервера (`internal/sshgw/sudo.go`).
 
 ## Центральный сервер
 
