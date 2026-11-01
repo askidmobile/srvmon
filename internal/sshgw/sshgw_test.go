@@ -181,7 +181,7 @@ func testOnboard(t *testing.T, hasDocker bool) {
 	var log []string
 	res, err := Onboard(context.Background(), OnboardParams{
 		Addr: ts.addr, User: "root", Password: "S3cr3t!pw", HostKey: ts.hostKey,
-		Key: key, SSHUser: "srvmon", Sudo: true, DisablePassword: true,
+		Key: key, SSHUser: "srvmon", SudoMode: SudoFull, DisablePassword: true,
 		Agent: &AgentInstall{Image: "ghcr.io/x/agent:latest", URL: "https://mon", Token: "a_tok"},
 	}, func(state, text string) { log = append(log, state+" "+text) })
 	if err != nil {
@@ -203,7 +203,7 @@ func testOnboard(t *testing.T, hasDocker bool) {
 	}
 	if !hasDocker {
 		if !strings.Contains(scripts[1], "get.docker.com") || !strings.Contains(scripts[1], "U='srvmon'") ||
-			!strings.Contains(scripts[2], "docker run") {
+			!strings.Contains(scripts[2], "--name srvmon-agent ") {
 			t.Fatalf("docker must be installed right before the agent:\n%s", scripts[1])
 		}
 	}
@@ -328,7 +328,7 @@ func TestOnboardCancelBeforeCommit(t *testing.T) {
 // An existing account's password hash must survive onboarding: only an
 // account created by the script gets the "*" (key-only) password.
 func TestUserScriptKeepsExistingPassword(t *testing.T) {
-	s := userScript("srvmon", "ssh-ed25519 AAAA test", false)
+	s := userScript("srvmon", "ssh-ed25519 AAAA test", SudoNone)
 	create := strings.Index(s, `if ! id -u "$U"`)
 	end := strings.Index(s[create:], "\nfi\n") + create
 	for _, cmd := range []string{"usermod -p", "chpasswd"} {

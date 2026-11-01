@@ -189,6 +189,8 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/servers/{id}/history", s.requireSession(http.HandlerFunc(s.handleHistory)))
 	mux.Handle("POST /api/servers/{id}/agent/update", s.requireSession(http.HandlerFunc(s.handleAgentUpdate)))
 	mux.Handle("POST /api/servers/agents/update", s.requireSession(http.HandlerFunc(s.handleAgentUpdateAll)))
+	mux.Handle("GET /api/servers/{id}/sudo", s.requireSession(http.HandlerFunc(s.handleSudo)))
+	mux.Handle("PUT /api/servers/{id}/sudo", s.requireSession(http.HandlerFunc(s.handleSetSudo)))
 
 	agent := func(pattern string, h http.HandlerFunc) { mux.Handle(pattern, s.requireSession(h)) }
 	agent("GET /api/agent/status", s.handleAgentStatus)

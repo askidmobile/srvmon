@@ -16,14 +16,14 @@ The interface is a dark TUI-style dashboard (btop-like) with a green accent. The
 ## Features
 
 - **Overview.** One table for all servers: CPU, RAM and disk bars, running/total containers (with a mark for failed ones), uptime, RAM size, the next hosting payment and its due date, plus the latest alerts. Filter by group, open a terminal in one click. Hotkeys: `1` overview, `3` terminal, `4` agent, `5` alerts, `6` settings.
-- **Metrics and containers.** A small Go agent (`srvmon-agent`) on each server reads CPU, RAM, swap, load, disks, network and uptime from `/proc`, containers through the docker socket (read-only), and pushes them to the panel. It buffers for an hour if the panel is unreachable. Metrics are stored in VictoriaMetrics.
+- **Metrics and containers.** A small Go agent (`srvmon-agent`) on each server reads CPU, RAM, swap, load, disks, network and uptime from `/proc`, containers through `srvmon-dockerproxy` (a filtered read-only Docker API: no writes, no environment variables of containers), and pushes them to the panel. It buffers for an hour if the panel is unreachable. Metrics are stored in VictoriaMetrics.
 - **Server screen.** Per-core CPU, memory, disks, network, processes, containers with status/health/restarts, and syslog + docker logs, all live while the screen is open.
 - **Server passport and payments.** Each server keeps a passport: description, project, group, tags, provider, plan, cost with currency and the next payment date. Payments show up in the overview, in Telegram (`/bills`) and as an alert a few days before the due date.
 - **Onboarding wizard.** Add a server, verify its SSH host key, log in once with a password or your own key. srvmon creates a `srvmon` user with its own ed25519 key, installs the agent and can disable password auth. The one-time password or key is never stored.
 - **Web terminal.** xterm.js ↔ WebSocket ↔ SSH client inside `srvmon-server` ↔ sshd. Tabs, resize, `docker exec` into a container. The AI agent panel sits next to the terminal (`F9` shows or hides it) and works in the context of that server. Private keys never leave the monitoring server; they are encrypted at rest (XChaCha20-Poly1305).
 - **AI agent.** Built on the [pi](https://pi.dev) SDK, any provider (DeepSeek, Anthropic, OpenAI, OpenRouter, Google, Ollama, any OpenAI- or Anthropic-compatible endpoint). Read-only commands run immediately; anything that changes a server waits for your explicit approval. The policy is enforced by `srvmon-server`, not by the model. Each server has its own chat context, chats keep their history, and the model can be picked per chat. Scheduled tasks (cron) report to Telegram, and you can ask the agent from Telegram with `/ask`.
 - **Alerts and Telegram.** Agent offline, container down/unhealthy, restart loops, CPU, disk, upcoming hosting payments, fail2ban bans, login attempts. Rules are editable (threshold, duration, level, channel: Telegram or panel only). Quiet hours in your time zone (critical alerts still go through), ack and mute, 90-day history. The bot answers `/status`, `/server`, `/alerts`, `/ack`, `/bills`, `/ask`.
-- **Security.** Password (argon2id) + TOTP or backup code, no username. Rate limiting, an audit log and fail2ban jails for the panel and sshd.
+- **Security.** Password (argon2id) + TOTP or backup code, no username. Rate limiting, an audit log and fail2ban jails for the panel and sshd. On servers, only the `srvmon-dockerproxy` container sees the docker socket, and the `srvmon` user gets limited sudo by default (see [Server access](#server-access)).
 
 ## Screenshots
 
@@ -102,7 +102,7 @@ The add wizard (`+ server`, `#/add`):
 1. Name, `host:port`, project, group, tags, description; optionally provider, plan, cost and next payment date.
 2. "Check host key": srvmon connects to sshd without logging in and shows the fingerprint. Compare it on the server (`ssh-keygen -lf /etc/ssh/ssh_host_ecdsa_key.pub`) and confirm; only this key is accepted afterwards.
 3. User (root or with sudo) and a one-time login method: **password**, **my key** (your private key, used once and not saved), or **panel key** (the panel shows its public key and a command to add it to `authorized_keys`).
-4. srvmon creates the `srvmon` user (docker group, optional passwordless sudo), installs its key, verifies key login, starts the `srvmon-agent` container with a token in `/etc/srvmon/agent.token` (0600) and optionally disables `PasswordAuthentication`.
+4. srvmon creates the `srvmon` user (docker group, sudo mode of your choice, see below), installs its key, verifies key login, starts the `srvmon-agent` container with a token in `/etc/srvmon/agent.token` (0600) and optionally disables `PasswordAuthentication`.
 
 Manually, without the wizard:
 
@@ -111,6 +111,14 @@ docker compose exec server /srvmon-server add-server -name shop-db -group prod -
 # on the target server, with deploy/agent/docker-compose.yml:
 SRVMON_URL=https://mon.example.com SRVMON_TOKEN=a_... docker compose up -d
 ```
+
+## Server access
+
+What the panel can do on a managed server, and what it cannot:
+
+- **Agent.** `srvmon-agent` never touches the docker socket. A separate `srvmon-dockerproxy` container (same image, no network, no capabilities, read-only root) holds the socket and serves the agent a unix socket with only `GET /_ping`, `/version`, `/containers/json`, `/containers/{id}/json` and `/containers/{id}/logs`; `Env` is removed from container inspect so secrets in environment variables stay on the server. The host's `/run` (docker and containerd sockets) is hidden from the agent's `/host` view. Panel updates move existing agents to this layout automatically.
+- **sudo of `srvmon`.** Three modes, chosen in the wizard and switchable in the server passport: **no sudo**; **limited** (default: `systemctl status/start/stop/restart/reload/…`, `journalctl`, `service`, `docker`; no `sudo -i`, no editing or enabling units); **full** (`NOPASSWD:ALL`, root in the terminal). The panel reads the current mode live with `sudo -n -l`; servers added before this change keep full sudo until you switch them.
+- **The honest part.** `srvmon` stays in the `docker` group, and docker access is root-equivalent. Limited sudo guards against mistakes (yours, or a command you approved for the AI agent), not against someone who already controls the panel. That is also how the panel can widen a narrowed sudo again: it writes `/etc/sudoers.d/srvmon` through a one-off container of the agent image, after `visudo -c` on the server.
 
 ## Alerts and Telegram
 

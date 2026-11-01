@@ -48,12 +48,19 @@ func Run(ctx context.Context, cfg Config, log *slog.Logger) error {
 	hostname := readHostname(cfg.HostRoot)
 	col := &Collector{HostProc: cfg.HostProc, HostRoot: cfg.HostRoot}
 	var dock *Docker
-	if cfg.DockerSock != "" {
+	// The socket may appear after the start (srvmon-dockerproxy starting
+	// next to the agent): it is looked up again before every report.
+	findDocker := func() {
+		if dock != nil || cfg.DockerSock == "" {
+			return
+		}
 		if _, err := os.Stat(cfg.DockerSock); err == nil {
 			dock = NewDocker(cfg.DockerSock)
-		} else {
-			log.Warn("docker socket not available, containers will not be reported", "sock", cfg.DockerSock)
 		}
+	}
+	findDocker()
+	if dock == nil && cfg.DockerSock != "" {
+		log.Warn("docker socket not available yet, containers are not reported until it appears", "sock", cfg.DockerSock)
 	}
 	client := &http.Client{Timeout: 15 * time.Second}
 	endpoint := strings.TrimRight(cfg.URL, "/") + "/api/ingest"
@@ -84,6 +91,12 @@ func Run(ctx context.Context, cfg Config, log *slog.Logger) error {
 			timer.Reset(cfg.Interval)
 		}
 
+		if dock == nil && cfg.DockerSock != "" {
+			if findDocker(); dock != nil {
+				logs.Docker = dock
+				log.Info("docker socket available", "sock", cfg.DockerSock)
+			}
+		}
 		rep := protocol.Report{Hostname: hostname, AgentVersion: cfg.Version, Timestamp: now.UTC()}
 		h, err := col.Collect()
 		if err != nil {
