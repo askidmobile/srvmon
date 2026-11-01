@@ -57,6 +57,10 @@ var mcpProtocols = map[string]bool{"2025-11-25": true, "2025-06-18": true, "2025
 type mcpState struct {
 	mu      sync.Mutex
 	pending map[int64]chan struct{}
+	// slots counts confirmations from the moment run_command reserves one
+	// until their supervisor ends, so concurrent calls cannot overrun
+	// mcpMaxPending between the check and the registration.
+	slots int
 }
 
 func newMCPState() *mcpState { return &mcpState{pending: map[int64]chan struct{}{}} }
@@ -558,7 +562,10 @@ func (s *Server) mcpRun(ctx context.Context, who, server, command, reason string
 	}
 
 	s.mcp.mu.Lock()
-	busy := len(s.mcp.pending) >= mcpMaxPending
+	busy := s.mcp.slots >= mcpMaxPending
+	if !busy {
+		s.mcp.slots++
+	}
 	s.mcp.mu.Unlock()
 	if busy {
 		return mcpText(true, "too many commands already wait for the owner; wait for them with action_status")
@@ -571,6 +578,9 @@ func (s *Server) mcpRun(ctx context.Context, who, server, command, reason string
 		ServerID: srv.ID, ServerName: srv.Name, Command: command, Reason: truncate(reason, 500), Source: who,
 	})
 	if err != nil {
+		s.mcp.mu.Lock()
+		s.mcp.slots--
+		s.mcp.mu.Unlock()
 		return mcpText(true, "internal error")
 	}
 	s.superviseAction(action, access, who)
@@ -596,6 +606,7 @@ func (s *Server) superviseAction(action store.AgentAction, access store.SSHAcces
 		defer func() {
 			s.mcp.mu.Lock()
 			delete(s.mcp.pending, action.ID)
+			s.mcp.slots--
 			s.mcp.mu.Unlock()
 			close(done)
 		}()

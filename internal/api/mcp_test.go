@@ -337,3 +337,30 @@ func TestMCPTasks(t *testing.T) {
 		t.Fatalf("left %+v", list)
 	}
 }
+
+// Concurrent calls cannot queue more than mcpMaxPending confirmations.
+func TestMCPPendingCapIsAtomic(t *testing.T) {
+	a := newAgentEnv(t, "http://127.0.0.1:1")
+	tok := a.newMCPToken(t, "exec")
+	a.srv.onActionPending = nil
+	old := mcpWait
+	mcpWait = 10 * time.Millisecond
+	t.Cleanup(func() { mcpWait = old })
+	var wg sync.WaitGroup
+	for i := 0; i < mcpMaxPending+15; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			a.call(t, tok.Secret, "run_command", map[string]any{"server": "prod-api-01", "command": "touch /tmp/x"})
+		}()
+	}
+	wg.Wait()
+	list, _ := a.st.ListAgentActions(context.Background(), store.ActionPending, 100)
+	if len(list) != mcpMaxPending {
+		t.Fatalf("pending %d, want %d", len(list), mcpMaxPending)
+	}
+	r := a.call(t, tok.Secret, "run_command", map[string]any{"server": "prod-api-01", "command": "touch /tmp/y"})
+	if !r.Result.IsError || !strings.Contains(r.text(), "too many") {
+		t.Fatalf("over the cap: %+v", r)
+	}
+}
