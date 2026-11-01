@@ -23,6 +23,7 @@
 - **Web 终端。** xterm.js ↔ WebSocket ↔ `srvmon-server` 内的 SSH 客户端 ↔ sshd。支持多标签、窗口缩放、`docker exec` 进入容器。终端旁边是 AI 代理面板（`F9` 显示或隐藏），在该服务器的上下文中工作。私钥从不离开监控服务器，并以 XChaCha20-Poly1305 加密存储。
 - **AI 代理。** 基于 [pi](https://pi.dev) SDK，支持任意提供商（DeepSeek、Anthropic、OpenAI、OpenRouter、Google、Ollama，以及任何 OpenAI / Anthropic 兼容接口）。只读命令直接执行；任何会修改服务器的命令都必须经你明确批准，策略由 `srvmon-server` 而非模型执行。每台服务器有独立的对话上下文，对话保留历史，每个对话可单独选择模型。定时任务（cron）结果可发送到 Telegram，也可以在 Telegram 中用 `/ask` 向代理提问。
 - **告警与 Telegram。** 代理离线、容器停止或不健康、频繁重启、CPU、磁盘、主机续费提醒、fail2ban 封禁、登录尝试。规则可编辑（阈值、持续时间、级别、渠道：Telegram 或仅面板）。按你的时区设置静默时段（严重告警仍会发送），支持确认与临时静音，保留 90 天历史。机器人命令：`/status`、`/server`、`/alerts`、`/ack`、`/bills`、`/ask`。
+- **面板心跳（dead man's switch）。** 面板每分钟自检一次并 ping 一个外部 URL，例如 [healthchecks.io](https://healthchecks.io)。如果面板宕机，ping 会停止，该服务会通过邮件或其自身渠道提醒您。
 - **安全。** 密码（argon2id）+ TOTP 或备用码，无需用户名。限流、审计日志，以及面板和 sshd 的 fail2ban 规则。
 
 ## 截图
@@ -121,6 +122,16 @@ SRVMON_URL=https://mon.example.com SRVMON_TOKEN=a_... docker compose up -d
 4. 发送测试消息。
 
 如果监控服务器无法访问 `api.telegram.org`，可以用 Cloudflare Worker 搭一个代理并设置 `SRVMON_TELEGRAM_API`，见 [docs/telegram-proxy.md](docs/telegram-proxy.md)。
+
+### 面板心跳（dead man's switch）
+
+告警由面板自己发送，因此宕机的面板无法告诉你它已宕机。心跳弥补了这一点：`srvmon-server` 每分钟检查数据库、告警引擎、VictoriaMetrics 和 Telegram 机器人，然后 ping 一个外部 URL。如果面板或其主机宕机，ping 会停止，外部服务会通过其自身渠道发出告警。
+
+1. 在 [healthchecks.io](https://healthchecks.io)（免费套餐即可）添加一个检查：period 1 分钟，grace 5 分钟。
+2. 在检查的集成中选择提醒方式：默认启用邮件，也可使用 Telegram、ntfy 等。
+3. 在面板中：告警 → 面板心跳 → 粘贴 ping URL（`https://hc-ping.com/<uuid>`）→ 保存，然后点击“立即 ping”。
+
+当某项自检连续 3 分钟失败时，面板会把问题发送到 `<url>/fail`，healthchecks.io 会立即告警并显示出错内容。对于其他接收方（Uptime Kuma 推送监控、你自己的第二台服务器），取消勾选“将问题报告到 URL/fail”：此时面板在出问题期间只是跳过 ping。URL 使用主密钥加密存储。
 
 ## AI 代理
 

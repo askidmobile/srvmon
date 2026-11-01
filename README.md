@@ -23,6 +23,7 @@ The interface is a dark TUI-style dashboard (btop-like) with a green accent. The
 - **Web terminal.** xterm.js ↔ WebSocket ↔ SSH client inside `srvmon-server` ↔ sshd. Tabs, resize, `docker exec` into a container. The AI agent panel sits next to the terminal (`F9` shows or hides it) and works in the context of that server. Private keys never leave the monitoring server; they are encrypted at rest (XChaCha20-Poly1305).
 - **AI agent.** Built on the [pi](https://pi.dev) SDK, any provider (DeepSeek, Anthropic, OpenAI, OpenRouter, Google, Ollama, any OpenAI- or Anthropic-compatible endpoint). Read-only commands run immediately; anything that changes a server waits for your explicit approval. The policy is enforced by `srvmon-server`, not by the model. Each server has its own chat context, chats keep their history, and the model can be picked per chat. Scheduled tasks (cron) report to Telegram, and you can ask the agent from Telegram with `/ask`.
 - **Alerts and Telegram.** Agent offline, container down/unhealthy, restart loops, CPU, disk, upcoming hosting payments, fail2ban bans, login attempts. Rules are editable (threshold, duration, level, channel: Telegram or panel only). Quiet hours in your time zone (critical alerts still go through), ack and mute, 90-day history. The bot answers `/status`, `/server`, `/alerts`, `/ack`, `/bills`, `/ask`.
+- **Panel heartbeat (dead man's switch).** Once a minute the panel checks itself and pings an external URL such as [healthchecks.io](https://healthchecks.io). If the panel dies, the pings stop and that service alerts you by email or its own channels.
 - **Security.** Password (argon2id) + TOTP or backup code, no username. Rate limiting, an audit log and fail2ban jails for the panel and sshd.
 
 ## Screenshots
@@ -128,6 +129,16 @@ Bot setup:
 4. "Send test".
 
 If the monitoring server cannot reach `api.telegram.org` (Russian hosting, corporate networks), run a tiny Cloudflare Worker proxy and set `SRVMON_TELEGRAM_API`: see [docs/telegram-proxy.md](docs/telegram-proxy.md).
+
+### Panel heartbeat (dead man's switch)
+
+Alerts come from the panel itself, so a dead panel cannot tell you it is dead. The heartbeat closes that gap: once a minute `srvmon-server` checks its database, the alert engine, VictoriaMetrics and the Telegram bot, then pings an external URL. If the panel or its host goes down, the pings stop and the external service raises the alarm through its own channels.
+
+1. On [healthchecks.io](https://healthchecks.io) (free plan is enough) add a check: period 1 minute, grace 5 minutes.
+2. In the check's integrations choose where to be alerted: email is on by default, Telegram, ntfy and others are available.
+3. In the panel: alerts → panel heartbeat → paste the ping URL (`https://hc-ping.com/<uuid>`) → save, then "ping now".
+
+When a self-check fails for 3 minutes in a row, the panel sends the problems to `<url>/fail`, so healthchecks.io alerts right away and shows what broke. For other receivers (an Uptime Kuma push monitor, your own second server) uncheck "report problems to URL/fail": the panel then just skips pings while something is broken. The URL is stored encrypted with the master key.
 
 ## AI agent
 
