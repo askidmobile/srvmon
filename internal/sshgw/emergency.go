@@ -100,14 +100,16 @@ F="$D/authorized_keys"
 mkdir -p "$D"
 chmod 700 "$D"
 touch "$F"
-nb=$(grep -cxF "$B" "$F" || true)
-ne=$(grep -cxF "$E" "$F" || true)
-# An unterminated block would swallow the lines after it, the panel key
-# among them: stop instead.
-[ "$nb" = "$ne" ] || { echo srvmon:bad-block >&2; exit 5; }
 T=$(mktemp "$D/.authorized_keys.XXXXXX")
 trap 'rm -f "$T"' EXIT
-awk -v b="$B" -v e="$E" '$0==b{skip=1;next} $0==e{skip=0;next} !skip' "$F" > "$T"
+# Drop the old block. A malformed one (begin inside a block, end outside
+# one, begin without end) would swallow lines, the panel key among them:
+# stop without touching the file instead.
+awk -v b="$B" -v e="$E" '
+$0==b { if (skip) bad=1; skip=1; next }
+$0==e { if (!skip) bad=1; skip=0; next }
+!skip { print }
+END { if (skip || bad) exit 5 }' "$F" > "$T" || { echo srvmon:bad-block >&2; exit 5; }
 if [ -n "$KEYS" ]; then
   printf '%s\n%s\n%s\n' "$B" "$KEYS" "$E" >> "$T"
 fi

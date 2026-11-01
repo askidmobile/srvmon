@@ -232,6 +232,8 @@ func (r *Runner) RunNow(ctx context.Context) (Status, error) {
 	st := r.Status(ctx)
 	now := r.Now().UTC()
 	st.AttemptAt = &now
+	// The returned status describes the finished attempt.
+	st.Running = false
 	obj, size, err := r.run(ctx, now)
 	if err != nil {
 		st.Error = err.Error()

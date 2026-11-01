@@ -52,16 +52,24 @@ func TestEmergencyKeysBlock(t *testing.T) {
 	if got, _ = readFile(ak); got != panel.Public+"\n" {
 		t.Fatalf("after removal:\n%s", got)
 	}
-	// A begin marker without an end must not swallow the panel key.
-	if err := writeFile(ak, emergencyBegin+"\n"+panel.Public+"\n"); err != nil {
-		t.Fatal(err)
-	}
-	out, err := runEmergency(t, home, []string{k1.Public})
-	if err == nil || !strings.Contains(out, "srvmon:bad-block") {
-		t.Fatalf("broken block accepted: %v %s", err, out)
-	}
-	if got, _ = readFile(ak); !strings.Contains(got, panel.Public) {
-		t.Fatal("panel key lost")
+	// Malformed blocks must not swallow the panel key.
+	for _, broken := range []string{
+		emergencyBegin + "\n" + panel.Public + "\n",
+		emergencyEnd + "\n" + emergencyBegin + "\n" + panel.Public + "\n",
+		emergencyBegin + "\n" + emergencyBegin + "\n" + emergencyEnd + "\n" + panel.Public + "\n" + emergencyEnd + "\n",
+	} {
+		if err := writeFile(ak, broken); err != nil {
+			t.Fatal(err)
+		}
+		for _, keys := range [][]string{{k1.Public}, nil} {
+			out, err := runEmergency(t, home, keys)
+			if err == nil || !strings.Contains(out, "srvmon:bad-block") {
+				t.Fatalf("broken block accepted: %v %s", err, out)
+			}
+			if got, _ = readFile(ak); got != broken {
+				t.Fatalf("file changed:\n%s", got)
+			}
+		}
 	}
 }
 

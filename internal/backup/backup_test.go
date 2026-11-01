@@ -192,13 +192,17 @@ func TestRunnerScheduleRetentionAndAlerts(t *testing.T) {
 	if _, ok := bucket.objs["srvmon/unrelated.txt"]; !ok {
 		t.Fatal("retention deleted a foreign object")
 	}
-	if s := r.Status(ctx); s.Error != "" || s.OKAt == nil || s.Object != objs[0].Key {
+	if s, err := r.RunNow(ctx); err != nil || s.Running {
+		t.Fatalf("finished backup reports %+v %v", s, err)
+	}
+	objs, _ = Backups(ctx, bucket, "srvmon/")
+	if s := r.Status(ctx); s.Error != "" || s.OKAt == nil || s.Running || s.Object != objs[0].Key {
 		t.Fatalf("status %+v", s)
 	}
 
 	// Failures: retried hourly, reported once a day.
 	bucket.failPut = true
-	for i := 0; i < 30; i++ {
+	for i := 0; i < 54; i++ { // the first failure is due a day after the last backup
 		r.tick(ctx)
 		now = now.Add(time.Hour)
 	}
