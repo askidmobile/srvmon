@@ -222,7 +222,9 @@ func limitOutput(s string) string {
 }
 
 // runOnServer runs cmd over SSH under `timeout`, so a streaming command
-// (logs -f, events) ends on the server too, not only on our side.
+// (logs -f, events) ends on the server too, not only on our side. It is the
+// agent's and MCP's path only (the owner's terminal does not use it), so its
+// output is redacted.
 func (s *Server) runOnServer(ctx context.Context, a store.SSHAccess, cmd string, limit time.Duration) (int, string, error) {
 	ctx, cancel := context.WithTimeout(ctx, limit+20*time.Second)
 	defer cancel()
@@ -237,6 +239,9 @@ func (s *Server) runOnServer(ctx context.Context, a store.SSHAccess, cmd string,
 	// fill our memory before limitOutput trims it.
 	out, errOut, err := sshgw.RunCapped(ctx, client, wrapped, toolOutputKeepHead, toolOutputMax-toolOutputKeepHead)
 	code := sshgw.ExitCode(err)
+	// Everything here goes to the model: mask secrets even in the output of
+	// a command the owner approved.
+	out, errOut = aiagent.Redact(out), aiagent.Redact(errOut)
 	text := out
 	if strings.TrimSpace(errOut) != "" {
 		if text != "" && !strings.HasSuffix(text, "\n") {
