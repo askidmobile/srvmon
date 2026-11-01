@@ -180,6 +180,11 @@ func (s *Server) handleTerminal(w http.ResponseWriter, r *http.Request) {
 	out.rec = rec
 	sess.Stdout = out
 	sess.Stderr = out
+	// Before the shell starts: its first output (the prompt) must not
+	// reach the browser ahead of the notice that the session is recorded.
+	if rec != nil {
+		out.control(map[string]any{"type": "rec", "on": true, "id": rec.id})
+	}
 	if container != "" {
 		err = sess.Start("docker exec -it " + container + " sh -c 'command -v bash >/dev/null 2>&1 && exec bash || exec sh'")
 	} else {
@@ -196,9 +201,6 @@ func (s *Server) handleTerminal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	started = true
-	if rec != nil {
-		out.control(map[string]any{"type": "rec", "on": true, "id": rec.id})
-	}
 	_ = s.store.Audit(context.Background(), ip, "terminal_open", target)
 	s.log.Info("terminal open", "server", target, "ip", ip)
 	opened := time.Now()
