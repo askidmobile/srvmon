@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/askidmobile/srvmon/internal/i18n"
@@ -48,8 +49,12 @@ func tlsConfig(serverName string) *tls.Config {
 		ServerName:       serverName,
 		MinVersion:       tls.VersionTLS12,
 		CurvePreferences: []tls.CurveID{tls.X25519, tls.CurveP256, tls.CurveP384},
+		RootCAs:          rootCAs,
 	}
 }
+
+// rootCAs replaces the system roots in tests.
+var rootCAs *x509.CertPool
 
 const userAgent = "srvmon-check/1"
 
@@ -72,10 +77,23 @@ func probe(ctx context.Context, t Target) Result {
 
 func probeHTTP(ctx context.Context, t Target) Result {
 	var first *tls.ConnectionState
+	// The certificate of the first verified handshake, which is always with
+	// the URL itself: kept for when the server then fails to answer.
+	var mu sync.Mutex
+	var handshake *CertInfo
+	cfg := tlsConfig("")
+	cfg.VerifyConnection = func(cs tls.ConnectionState) error {
+		mu.Lock()
+		defer mu.Unlock()
+		if handshake == nil {
+			handshake = certOf(&cs)
+		}
+		return nil
+	}
 	tr := &http.Transport{
 		Proxy:               nil, // the target is checked from the panel's own network
 		DialContext:         (&net.Dialer{Timeout: Timeout}).DialContext,
-		TLSClientConfig:     tlsConfig(""),
+		TLSClientConfig:     cfg,
 		TLSHandshakeTimeout: Timeout,
 		DisableKeepAlives:   true,
 		ForceAttemptHTTP2:   true,
@@ -104,6 +122,11 @@ func probeHTTP(ctx context.Context, t Target) Result {
 	if err != nil {
 		r := Result{Error: describe(err)}
 		r.Cert = invalidCert(err)
+		mu.Lock()
+		if r.Cert == nil {
+			r.Cert = handshake
+		}
+		mu.Unlock()
 		if first != nil {
 			r.Cert = certOf(first)
 		}

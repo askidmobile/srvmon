@@ -103,6 +103,27 @@ func TestProbeTLSCert(t *testing.T) {
 	}
 }
 
+func TestCertKeptWhenNoHTTPAnswer(t *testing.T) {
+	// A trusted handshake, then the server drops the connection without
+	// answering: the check is down, but the certificate is known.
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, _, err := w.(http.Hijacker).Hijack()
+		if err == nil {
+			conn.Close()
+		}
+	}))
+	defer srv.Close()
+	pool := x509.NewCertPool()
+	pool.AddCert(srv.Certificate())
+	rootCAs = pool
+	defer func() { rootCAs = nil }()
+	tg, _ := Parse(srv.URL)
+	r := probe(context.Background(), tg)
+	if r.Up || r.Cert == nil || !r.Cert.NotAfter.Equal(srv.Certificate().NotAfter.UTC()) {
+		t.Fatalf("https: %+v", r)
+	}
+}
+
 func TestInvalidCertIsTheLeaf(t *testing.T) {
 	leaf := &x509.Certificate{NotAfter: time.Date(2026, 12, 1, 0, 0, 0, 0, time.UTC)}
 	root := &x509.Certificate{NotAfter: time.Date(2035, 1, 1, 0, 0, 0, 0, time.UTC)}
