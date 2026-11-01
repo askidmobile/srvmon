@@ -172,7 +172,17 @@ func ValidateURL(raw string) (string, error) {
 	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || u.Fragment != "" || u.User != nil {
 		return "", ErrBadURL
 	}
-	return strings.TrimRight(u.String(), "/"), nil
+	return withPath(u, strings.TrimRight(u.EscapedPath(), "/")), nil
+}
+
+// withPath rebuilds u with an escaped path, keeping escapes and the query
+// exactly as given (they may carry the receiver's token).
+func withPath(u *url.URL, escapedPath string) string {
+	out := u.Scheme + "://" + u.Host + escapedPath
+	if u.RawQuery != "" {
+		out += "?" + u.RawQuery
+	}
+	return out
 }
 
 // failURL appends /fail to the path of target, keeping its query.
@@ -181,9 +191,7 @@ func failURL(target string) string {
 	if err != nil {
 		return target + "/fail"
 	}
-	u.Path = strings.TrimRight(u.Path, "/") + "/fail"
-	u.RawPath = ""
-	return u.String()
+	return withPath(u, strings.TrimRight(u.EscapedPath(), "/")+"/fail")
 }
 
 // mask hides the secret part of a ping URL: the path and query usually are

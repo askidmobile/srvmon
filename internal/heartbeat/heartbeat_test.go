@@ -72,6 +72,8 @@ func TestValidateURL(t *testing.T) {
 	for in, want := range map[string]string{
 		"https://hc-ping.com/abc/":          "https://hc-ping.com/abc",
 		" http://10.0.0.2:3001/api/push/x ": "http://10.0.0.2:3001/api/push/x",
+		"https://r.example/ping?token=abc/": "https://r.example/ping?token=abc/",
+		"https://r.example/ping/abc%2Fdef/": "https://r.example/ping/abc%2Fdef",
 	} {
 		got, err := ValidateURL(in)
 		if err != nil || got != want {
@@ -89,6 +91,7 @@ func TestFailURL(t *testing.T) {
 	for in, want := range map[string]string{
 		"https://hc-ping.com/abc":            "https://hc-ping.com/abc/fail",
 		"https://r.example/ping?token=s&x=1": "https://r.example/ping/fail?token=s&x=1",
+		"https://r.example/ping/abc%2Fdef":   "https://r.example/ping/abc%2Fdef/fail",
 	} {
 		if got := failURL(in); got != want {
 			t.Errorf("%q: %q", in, got)
