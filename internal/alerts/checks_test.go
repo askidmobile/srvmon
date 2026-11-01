@@ -60,8 +60,8 @@ func TestCertAndDomainExpiry(t *testing.T) {
 	domain := te.now.Add(20*24*time.Hour + time.Hour)
 	fc.st = checks.ServerState{Ready: true, DomainsReady: true,
 		Checks: []checks.CheckState{
-			{Target: "https://a.example.com/", Result: &checks.Result{Up: true, Cert: &checks.CertInfo{NotAfter: soon}}},
-			{Target: "https://b.example.com/", Result: &checks.Result{Up: true, Cert: &checks.CertInfo{NotAfter: later}}},
+			{Target: "https://a.example.com/", TLS: true, Result: &checks.Result{Up: true, Cert: &checks.CertInfo{NotAfter: soon}}},
+			{Target: "https://b.example.com/", TLS: true, Result: &checks.Result{Up: true, Cert: &checks.CertInfo{NotAfter: later}}},
 			{Target: "db.example.com:5432", Result: &checks.Result{Up: true}},
 		},
 		Domains: []checks.DomainInfo{{Domain: "example.com", Expires: &domain}, {Domain: "unknown.org"}},
@@ -76,6 +76,16 @@ func TestCertAndDomainExpiry(t *testing.T) {
 		got["domain_expiry example.com"] != "domain example.com expires in 20 days ("+domain.UTC().Format("02.01.2006")+")" {
 		t.Fatalf("open: %v", got)
 	}
+	// After a restart the certificate is not seen yet (timeout) and the
+	// domain lookup failed: open alerts stay, nothing resolves.
+	before := len(te.n.list())
+	fc.st.Checks[0].Result = &checks.Result{Error: "timeout"}
+	fc.st.Domains[0].Expires = nil
+	te.eval(t)
+	if open := te.open(t); len(open) != 2 || len(te.n.list()) != before {
+		t.Fatalf("unknown expiry resolved alerts: %+v", open)
+	}
+	fc.st.Domains[0].Expires = &domain
 	// The certificate was renewed.
 	fc.st.Checks[0].Result.Cert = &checks.CertInfo{NotAfter: later}
 	te.eval(t)

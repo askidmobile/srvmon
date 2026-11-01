@@ -159,6 +159,12 @@ func infoOf(c *x509.Certificate) *CertInfo {
 
 // invalidCert returns the certificate a verification error is about.
 func invalidCert(err error) *CertInfo {
+	// The leaf is the first certificate the server sent; the one an x509
+	// error names may be an intermediate or the root.
+	var ve *tls.CertificateVerificationError
+	if errors.As(err, &ve) && len(ve.UnverifiedCertificates) > 0 {
+		return infoOf(ve.UnverifiedCertificates[0])
+	}
 	var ci x509.CertificateInvalidError
 	if errors.As(err, &ci) && ci.Cert != nil {
 		return infoOf(ci.Cert)

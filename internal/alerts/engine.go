@@ -56,6 +56,10 @@ type condKey struct {
 type cond struct {
 	subject string
 	message string
+	// unknown: the data for this subject is missing (a certificate not
+	// seen since the restart, a failed domain lookup). An open alert stays
+	// as it is; nothing new fires.
+	unknown bool
 }
 
 // Engine evaluates rules. Create it with New and run Run in a goroutine.
@@ -230,6 +234,12 @@ func (e *Engine) Evaluate(ctx context.Context) error {
 			}
 			for _, c := range conds {
 				k := condKey{r.ID, srv.ID, c.subject}
+				if c.unknown {
+					if _, isOpen := openBy[k]; isOpen {
+						evaluated[k] = true
+					}
+					continue
+				}
 				since, seen := e.pending[k]
 				if !seen {
 					since = now
@@ -458,7 +468,11 @@ func (e *Engine) checkTargets(r store.Rule, srv store.Server, now time.Time) ([]
 			return nil, false
 		}
 		for _, c := range st.Checks {
+			if !c.TLS {
+				continue
+			}
 			if c.Result == nil || c.Result.Cert == nil {
+				out = append(out, cond{subject: c.Target, unknown: true})
 				continue
 			}
 			days := DaysLeft(now, c.Result.Cert.NotAfter)
@@ -472,6 +486,7 @@ func (e *Engine) checkTargets(r store.Rule, srv store.Server, now time.Time) ([]
 		}
 		for _, d := range st.Domains {
 			if d.Expires == nil {
+				out = append(out, cond{subject: d.Domain, unknown: true})
 				continue
 			}
 			days := DaysLeft(now, *d.Expires)

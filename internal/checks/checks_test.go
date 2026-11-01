@@ -103,6 +103,16 @@ func TestProbeTLSCert(t *testing.T) {
 	}
 }
 
+func TestInvalidCertIsTheLeaf(t *testing.T) {
+	leaf := &x509.Certificate{NotAfter: time.Date(2026, 12, 1, 0, 0, 0, 0, time.UTC)}
+	root := &x509.Certificate{NotAfter: time.Date(2035, 1, 1, 0, 0, 0, 0, time.UTC)}
+	err := &tls.CertificateVerificationError{UnverifiedCertificates: []*x509.Certificate{leaf, root},
+		Err: x509.UnknownAuthorityError{Cert: root}}
+	if c := invalidCert(fmt.Errorf("get: %w", err)); c == nil || !c.NotAfter.Equal(leaf.NotAfter) {
+		t.Fatalf("cert: %+v", c)
+	}
+}
+
 func TestDescribe(t *testing.T) {
 	ce := x509.CertificateInvalidError{Reason: x509.Expired, Cert: &x509.Certificate{NotAfter: time.Unix(0, 0)}}
 	if got := describe(fmt.Errorf("Get: %w", ce)); got != "certificate expired" {
