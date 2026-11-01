@@ -15,6 +15,7 @@ var zh = map[string]string{
 	"%ds":                                  "%d秒",
 	"%s %s is not in the safe option list": "%s %s 不在安全选项列表中",
 	"%s %s without a value":                "%s %s 缺少值",
+	"%s %s reads files recursively":        "%s %s 会递归读取文件",
 	"%s may hold secrets":                  "%s 可能包含机密",
 	"%s sends DNS queries":                 "%s 会发送 DNS 查询",
 	"%s looks up %s in DNS":                "%s 会在 DNS 中查询 %s",

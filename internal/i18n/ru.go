@@ -15,6 +15,7 @@ var ru = map[string]string{
 	"%ds":                                  "%dс",
 	"%s %s is not in the safe option list": "%s %s нет в списке безопасных опций",
 	"%s %s without a value":                "%s %s без значения",
+	"%s %s reads files recursively":        "%s %s читает файлы рекурсивно",
 	"%s may hold secrets":                  "%s может содержать секреты",
 	"%s sends DNS queries":                 "%s отправляет DNS-запросы",
 	"%s looks up %s in DNS":                "%s ищет %s в DNS",

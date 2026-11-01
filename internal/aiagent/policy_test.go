@@ -76,6 +76,8 @@ func TestClassify(t *testing.T) {
 		"ls /etc/ssl/private",
 		"cat /etc/ssl/certs/ca.pem",
 		"grep -c env /etc/environment",
+		"grep -in error /var/log/syslog",
+		"diff /etc/a.conf /etc/b.conf",
 	}
 	for _, c := range readOnly {
 		if ok, why := Classify(c); !ok {
@@ -206,6 +208,13 @@ func TestClassify(t *testing.T) {
 		"jq . --rawfile=/opt/app/.env",
 		"cat -- /run/secrets/db_password",
 		"cat /root/.pgpass",
+		"grep -rh . /run/secrets",
+		"grep -R PASS /etc",
+		"grep --recursive x /opt",
+		"grep --rec x /opt",
+		"grep -d recurse x /opt",
+		"egrep -irn x /srv",
+		"diff -r /a /b",
 	}
 	for _, c := range mutating {
 		if ok, _ := Classify(c); ok {

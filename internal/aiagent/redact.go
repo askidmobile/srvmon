@@ -58,7 +58,7 @@ var (
 	}
 	jsonAssign = regexp.MustCompile(`"` + secretKey + `=(?:[^"\\\n]|\\.)*"`)
 	// KEY=value, KEY: value, "key": "value" where the key names a secret.
-	secretAssign = regexp.MustCompile(secretKey + `"?[ \t]*[:=][ \t]*("(?:[^"\\\n]|\\.)*"|'[^'\n]*'|\$\{[^}\s]*\}|[^\s"',;}\]]+)`)
+	secretAssign = regexp.MustCompile(secretKey + `"?[ \t]*[:=][ \t]*("(?:[^"\\\n]|\\.)*"|'[^'\n]*'|\$\{[^}\s]*\}|[^\s"'}\]]+)`)
 	// A placeholder, not a value: ${DB_PASSWORD}, ${X:-default}, $DB_PASSWORD.
 	placeholder = regexp.MustCompile(`^\$(\{[A-Za-z_][A-Za-z0-9_]*(:?[-=?+][^}]*)?\}|[A-Z_][A-Z0-9_]*)$`)
 	assignSep   = regexp.MustCompile(`"?[ \t]*[:=][ \t]*`)
@@ -74,6 +74,16 @@ func redactAssign(m string) string {
 		return m
 	}
 	key, sep, val := m[:loc[0]], m[loc[0]:loc[1]], m[loc[1]:]
+	// An unquoted value may contain , and ; (PASSWORD=ab;cd): only a trailing
+	// one is a separator of structured output ({password: x, user: y}).
+	rest := ""
+	if val != "" && val[0] != '"' && val[0] != '\'' {
+		t := strings.TrimRight(val, ",;")
+		val, rest = t, val[len(t):]
+		if val == "" {
+			return m
+		}
+	}
 	if keepValue(val) {
 		return m
 	}
@@ -81,7 +91,7 @@ func redactAssign(m string) string {
 	if len(val) >= 2 && (val[0] == '"' || val[0] == '\'') {
 		q = val[:1]
 	}
-	return key + sep + q + "***" + q
+	return key + sep + q + "***" + q + rest
 }
 
 func keepValue(val string) bool {

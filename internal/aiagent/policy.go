@@ -162,6 +162,18 @@ func checkProgram(words []string) string {
 		return i18n.T("the command is given by a path or with an environment variable")
 	}
 	if anyArgs[prog] {
+		switch prog {
+		case "grep", "egrep", "fgrep", "zgrep":
+			// A recursive grep reads every file below a directory, secret
+			// ones included (grep -rh . /run/secrets prints bare values).
+			if a := hasArg(words, "-r", "-R", "-d", "--recursive", "--dereference-recursive", "--directories"); a != "" {
+				return i18n.T("%s %s reads files recursively", prog, a)
+			}
+		case "diff":
+			if a := hasArg(words, "-r", "--recursive"); a != "" {
+				return i18n.T("%s %s reads files recursively", prog, a)
+			}
+		}
 		return ""
 	}
 	switch prog {

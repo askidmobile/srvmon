@@ -25,6 +25,10 @@ func TestRedact(t *testing.T) {
 		{"password: $2b$12$abcdefghijklmnopqrstuv", "password: ***"},
 		{"PASSWORD: ${DB_PASSWORD:-changeme}", "PASSWORD: ${DB_PASSWORD:-changeme}"},
 		{"PASSWORD=$DB_PASSWORD", "PASSWORD=$DB_PASSWORD"},
+		{"DB_PASSWORD: abc,secret-rest", "DB_PASSWORD: ***"},
+		{"PASSWORD=ab;cdef", "PASSWORD=***"},
+		{"{password: abc, user: app}", "{password: ***, user: app}"},
+		{"password=abc;", "password=***;"},
 		// Configuration, not secrets: kept.
 		{"PasswordAuthentication no", "PasswordAuthentication no"},
 		{"auth_required: true", "auth_required: true"},
