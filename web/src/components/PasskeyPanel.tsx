@@ -12,6 +12,7 @@ import {
   isIPHost,
   passkeyApi,
   passkeyProblem,
+  type CreationJSON,
   type PasskeyList,
   type PasskeyView,
 } from "@/lib/passkey";
@@ -82,6 +83,9 @@ export function PasskeyPanel() {
   const [name, setName] = useState(deviceName());
   const [code, setCode] = useState("");
   const [agree, setAgree] = useState(false);
+  // Prompt options issued after the code passed: the next click opens the
+  // browser prompt directly.
+  const [options, setOptions] = useState<CreationJSON | null>(null);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
@@ -99,19 +103,44 @@ export function PasskeyPanel() {
   const keys = list?.passkeys ?? [];
   const here = keys.filter((k) => k.here);
 
-  const add = async () => {
+  const reset = () => {
+    setAdding(false);
+    setCode("");
+    setAgree(false);
+    setOptions(null);
+  };
+
+  // Step 1: the code from the authenticator app confirms it is the owner.
+  const confirmCode = async (c: string) => {
     setBusy(true);
     setMsg(null);
     try {
-      await passkeyApi.add(code.replace(/\s/g, ""), name.trim());
-      setAdding(false);
+      setOptions(await passkeyApi.addBegin(c.replace(/\s/g, ""), name.trim()));
+    } catch (e) {
       setCode("");
-      setAgree(false);
+      setMsg({ ok: false, text: errText(e) });
+    }
+    setBusy(false);
+  };
+
+  // Step 2: the browser prompt, opened right in the click.
+  const add = async () => {
+    if (!options) return;
+    setBusy(true);
+    setMsg(null);
+    try {
+      await passkeyApi.addFinish(options);
+      reset();
       setMsg({ ok: true, text: t("passkey added: the sign-in page now offers it at {host}", { host }) });
       await load();
     } catch (e) {
+      setOptions(null);
       setCode("");
-      setMsg(cancelled(e) ? { ok: false, text: t("cancelled; enter a new code to try again") } : { ok: false, text: errText(e) });
+      setMsg(
+        cancelled(e)
+          ? { ok: false, text: t("cancelled; enter a new code from the authenticator app to try again") }
+          : { ok: false, text: errText(e) },
+      );
     }
     setBusy(false);
   };
@@ -158,36 +187,68 @@ export function PasskeyPanel() {
           (adding ? (
             <div className="flex flex-col gap-2.5 border-t border-border/60 pt-3">
               <label className="flex flex-col gap-1">
-                <span className="text-muted-foreground">{t("name")}</span>
-                <input className={cn(fieldCls, "max-w-72")} maxLength={64} value={name} onChange={(e) => setName(e.target.value)} />
+                <span className="text-muted-foreground">{t("passkey name (to tell your devices apart)")}</span>
+                <input
+                  className={cn(fieldCls, "max-w-72")}
+                  maxLength={64}
+                  disabled={!!options}
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                />
               </label>
-              <Check checked={agree} onChange={setAgree}>
+              <Check checked={agree} disabled={!!options} onChange={setAgree}>
                 {t(
                   "I understand: the passkey works only at {host}. If the panel moves to another address, I add a new passkey there; the password and the app code stay as a fallback.",
                   { host },
                 )}
               </Check>
-              <div className="flex flex-wrap items-center gap-2">
-                <input
-                  className={cn(fieldCls, "max-w-48")}
-                  placeholder={t("code from the app")}
-                  inputMode="numeric"
-                  autoComplete="one-time-code"
-                  value={code}
-                  onChange={(e) => setCode(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && agree && code.trim() && void add()}
-                  aria-label={t("code from the app")}
-                />
-                <Button size="sm" disabled={busy || !agree || !code.trim()} onClick={() => void add()}>
-                  {t("add passkey")}
-                </Button>
-                <Button size="sm" variant="ghost" disabled={busy} onClick={() => setAdding(false)}>
-                  {t("cancel")}
-                </Button>
-              </div>
-              <div className="text-xs text-muted-foreground">
-                {t("A fresh code from the authenticator confirms it is you; then the system asks for Face ID, Touch ID or the device PIN.")}
-              </div>
+              {!options ? (
+                <div className="flex flex-col gap-1">
+                  <span className="text-muted-foreground">
+                    {t("1. Confirm it is you: the current 6-digit code from Google Authenticator (the app you sign in with)")}
+                  </span>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <input
+                      className={cn(fieldCls, "max-w-48 tracking-[4px]")}
+                      placeholder="123456"
+                      inputMode="numeric"
+                      autoComplete="one-time-code"
+                      disabled={!agree || busy}
+                      value={code}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setCode(v);
+                        // Six digits are a whole TOTP code: no extra click.
+                        if (/^\d{6}$/.test(v.replace(/\s/g, ""))) void confirmCode(v);
+                      }}
+                      onKeyDown={(e) => e.key === "Enter" && code.trim() && void confirmCode(code)}
+                      aria-label={t("code from Google Authenticator")}
+                    />
+                    <Button size="sm" variant="outline" disabled={busy || !agree || !code.trim()} onClick={() => void confirmCode(code)}>
+                      {t("confirm code")}
+                    </Button>
+                    <Button size="sm" variant="ghost" disabled={busy} onClick={reset}>
+                      {t("cancel")}
+                    </Button>
+                  </div>
+                  {!agree && <span className="text-xs text-muted-foreground">{t("tick the box above first")}</span>}
+                </div>
+              ) : (
+                <div className="flex flex-col gap-1">
+                  <span className="text-primary">✓ {t("code confirmed")}</span>
+                  <span className="text-muted-foreground">
+                    {t("2. Press the button: the browser asks for Touch ID, Face ID or the device PIN")}
+                  </span>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button size="sm" disabled={busy} onClick={() => void add()}>
+                      {t("add passkey · Touch ID")}
+                    </Button>
+                    <Button size="sm" variant="ghost" disabled={busy} onClick={reset}>
+                      {t("cancel")}
+                    </Button>
+                  </div>
+                </div>
+              )}
             </div>
           ) : (
             list &&
@@ -245,14 +306,14 @@ function PasskeyRow({ k, onRemoved }: { k: PasskeyView; onRemoved: () => void })
         <div className="flex flex-wrap items-center gap-2">
           <input
             className={cn(fieldCls, "max-w-48")}
-            placeholder={t("code from the app")}
+            placeholder={t("code from Google Authenticator")}
             inputMode="numeric"
             autoComplete="one-time-code"
             autoFocus
             value={code}
             onChange={(e) => setCode(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && code.trim() && void remove()}
-            aria-label={t("code from the app")}
+            aria-label={t("code from Google Authenticator")}
           />
           <Button size="sm" variant="outline" className="text-crit" disabled={busy || !code.trim()} onClick={() => void remove()}>
             {t("remove passkey")}
