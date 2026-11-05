@@ -34,7 +34,12 @@ export function App() {
   }, []);
 
   useEffect(refresh, [refresh]);
-  const logout = useCallback(() => setMe((m) => (m ? { ...m, authenticated: false } : m)), []);
+  // Show the sign-in page at once, then reload /me: passkeys added or
+  // removed in this session change what the sign-in page offers.
+  const logout = useCallback(() => {
+    setMe((m) => (m ? { ...m, authenticated: false } : m));
+    refresh();
+  }, [refresh]);
 
   // Global hotkeys from the mockup: [1] overview, [3] terminal, [4] agent, [5] alerts, [6] settings.
   useEffect(() => {
@@ -57,7 +62,7 @@ export function App() {
     return <p className="p-6 text-muted-foreground">{t("loading…")}</p>;
   }
   if (!me.authenticated) {
-    return <Login key={lang} onSuccess={refresh} />;
+    return <Login key={lang} passkey={!!me.passkey} onSuccess={refresh} />;
   }
   return (
     <ErrorBoundary resetKey={JSON.stringify(route)}>

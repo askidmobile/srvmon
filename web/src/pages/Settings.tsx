@@ -1,6 +1,7 @@
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { McpPanel } from "@/components/McpPanel";
+import { PasskeyPanel } from "@/components/PasskeyPanel";
 import { BackupPanel, EmergencyPanel } from "@/components/Recovery";
 import { Hotkey, Shell } from "@/components/Shell";
 import { Button } from "@/components/ui/button";
@@ -745,6 +746,7 @@ export function SettingsPage({ route, version, onLogout }: { route: Route; versi
     >
       <div className="flex max-w-5xl flex-col gap-5">
         <LanguagePanel />
+        <PasskeyPanel />
         <RecordingPanel />
         <AIPanel />
         <DiagnosePanel />

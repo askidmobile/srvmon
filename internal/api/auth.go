@@ -194,6 +194,13 @@ func (s *Server) handleTOTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = s.store.DeleteSession(r.Context(), pendingHash)
+	s.clearCookie(w, cookiePending, "/api/auth")
+	s.startSession(w, r, ip, method)
+}
+
+// startSession signs the owner in after the last factor passed: a full
+// session cookie, limiter reset, audit and the login event.
+func (s *Server) startSession(w http.ResponseWriter, r *http.Request, ip, method string) {
 	token, err := auth.NewToken("s_")
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal")
@@ -208,7 +215,6 @@ func (s *Server) handleTOTP(w http.ResponseWriter, r *http.Request) {
 	_ = s.store.Audit(r.Context(), ip, "login", method)
 	s.alerts.Event(r.Context(), store.KindLogin, 0, "", ip, loginText(ip, method, r.UserAgent()))
 	s.log.Info("login", "ip", ip, "method", method)
-	s.clearCookie(w, cookiePending, "/api/auth")
 	s.setCookie(w, cookieSession, token, "/", s.cfg.SessionTTL)
 	writeJSON(w, http.StatusOK, map[string]bool{"authenticated": true})
 }
@@ -254,6 +260,8 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 		"authenticated": s.sessionValid(r),
 		"initialized":   initialized,
 		"version":       s.version,
+		// Public: whether this address has passkeys to offer (not which).
+		"passkey": s.passkeyOffered(r),
 		// Public: the sign-in page is shown in this language too.
 		"lang": i18n.Current(),
 	})
@@ -304,8 +312,13 @@ func (s *Server) requireSession(next http.Handler) http.Handler {
 
 // loginText describes a successful login for the login event.
 func loginText(ip, method, ua string) string {
-	via := i18n.T("app code")
-	if method != "totp" {
+	var via string
+	switch method {
+	case "totp":
+		via = i18n.T("app code")
+	case "passkey":
+		via = i18n.T("passkey")
+	default:
 		via = i18n.T("recovery code")
 	}
 	if r := []rune(ua); len(r) > 80 {

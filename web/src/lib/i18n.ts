@@ -7,6 +7,7 @@
 import { useSyncExternalStore } from "react";
 
 import { checksRu, checksZh } from "@/i18n/checks";
+import { passkeyRu, passkeyZh } from "@/i18n/passkey";
 import { ru } from "@/i18n/ru";
 import { zh } from "@/i18n/zh";
 
@@ -19,7 +20,11 @@ export const LANGS: { code: Lang; name: string }[] = [
 ];
 
 export type Dict = Record<string, string>;
-const dicts: Record<Lang, Dict> = { en: {}, ru: { ...ru, ...checksRu }, zh: { ...zh, ...checksZh } };
+const dicts: Record<Lang, Dict> = {
+  en: {},
+  ru: { ...ru, ...checksRu, ...passkeyRu },
+  zh: { ...zh, ...checksZh, ...passkeyZh },
+};
 
 const STORAGE = "srvmon.lang";
 

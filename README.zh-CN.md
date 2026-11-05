@@ -31,7 +31,7 @@
 - **更多通知通道。** 除 Telegram 外，告警还可以发送到邮件、ntfy、Discord、Gotify、Slack、Matrix、Pushover、Webhook 以及 [Shoutrrr](https://shoutrrr.nickfedor.com/) 支持的其他服务，每个通道可设置最低级别。
 - **面板心跳（dead man's switch）。** 面板每分钟自检一次并 ping 一个外部 URL，例如 [healthchecks.io](https://healthchecks.io)。如果面板宕机，ping 会停止，该服务会通过邮件或其自身渠道提醒您。
 - **备份与应急访问。** 按计划将面板数据库加密备份到任意 S3 兼容存储（AWS、Yandex Object Storage、R2、B2、MinIO），支持保留份数，失败时 Telegram 告警；主密钥需凭 TOTP 验证码单独导出。您自己的 SSH 公钥会保存在每台服务器的 `authorized_keys` 中，面板丢失也不会被锁在服务器外。详见 [docs/backup.md](docs/backup.md)。
-- **安全。** 密码（argon2id）+ TOTP 或备用码，无需用户名。限流、审计日志，以及面板和 sshd 的 fail2ban 规则。在服务器上只有 `srvmon-dockerproxy` 容器能访问 docker socket，`srvmon` 用户默认只有受限 sudo（见[服务器访问权限](#服务器访问权限)）。
+- **安全。** 密码（argon2id）+ TOTP 或备用码，无需用户名；面板使用 HTTPS 域名时，还可选用通行密钥（Face ID、Touch ID、Windows Hello、安全密钥）。限流、审计日志，以及面板和 sshd 的 fail2ban 规则。在服务器上只有 `srvmon-dockerproxy` 容器能访问 docker socket，`srvmon` 用户默认只有受限 sudo（见[服务器访问权限](#服务器访问权限)）。
 
 ## 截图
 

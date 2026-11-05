@@ -108,6 +108,8 @@ var migrations = []string{
 	// A reissued agent token revokes the server's other tokens on its
 	// first push.
 	`ALTER TABLE agent_tokens ADD COLUMN supersede INTEGER NOT NULL DEFAULT 0;`,
+	// Optional sign-in with passkeys (passkeys.go).
+	migrationPasskeys,
 }
 
 func (s *Store) migrate(ctx context.Context) error {
@@ -188,7 +190,7 @@ func (s *Store) SetSetting(ctx context.Context, key, value string) error {
 }
 
 // SetCredentials atomically replaces password, TOTP secret and recovery codes
-// and drops all sessions. Used by `srvmon-server init`.
+// and drops all sessions and passkeys. Used by `srvmon-server init`.
 func (s *Store) SetCredentials(ctx context.Context, passwordHash, totpSecret string, recoveryHashes []string) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -204,6 +206,8 @@ func (s *Store) SetCredentials(ctx context.Context, passwordHash, totpSecret str
 		{`DELETE FROM settings WHERE key = ?`, []any{KeyTOTPLastStep}},
 		{`DELETE FROM recovery_codes`, nil},
 		{`DELETE FROM sessions`, nil},
+		// New credentials mean the old ones are not trusted: passkeys too.
+		{`DELETE FROM passkeys`, nil},
 	}
 	for _, st := range stmts {
 		if _, err := tx.ExecContext(ctx, st.q, st.args...); err != nil {

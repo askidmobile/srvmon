@@ -201,7 +201,7 @@ func initCreds() error {
 	in := bufio.NewReader(os.Stdin)
 
 	if _, err := st.GetSetting(ctx, store.KeyPasswordHash); err == nil {
-		fmt.Print("Panel is already initialized. Reset password and TOTP? All sessions will be dropped. [y/N]: ")
+		fmt.Print("Panel is already initialized. Reset password and TOTP? All sessions and passkeys will be dropped. [y/N]: ")
 		if a, _ := in.ReadString('\n'); strings.ToLower(strings.TrimSpace(a)) != "y" {
 			return errors.New("aborted")
 		}
