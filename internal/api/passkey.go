@@ -336,6 +336,11 @@ func (s *Server) handlePasskeyLoginFinish(w http.ResponseWriter, r *http.Request
 		fail(err)
 		return
 	}
+	// Load, check the signature counter and store the new one as one step:
+	// two sign-ins at once must not both pass on the same stored counter
+	// and then roll it back.
+	s.passkeyUseMu.Lock()
+	defer s.passkeyUseMu.Unlock()
 	u, err := s.passkeyUser(r.Context(), rpID, false)
 	if errors.Is(err, errNoPasskeys) {
 		fail(err)

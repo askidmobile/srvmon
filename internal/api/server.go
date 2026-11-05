@@ -73,6 +73,8 @@ type Server struct {
 
 	passkeys  *ceremonies // WebAuthn sign-ins and registrations in flight
 	passkeyMu sync.Mutex  // creates the WebAuthn user handle once
+	// passkeyUseMu serializes the counter check and update of sign-ins.
+	passkeyUseMu sync.Mutex
 
 	totpMu  sync.Mutex    // serializes TOTP replay check-and-set
 	hashSem chan struct{} // caps concurrent argon2id verifications

@@ -13,6 +13,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/http/cookiejar"
 	"strings"
 	"testing"
 	"time"
@@ -334,5 +335,44 @@ func TestPasskeyBoundToDomain(t *testing.T) {
 	}
 	if keys, _ := e.st.ListPasskeys(context.Background()); len(keys) != 0 {
 		t.Fatalf("passkeys kept after init: %d", len(keys))
+	}
+}
+
+// Two sign-ins answered with the same counter at once: only one passes, so
+// the stored counter cannot be rolled back by a race.
+func TestPasskeyConcurrentSignIns(t *testing.T) {
+	e := newEnv(t, func(o *Options) { o.Config.PublicOrigin = testOrigin })
+	e.login(t)
+	key := newSoftKey(t, testOrigin, "mon.example.test")
+	_, opts := e.call(t, "POST", "/api/passkeys/begin", testOrigin, jsonBody(map[string]string{"code": e.freshCode(t)}))
+	if c, b := e.call(t, "POST", "/api/passkeys/finish", testOrigin, key.create(t, opts)); c != http.StatusOK {
+		t.Fatalf("add: %d %s", c, b)
+	}
+	key.counter = 7
+	var answers [2][]byte
+	var clients [2]*env
+	for i := range clients {
+		c := *e
+		jar, _ := cookiejar.New(nil)
+		c.client = &http.Client{Jar: jar}
+		clients[i] = &c
+		_, o := c.call(t, "POST", "/api/auth/passkey/begin", testOrigin, nil)
+		answers[i] = key.get(t, o)
+	}
+	codes := make(chan int, 2)
+	for i := range clients {
+		go func(i int) {
+			c, _ := clients[i].call(t, "POST", "/api/auth/passkey/finish", testOrigin, answers[i])
+			codes <- c
+		}(i)
+	}
+	ok := 0
+	for range clients {
+		if <-codes == http.StatusOK {
+			ok++
+		}
+	}
+	if ok != 1 {
+		t.Fatalf("%d sign-ins passed with the same counter, want 1", ok)
 	}
 }
