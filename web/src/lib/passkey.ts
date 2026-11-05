@@ -66,7 +66,7 @@ type JSONDescriptor = { id: string; type: PublicKeyCredentialType; transports?: 
 const descriptors = (l?: JSONDescriptor[]): PublicKeyCredentialDescriptor[] | undefined =>
   l?.map((d) => ({ ...d, id: fromB64u(d.id) }));
 
-interface CreationJSON {
+export interface CreationJSON {
   publicKey: Omit<PublicKeyCredentialCreationOptions, "challenge" | "user" | "excludeCredentials"> & {
     challenge: string;
     user: { id: string; name: string; displayName: string };
@@ -112,9 +112,16 @@ export const passkeyApi = {
   list: () => request<PasskeyList>("GET", "/api/passkeys"),
   remove: (id: number, code: string) => request<unknown>("DELETE", `/api/passkeys/${id}`, { code }),
 
-  /** Adds a passkey for this address: a fresh app code, then the system prompt. */
-  async add(code: string, name: string) {
-    const o = await request<CreationJSON>("POST", "/api/passkeys/begin", { code, name });
+  /**
+   * Starts adding a passkey: the server checks the authenticator code and
+   * returns the options for the browser prompt. Fetched before the click on
+   * "add", so the prompt opens right in the click (Safari shows it only
+   * within a user gesture).
+   */
+  addBegin: (code: string, name: string) => request<CreationJSON>("POST", "/api/passkeys/begin", { code, name }),
+
+  /** Shows the system prompt (Face ID, Touch ID, PIN) and saves the passkey. */
+  async addFinish(o: CreationJSON) {
     const pk = o.publicKey;
     const cred = (await navigator.credentials.create({
       publicKey: {
