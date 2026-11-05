@@ -71,6 +71,9 @@ type Server struct {
 	notify          func(ctx context.Context, text string) error
 	onActionPending func(store.AgentAction)
 
+	passkeys  *ceremonies // WebAuthn sign-ins and registrations in flight
+	passkeyMu sync.Mutex  // creates the WebAuthn user handle once
+
 	totpMu  sync.Mutex    // serializes TOTP replay check-and-set
 	hashSem chan struct{} // caps concurrent argon2id verifications
 	now     func() time.Time
@@ -127,6 +130,7 @@ func New(o Options) *Server {
 		updates:   newAgentUpdates(),
 		bins:      agentBinCache{limiter: auth.NewLimiter(20, 10*time.Minute)},
 		setupKeys: &setupKeys{m: map[string]setupKey{}},
+		passkeys:  newCeremonies(),
 		now:       time.Now,
 		hashSem:   make(chan struct{}, 2),
 
@@ -244,6 +248,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/auth/totp", s.handleTOTP)
 	mux.HandleFunc("POST /api/auth/logout", s.handleLogout)
 	mux.HandleFunc("GET /api/auth/me", s.handleMe)
+	s.passkeyRoutes(mux)
 	mux.Handle("PUT /api/settings/lang", s.requireSession(http.HandlerFunc(s.handleSetLang)))
 
 	mux.HandleFunc("POST /api/ingest", s.handleIngest)

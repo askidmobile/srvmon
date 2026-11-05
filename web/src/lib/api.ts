@@ -52,7 +52,7 @@ function normalizeDetail(v: ServerDetailView): ServerDetailView {
   return v;
 }
 
-async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+export async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   const res = await fetch(path, {
     method,
     credentials: "same-origin",
@@ -75,6 +75,7 @@ export interface Me {
   initialized: boolean;
   version: string;
   lang?: string;
+  passkey?: boolean; // a passkey exists for this address
 }
 
 export interface Container {

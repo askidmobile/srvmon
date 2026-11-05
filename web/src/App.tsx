@@ -57,7 +57,7 @@ export function App() {
     return <p className="p-6 text-muted-foreground">{t("loading…")}</p>;
   }
   if (!me.authenticated) {
-    return <Login key={lang} onSuccess={refresh} />;
+    return <Login key={lang} passkey={!!me.passkey} onSuccess={refresh} />;
   }
   return (
     <ErrorBoundary resetKey={JSON.stringify(route)}>

@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Panel } from "@/components/ui/panel";
 import { api, ApiError } from "@/lib/api";
 import { t } from "@/lib/i18n";
+import { cancelled, passkeyApi, passkeyProblem } from "@/lib/passkey";
 
 const LOGO = String.raw`  ___ _ ____   ___ __ ___   ___  _ __
  / __| '__\ \ / / '_ ${"`"} _ \ / _ \| '_ \
@@ -24,6 +25,12 @@ function errorText(e: unknown): string {
       return t("too many attempts, try again in {m} min", { m: Math.ceil((e.retryAfter ?? 600) / 60) });
     case "not_initialized":
       return t("the panel is not set up: run srvmon-server init on the server");
+    case "invalid_passkey":
+      return t("the passkey was not accepted");
+    case "passkey_expired":
+      return t("the passkey prompt timed out, try again");
+    case "no_passkeys":
+      return t("no passkeys for this address: sign in with the password");
     default:
       return t("error: {code}", { code: e.code });
   }
@@ -33,7 +40,7 @@ function secondsLeft() {
   return 30 - (Math.floor(Date.now() / 1000) % 30);
 }
 
-export function Login({ onSuccess }: { onSuccess: () => void }) {
+export function Login({ onSuccess, passkey }: { onSuccess: () => void; passkey: boolean }) {
   const [step, setStep] = useState<"password" | "totp">("password");
   const [password, setPassword] = useState("");
   const [code, setCode] = useState("");
@@ -49,6 +56,23 @@ export function Login({ onSuccess }: { onSuccess: () => void }) {
   useEffect(() => {
     if (step === "totp") codeRef.current?.focus();
   }, [step]);
+
+  // The server offers a passkey only for the address it was made on; the
+  // browser must support WebAuthn here too.
+  const canPasskey = passkey && passkeyProblem() === "";
+
+  async function signInPasskey() {
+    setBusy(true);
+    setError("");
+    try {
+      await passkeyApi.signIn();
+      onSuccess();
+    } catch (err) {
+      if (!cancelled(err)) setError(errorText(err));
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function submitPassword(e: React.FormEvent) {
     e.preventDefault();
@@ -90,6 +114,16 @@ export function Login({ onSuccess }: { onSuccess: () => void }) {
 
         {step === "password" ? (
           <Panel title={t("sign in ── step 1/2")} accent className="w-full">
+            {canPasskey && (
+              <div className="mb-4 flex flex-col gap-3.5 border-b border-border/60 pb-4">
+                <Button type="button" size="lg" disabled={busy} onClick={() => void signInPasskey()}>
+                  {t("sign in with a passkey")}
+                </Button>
+                <p className="m-0 text-xs text-muted-foreground">
+                  {t("Face ID, Touch ID, Windows Hello or a security key. Or use the password and the app code below.")}
+                </p>
+              </div>
+            )}
             <form onSubmit={submitPassword} className="flex flex-col gap-3.5">
               <label htmlFor="pw" className="text-muted-foreground">
                 {t("password")}
@@ -98,7 +132,7 @@ export function Login({ onSuccess }: { onSuccess: () => void }) {
                 id="pw"
                 type="password"
                 autoComplete="current-password"
-                autoFocus
+                autoFocus={!canPasskey}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
               />
